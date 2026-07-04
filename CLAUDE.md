@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The full design + UX spec lives in `app/docs/` and is the source of truth for what to build — see [Design Reference](#design-reference). The project is **early-stage**: the module scaffold, navigation host, and theme plumbing exist, but most of the dashboard UI is still stubbed (see [Current State](#current-state)).
 
-> The design was handed off (in `app/docs/`) as a Vite + React + TypeScript brief. That stack recommendation is **superseded** — we build in Compose Multiplatform. Read those docs for design intent, tokens, geometry, and the dial/slider math; ignore their React/Vite/CSS-Modules stack guidance and re-author as idiomatic Compose.
+> The design was handed off (in `app/docs/`) as a Vite + React + TypeScript brief. That stack recommendation is **superseded** — we build in Compose Multiplatform. Read the handoff spec for design intent and behavior; the geometry, tokens, and dial/slider math are transcribed into the [Design Reference](#design-reference) below. Ignore any React/Vite/CSS-Modules stack guidance and re-author as idiomatic Compose.
 
 ## Planning & Exploration
 
@@ -91,11 +91,11 @@ All paths relative to `app/shared/src/commonMain/kotlin/com/mattschoe/smarthome/
 
 **Docs (`app/docs/`):**
 - `Claude Code Handoff - Smart Home Dashboard.dc.html` — The design/UX spec (intent, tokens, component contracts, interactions, state model, DoD).
-- `Smart Home Dashboard Green copy.dc.html` — The reference prototype (exact geometry, colors, radii, and the dial/volume math). Treat its `renderVals()` as pseudo-code for state, not shippable code.
+- `Dashboard_with_media.png` / `Dashboard_with_calendar.png` — Rendered reference screenshots of the target dashboard (1240×800), showing the Media and Calendar right-panel states. These are the visual source of truth; the exact geometry, dial/volume math, and tokens are transcribed into this file below. `Read` them directly for layout, spacing, and color intent.
 
 ## Design Reference
 
-The two files in `app/docs/` are authored in a React-ish prototyping format. **Read them for values and behavior, port to Compose.** Highlights:
+The design intent lives in two places in `app/docs/`: the **rendered screenshots** (`Dashboard_with_media.png`, `Dashboard_with_calendar.png`) show exactly what to build, and the **handoff spec** (`Claude Code Handoff - Smart Home Dashboard.dc.html`, a React-ish prototyping format) carries the contracts, interactions, and DoD. **Read the screenshots for layout/color, the spec for behavior, port to Compose.** Highlights:
 
 **Layout** — One full-bleed screen at 1280×800, landscape. A sage surface fills the viewport; three cream cards float on it in a fixed row: **LEFT 288px fixed** (date/time + 2×2 climate stats + scrolling Apps grid), **CENTER flex 1, min 346px** (room chips, brightness dial, warmth swatches, audio), **RIGHT flex 1.12, min 392px** (Media / Calendar tab switch, scrolls). Only card-internal regions scroll; the page never does. Design for the fixed 1280×800 device in v1 — do not make it fluid/responsive.
 
