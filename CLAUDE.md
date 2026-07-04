@@ -78,7 +78,7 @@ All paths relative to `app/shared/src/commonMain/kotlin/com/mattschoe/smarthome/
 
 **Pages (`ui/pages/`):**
 - `homepage/Homepage.kt` — The dashboard screen (stub). `LandscapeLayout` will hold the 3-column layout.
-- `homepage/HomepageViewModel.kt` — Dashboard state holder (stub). Owns the per-room state, active room, panel tab, accent, clock format.
+- `homepage/HomepageViewModel.kt` — Dashboard state holder (stub). Owns the per-room state, active room, and panel tab. (Accent, clock format, name, and room list are fixed app constants, not state.)
 
 **Components (`ui/components/`):**
 - `PageShell.kt` — Thin `Scaffold` wrapper (top bar + content padding).
@@ -108,7 +108,7 @@ The design intent lives in two places in `app/docs/`: the **rendered screenshots
 
 **Design tokens** (centralize in `Color.kt` / `Type.kt` — the prototype hardcodes hex; don't):
 - Surface (sage) `#B2C488` · Card `#FAF8EA` · Card border `#A7BB7C` · Ink `#23301C` · Ink soft `#5C6650` · Muted `#A7A88C` · Sage green `#839958` · Teal `#105666` · Rose `#D3968C` · Warm amber `#E0A24E` · Inset fill `#ECE6CF`.
-- **Accent themes** (user-switchable, drive every selected/active state; Forest is default), each with an on-accent text color: Forest `#0A3323`/`#F6EEC7` · Sage `#839958`/`#23301C` · Teal `#105666`/`#F6EEC7` · Rose `#D3968C`/`#23301C`.
+- **Accent** — a single fixed accent drives every selected/active state (room chips, tabs, today's calendar cell). It is **not** user-switchable: Forest `#0A3323` with on-accent text `#F6EEC7`.
 - **Type** — Newsreader everywhere, weights 400/500/600. Section labels (APPS, WARMTH, AUDIO…): ~10–11px, weight 500, uppercase, letter-spacing ~1.5px, color `#A7A88C`. Icons: Material Symbols Rounded (FILL 1). Compose has no Material Symbols bundled — plan to ship the icon glyphs/font or map to the closest `Icons.*` equivalents.
 
 ### State Model
@@ -133,13 +133,12 @@ data class DashboardState(
     val speaker: String,          // room name or "Whole home"
     val audioSource: RoomId,      // where music originates
     val panel: Panel,             // Media | Calendar
-    val accent: Accent,           // Forest | Sage | Teal | Rose
-    val clock24: Boolean,
-    val userName: String,
 )
 ```
 
-Switching the active room swaps the entire center-card state. Clock ticks ~every 20s. Persist `accent`, `clock24`, and last room states so a wall tablet survives reloads (multiplatform settings/DataStore — add when needed).
+This is an **opinionated, single-home dashboard** — not a configurable product. Accent (Forest), clock format, user name, and the room list are **fixed app constants**, not runtime state or user-facing settings. Settings, if ever needed, is a navigation seam to a separate screen, never an in-dashboard surface.
+
+Switching the active room swaps the entire center-card state. Clock ticks ~every 20s. Persist the last room states so a wall tablet survives reloads (multiplatform settings/DataStore — add when needed).
 
 ### Data & Device Boundary
 
