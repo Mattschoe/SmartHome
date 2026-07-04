@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics="">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,400&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0">
+<style>
+  body{margin:0;background:#26251f}
+  .material-symbols-rounded{line-height:1;user-select:none}
+  ::-webkit-scrollbar{width:7px;height:7px}
+  ::-webkit-scrollbar-thumb{background:#d9d2b6;border-radius:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+</style>
+</helmet>
+
+<div ref="{{ rootRef }}" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 26px; box-sizing: border-box; font-family: 'Newsreader',Georgia,serif; position: absolute; left: 0px; top: -12px">
+  <div style="width:1180px;background:#1b1a16;border-radius:30px;padding:14px;box-shadow:0 34px 90px rgba(0,0,0,.55)">
+    <div style="background:var(--surface,#B2C488);border-radius:18px;padding:24px 26px;height:706px;display:flex;flex-direction:column;gap:18px;box-sizing:border-box;overflow:hidden">
+
+      <!-- ===== BODY ===== -->
+      <div style="flex:1;display:flex;gap:18px;min-height:0">
+
+        <!-- ---- LEFT: date + status + apps ---- -->
+        <div style="width:288px;flex:none;display:flex;flex-direction:column;gap:14px;min-height:0">
+          <div style="flex: none; border-radius: 18px; padding: 13px 16px; display: flex; align-items: center; justify-content: space-between; background-color: #FAF8EA00">
+            <div style="display:flex;flex-direction:column;gap:1px">
+              <span style="font:600 22px/1.05 'Newsreader';color:#23301c">{{ dayName }}</span>
+              <span style="font:400 14px 'Newsreader';color:#8a8c74">{{ dateFull }}</span>
+            </div>
+            <span style="font:600 20px 'Newsreader';color:#3a4633;letter-spacing:.3px">{{ timeStr }}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:none">
+            <div style="background:var(--card,#FAF8EA);border:1px solid #A7BB7C;border-radius:15px;padding:9px 12px;display:flex;flex-direction:column;justify-content:center;gap:2px">
+              <span class="material-symbols-rounded" style="font-size:17px;color:#D3968C">device_thermostat</span>
+              <span style="font:600 20px/1 'Newsreader';color:#23301c">72°</span>
+              <span style="font:400 11px 'Newsreader';color:#9a9c82;letter-spacing:.2px">Indoor temp</span>
+            </div>
+            <div style="background:var(--card,#FAF8EA);border:1px solid #A7BB7C;border-radius:15px;padding:9px 12px;display:flex;flex-direction:column;justify-content:center;gap:2px">
+              <span class="material-symbols-rounded" style="font-size:17px;color:#105666">humidity_percentage</span>
+              <span style="font:600 20px/1 'Newsreader';color:#23301c">44%</span>
+              <span style="font:400 11px 'Newsreader';color:#9a9c82;letter-spacing:.2px">Humidity</span>
+            </div>
+            <div style="background:var(--card,#FAF8EA);border:1px solid #A7BB7C;border-radius:15px;padding:9px 12px;display:flex;flex-direction:column;justify-content:center;gap:2px">
+              <span class="material-symbols-rounded" style="font-size:17px;color:#839958">bolt</span>
+              <span style="font:600 20px/1 'Newsreader';color:#23301c">2.1<span style="font-size:13px;color:#9a9c82"> kW</span></span>
+              <span style="font:400 11px 'Newsreader';color:#9a9c82;letter-spacing:.2px">Energy now</span>
+            </div>
+            <div style="background:var(--card,#FAF8EA);border:1px solid #A7BB7C;border-radius:15px;padding:9px 12px;display:flex;flex-direction:column;justify-content:center;gap:2px">
+              <span class="material-symbols-rounded" style="font-size:17px;color:#0A3323">clear_day</span>
+              <span style="font:600 20px/1 'Newsreader';color:#23301c">58°</span>
+              <span style="font:400 11px 'Newsreader';color:#9a9c82;letter-spacing:.2px">Outdoor</span>
+            </div>
+          </div>
+
+          <div style="flex: 1; min-height: 0; border: 1px solid #A7BB7C; border-radius: 18px; padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 8px; background-color: #FAF8EA">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:0 2px">
+              <span style="font:500 10px 'Newsreader';letter-spacing:1.4px;text-transform:uppercase;color:#a7a88c">Apps</span>
+              <button style="background:none;border:none;cursor:pointer;padding:0;display:flex;align-items:center" style-hover="opacity:.55"><span class="material-symbols-rounded" style="font-size:19px;color:#b7b89c">settings</span></button>
+            </div>
+            <div style="flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;align-content:start;padding-right:2px">
+              <sc-for list="{{ apps }}" as="a" hint-placeholder-count="18">
+                <button style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 1px solid #A7BB7C; cursor: pointer; padding: 16px 8px; border-radius: 16px; border-color: #EBE4C900; background-color: #FFFFFF00" style-hover="background:#DCE4BB">
+                  <span style="width:52px;height:52px;border-radius:15px;background:{{ a.bg }};display:flex;align-items:center;justify-content:center;flex:none"><span class="material-symbols-rounded" style="font-size:27px;color:{{ a.fg }}">{{ a.icon }}</span></span>
+                  <span style="font:400 14px 'Newsreader';color:#5c6650;line-height:1.05;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">{{ a.label }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- CENTER: light + audio ---- -->
+        <div style="flex:1;min-width:346px;background:var(--card,#FAF8EA);border:1px solid #A7BB7C;border-radius:22px;padding:22px 20px;display:flex;flex-direction:column;gap:16px;min-height:0;overflow:hidden;justify-content:space-between">
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <sc-for list="{{ rooms }}" as="r" hint-placeholder-count="4">
+              <button style="{{ r.style }}" onClick="{{ r.onClick }}">{{ r.name }}</button>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <svg ref="{{ arcRef }}" onPointerDown="{{ startDial }}" viewBox="0 0 260 160" style="width: 262px; height: 161px; touch-action: none; cursor: pointer; overflow: visible; position: static">
+              <path d="{{ trackPath }}" fill="none" stroke="#ECE6CF" stroke-width="17" stroke-linecap="round"></path>
+              <path d="{{ valuePath }}" fill="none" stroke="{{ arcColor }}" stroke-width="17" stroke-linecap="round"></path>
+              <circle cx="130" cy="96" r="{{ glowR }}" fill="{{ warmSw }}" opacity="{{ glowOpacity }}"></circle>
+              <!-- lamp bulb: click to toggle light on/off (spec-sheet affordance) -->
+              <text x="130" y="98" text-anchor="middle" dominant-baseline="central" onPointerDown="{{ toggleLight }}" font-family="Material Symbols Rounded" font-size="50" fill="{{ bulbColor }}" style="cursor:pointer">{{ bulbGlyph }}</text>
+              <circle cx="{{ knobX }}" cy="{{ knobY }}" r="12" fill="#fff" stroke="{{ arcColor }}" stroke-width="3.5"></circle>
+            </svg>
+            <div style="font:600 32px/1 'Newsreader';color:#23301c;margin-top:-4px">{{ brightLabel }}</div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+            <span style="font:500 11px 'Newsreader';letter-spacing:1.6px;text-transform:uppercase;color:#a7a88c">Warmth</span>
+            <div style="display:flex;justify-content:center;align-items:center;gap:13px">
+              <sc-for list="{{ warmths }}" as="w" hint-placeholder-count="5">
+                <button title="{{ w.n }}" aria-label="{{ w.n }}" onClick="{{ w.onClick }}" style="{{ w.style }}"></button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="height:1px;background:#B2C489;margin:20px 0 8px"></div>
+
+          <div style="display:flex;flex-direction:column;gap:11px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span style="font:500 11px 'Newsreader';letter-spacing:1.6px;text-transform:uppercase;color:#a7a88c">Audio</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;font:400 15px 'Newsreader';color:{{ audioTextColor }}"><span class="material-symbols-rounded" style="font-size:19px;color:{{ audioIconColor }}">{{ audioIcon }}</span>{{ audioLabel }}</span>
+            </div>
+
+            <!-- No audio in this room: offer to join the music playing elsewhere -->
+            <sc-if value="{{ notPlaying }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ joinAudio }}" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;box-sizing:border-box;padding:11px;border-radius:13px;border:1.5px dashed #cbb98a;background:#faf5e3;color:#8a6d38;cursor:pointer;font:500 14px 'Newsreader'" style-hover="background:#f4edd6"><span class="material-symbols-rounded" style="font-size:19px">group_add</span>Join the music in {{ audioSource }}</button>
+            </sc-if>
+
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <sc-for list="{{ speakers }}" as="s" hint-placeholder-count="4">
+                <button style="{{ s.style }}" onClick="{{ s.onClick }}"><span class="material-symbols-rounded" style="font-size:17px">speaker</span>{{ s.name }}</button>
+              </sc-for>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span class="material-symbols-rounded" style="font-size:22px;color:#6d7860">volume_down</span>
+              <div ref="{{ volRef }}" onPointerDown="{{ startVol }}" style="flex: 1; height: 10px; border-radius: 6px; position: relative; cursor: pointer; touch-action: none; background-color: #ECE6CF">
+                <div style="position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:#839958;width:{{ volStr }}"></div>
+                <div style="position:absolute;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.28);left:{{ volStr }}"></div>
+              </div>
+              <span style="font:600 15px 'Newsreader';color:#23301c;width:42px;text-align:right">{{ volStr }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- RIGHT: media / calendar ---- -->
+        <div style="flex:1.12;min-width:392px;background:var(--card,#FAF8EA);border:1px solid #A7BB7C;border-radius:22px;padding:18px 20px;display:flex;flex-direction:column;gap:14px;min-height:0;overflow:hidden;position:relative">
+          <div style="display: inline-flex; border-radius: 999px; padding: 4px; gap: 4px; align-self: flex-start; background-color: #ECE6CF">
+            <button style="{{ tabMediaStyle }}" onClick="{{ setMedia }}"><span class="material-symbols-rounded" style="font-size:19px">library_music</span>Media</button>
+            <button style="{{ tabCalStyle }}" onClick="{{ setCal }}"><span class="material-symbols-rounded" style="font-size:19px">calendar_month</span>Calendar</button>
+          </div>
+
+          <sc-if value="{{ showMedia }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:1;display:flex;flex-direction:column;gap:15px;min-height:0;overflow-y:auto;padding:0 2px 46px 0">
+            <div style="display: flex; align-items: center; gap: 9px; border: 1px solid #C9D3A3; border-radius: 14px; padding: 9px 14px; background-color: #ECE6CF">
+              <span class="material-symbols-rounded" style="font-size:21px;color:#9a9c82">search</span>
+              <input placeholder="Search songs, artists, podcasts" style="border:none;background:none;outline:none;flex:1;font:400 15px 'Newsreader';color:#3a4633">
+            </div>
+
+            <div style="display:flex;gap:15px;align-items:center">
+              <div style="width:88px;height:88px;border-radius:16px;background:#0A3323;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:0 6px 16px rgba(10,51,35,.28)"><span class="material-symbols-rounded" style="font-size:40px;color:#E7B36A">graphic_eq</span></div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
+                <div style="font:600 22px/1.1 'Newsreader';color:#23301c">Midnight City</div>
+                <div style="font:400 15px 'Newsreader';color:#8a8a76">M83 · Hurry Up, We're Dreaming</div>
+                <div style="display:flex;align-items:center;gap:9px;margin-top:4px">
+                  <span style="font:400 12px 'Newsreader';color:#9a9c82">1:52</span>
+                  <div style="flex: 1; height: 6px; border-radius: 4px; position: relative; background-color: #ECE6CF"><div style="position:absolute;left:0;top:0;bottom:0;width:46%;background:#D3968C;border-radius:4px"></div><div style="position:absolute;left:46%;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;background:#D3968C"></div></div>
+                  <span style="font:400 12px 'Newsreader';color:#9a9c82">4:03</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:center;gap:20px">
+              <button style="background:none;border:none;cursor:pointer;color:#6d7860" style-hover="color:#23301c"><span class="material-symbols-rounded" style="font-size:24px">shuffle</span></button>
+              <button style="background:none;border:none;cursor:pointer;color:#3a4633" style-hover="color:#000"><span class="material-symbols-rounded" style="font-size:30px">skip_previous</span></button>
+              <button style="width:56px;height:56px;border-radius:50%;background:#0A3323;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(10,51,35,.32)" style-hover="background:#0d442e"><span class="material-symbols-rounded" style="font-size:30px;color:#F6EEC7">pause</span></button>
+              <button style="background:none;border:none;cursor:pointer;color:#3a4633" style-hover="color:#000"><span class="material-symbols-rounded" style="font-size:30px">skip_next</span></button>
+              <button style="background:none;border:none;cursor:pointer;color:#6d7860" style-hover="color:#23301c"><span class="material-symbols-rounded" style="font-size:24px">repeat</span></button>
+            </div>
+
+            <!-- UP NEXT · vertical scroll -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px">
+              <span style="font:500 11px 'Newsreader';letter-spacing:1.6px;text-transform:uppercase;color:#a7a88c">Up next</span>
+              
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <sc-for list="{{ queue }}" as="q" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div style="width:44px;height:44px;border-radius:11px;background:{{ q.bg }};flex:none;display:flex;align-items:center;justify-content:center"><span class="material-symbols-rounded" style="font-size:22px;color:#F6EEC7">music_note</span></div>
+                  <div style="flex:1;min-width:0"><div style="font:500 16px 'Newsreader';color:#2b3624;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ q.title }}</div><div style="font:400 13px 'Newsreader';color:#9a9c82">{{ q.artist }}</div></div>
+                  <span style="font:400 13px 'Newsreader';color:#9a9c82">{{ q.dur }}</span>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- PLAYLISTS · horizontal scroll only -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;flex:none">
+              <div style="font:500 11px 'Newsreader';letter-spacing:1.6px;text-transform:uppercase;color:#a7a88c">Playlists</div>
+            </div>
+            <div style="display:flex;gap:13px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding-bottom:6px;flex:none">
+              <sc-for list="{{ playlists }}" as="pl" hint-placeholder-count="5">
+                <div style="flex:none;width:116px;scroll-snap-align:start;cursor:pointer">
+                  <div style="width:116px;height:116px;border-radius:15px;background:{{ pl.c }};display:flex;align-items:flex-end;padding:11px;box-sizing:border-box;box-shadow:0 4px 12px rgba(0,0,0,.14)"><span class="material-symbols-rounded" style="font-size:26px;color:#F6EEC7;opacity:.92">{{ pl.icon }}</span></div>
+                  <div style="font:600 16px 'Newsreader';color:#2b3624;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ pl.name }}</div>
+                  <div style="font:400 13px 'Newsreader';color:#9a9c82">{{ pl.count }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ showCal }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:1;display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;padding:0 2px 30px 0">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div style="font:600 20px 'Newsreader';color:#23301c">{{ monthLabel }}</div>
+              <div style="display:flex;gap:6px">
+                <button style="width:34px;height:34px;border-radius:10px;background:#E9EDCF;border:1px solid #C9D3A3;cursor:pointer;display:flex;align-items:center;justify-content:center"><span class="material-symbols-rounded" style="font-size:20px;color:#3a4633">chevron_left</span></button>
+                <button style="width:34px;height:34px;border-radius:10px;background:#E9EDCF;border:1px solid #C9D3A3;cursor:pointer;display:flex;align-items:center;justify-content:center"><span class="material-symbols-rounded" style="font-size:20px;color:#3a4633">chevron_right</span></button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font:500 11px 'Newsreader';color:#a7a88c;text-align:center">
+              <div>S</div><div>M</div><div>T</div><div>W</div><div>T</div><div>F</div><div>S</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
+              <sc-for list="{{ calCells }}" as="c" hint-placeholder-count="42">
+                <div style="{{ c.style }}">{{ c.label }}</div>
+              </sc-for>
+            </div>
+
+            <div style="height:1px;background:#B2C489;margin:2px 0"></div>
+            <div style="font:500 11px 'Newsreader';letter-spacing:1.6px;text-transform:uppercase;color:#a7a88c">Today</div>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:9px;height:9px;border-radius:50%;background:#105666;flex:none"></span><span style="font:400 14px 'Newsreader';color:#9a9c82;width:66px">8:00 AM</span><span style="font:500 16px 'Newsreader';color:#2b3624">Team standup</span></div>
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:9px;height:9px;border-radius:50%;background:#D3968C;flex:none"></span><span style="font:400 14px 'Newsreader';color:#9a9c82;width:66px">12:30 PM</span><span style="font:500 16px 'Newsreader';color:#2b3624">Lunch with Sam</span></div>
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:9px;height:9px;border-radius:50%;background:#839958;flex:none"></span><span style="font:400 14px 'Newsreader';color:#9a9c82;width:66px">6:00 PM</span><span style="font:500 16px 'Newsreader';color:#2b3624">Yoga class</span></div>
+            </div>
+
+            <div style="height:1px;background:#B2C489;margin:2px 0"></div>
+            <div style="font:500 11px 'Newsreader';letter-spacing:1.6px;text-transform:uppercase;color:#a7a88c">To-do</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:10px"><span class="material-symbols-rounded" style="font-size:22px;color:#839958">check_box</span><span style="font:400 16px 'Newsreader';color:#a7a88c;text-decoration:line-through">Water the plants</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span class="material-symbols-rounded" style="font-size:22px;color:#c3bd9f">check_box_outline_blank</span><span style="font:400 16px 'Newsreader';color:#2b3624">Pay electricity bill</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span class="material-symbols-rounded" style="font-size:22px;color:#c3bd9f">check_box_outline_blank</span><span style="font:400 16px 'Newsreader';color:#2b3624">Order groceries</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span class="material-symbols-rounded" style="font-size:22px;color:#c3bd9f">check_box_outline_blank</span><span style="font:400 16px 'Newsreader';color:#2b3624">Call the plumber</span></div>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- scrollable-panel signal: fade + pill at bottom edge -->
+          <div style="position:absolute;left:20px;right:20px;bottom:0;height:40px;background:linear-gradient(transparent,var(--card,#FAF8EA));pointer-events:none;border-radius:0 0 22px 22px"></div>
+          
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1240,&quot;height&quot;:800},&quot;userName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Alex&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Content&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Forest&quot;,&quot;Sage&quot;,&quot;Teal&quot;,&quot;Rose&quot;],&quot;default&quot;:&quot;Forest&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Style&quot;},&quot;surfaceColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#B2C488&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Style&quot;},&quot;cardColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#FAF8EA&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Style&quot;},&quot;clock24&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Content&quot;}}">
+class Component extends DCLogic {
+  arcRef = React.createRef();
+  volRef = React.createRef();
+  rootRef = React.createRef();
+  state = {
+    now: new Date(),
+    room: 'Living room',
+    rooms: ['Living room', 'Kitchen', 'Bedroom', 'Bathroom'],
+    bright: { 'Living room': 64, 'Kitchen': 85, 'Bedroom': 22, 'Bathroom': 40 },
+    on: { 'Living room': true, 'Kitchen': true, 'Bedroom': true, 'Bathroom': false },
+    warmth: { 'Living room': 'Warm', 'Kitchen': 'Soft', 'Bedroom': 'Candle', 'Bathroom': 'Neutral' },
+    vol: { 'Living room': 35, 'Kitchen': 60, 'Bedroom': 15, 'Bathroom': 20 },
+    speakers: ['Living room', 'Kitchen', 'Bedroom', 'Whole home'],
+    speaker: 'Living room',
+    // which rooms currently have audio playing (Bedroom & Bathroom are silent)
+    nowPlaying: { 'Living room': true, 'Kitchen': true, 'Bedroom': false, 'Bathroom': false },
+    panel: 'media',
+  };
+
+  componentDidMount() {
+    this._move = (e) => this._onMove(e);
+    this._up = () => this._onUp();
+    this._t = setInterval(() => this.setState({ now: new Date() }), 20000);
+    this._applyVars();
+  }
+  componentDidUpdate() { this._applyVars(); }
+  componentWillUnmount() {
+    clearInterval(this._t);
+    window.removeEventListener('pointermove', this._move);
+    window.removeEventListener('pointerup', this._up);
+  }
+  _applyVars() {
+    const el = this.rootRef.current;
+    if (!el) return;
+    const p = this.props || {};
+    el.style.setProperty('--surface', p.surfaceColor || '#B2C488');
+    el.style.setProperty('--card', p.cardColor || '#FAF8EA');
+  }
+  _onMove(e) {
+    if (this._drag === 'dial') this._brightFromEvent(e.clientX, e.clientY);
+    else if (this._drag === 'vol') this._volFromEvent(e.clientX);
+  }
+  _onUp() {
+    this._drag = null;
+    window.removeEventListener('pointermove', this._move);
+    window.removeEventListener('pointerup', this._up);
+  }
+  _startDial(e) {
+    e.preventDefault();
+    this._drag = 'dial';
+    window.addEventListener('pointermove', this._move);
+    window.addEventListener('pointerup', this._up);
+    this._brightFromEvent(e.clientX, e.clientY);
+  }
+  _startVol(e) {
+    e.preventDefault();
+    this._drag = 'vol';
+    window.addEventListener('pointermove', this._move);
+    window.addEventListener('pointerup', this._up);
+    this._volFromEvent(e.clientX);
+  }
+  _toggleLight(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    this.setState(s => ({ on: { ...s.on, [s.room]: !(s.on[s.room] !== false) } }));
+  }
+  _brightFromEvent(cx, cy) {
+    const el = this.arcRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const sx = r.width / 260, sy = r.height / 160;
+    const px = r.left + 130 * sx, py = r.top + 140 * sy;
+    const dx = cx - px, dy = py - cy;
+    let deg = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (deg < 0) deg = dx >= 0 ? 0 : 180;
+    deg = Math.max(0, Math.min(180, deg));
+    const val = Math.round((1 - deg / 180) * 100);
+    // dragging brightness also turns the light on
+    this.setState(s => ({ bright: { ...s.bright, [s.room]: val }, on: { ...s.on, [s.room]: true } }));
+  }
+  _volFromEvent(cx) {
+    const el = this.volRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    let f = (cx - r.left) / r.width;
+    f = Math.max(0, Math.min(1, f));
+    this.setState(s => ({ vol: { ...s.vol, [s.room]: Math.round(f * 100) } }));
+  }
+
+  renderVals() {
+    const p = this.props || {};
+    const userName = p.userName || 'Alex';
+    const clock24 = !!p.clock24;
+    const accent = p.accent || 'Forest';
+    const AMAP = { Forest: '#0A3323', Sage: '#839958', Teal: '#105666', Rose: '#D3968C' };
+    const AC = AMAP[accent] || '#0A3323';
+    const ON = (accent === 'Forest' || accent === 'Teal') ? '#F6EEC7' : '#23301c';
+
+    const now = this.state.now;
+    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const dateStr = days[now.getDay()] + ', ' + months[now.getMonth()] + ' ' + now.getDate();
+    const dayName = days[now.getDay()];
+    const dateFull = months[now.getMonth()] + ' ' + now.getDate() + ', ' + now.getFullYear();
+    let h = now.getHours();
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    let timeStr;
+    if (clock24) { timeStr = String(h).padStart(2, '0') + ':' + mm; }
+    else { const ap = h < 12 ? 'AM' : 'PM'; let h12 = h % 12; if (h12 === 0) h12 = 12; timeStr = h12 + ':' + mm + ' ' + ap; }
+    const gw = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+    const greeting = gw + ', ' + userName;
+
+    const room = this.state.room;
+    const chipBase = "display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:999px;font:500 15px 'Newsreader',serif;cursor:pointer;white-space:nowrap;";
+    const chipIdle = chipBase + "background:#fff;color:#41503a;border:1.5px solid #b6c48f;";
+    const chipOn = chipBase + "background:" + AC + ";color:" + ON + ";border:1.5px solid " + AC + ";";
+    const rooms = this.state.rooms.map(n => ({ name: n, onClick: () => this.setState({ room: n }), style: n === room ? chipOn : chipIdle }));
+    const speakers = this.state.speakers.map(n => ({ name: n, onClick: () => this.setState({ speaker: n }), style: n === this.state.speaker ? chipOn : chipIdle }));
+
+    // ---- light: on/off + warmth + brightness ----
+    const isOn = this.state.on[room] !== false;
+    const WARM = [
+      { n: 'Candle',  sw: '#E8863B', arc: '#DA6E28' },
+      { n: 'Warm',    sw: '#F0A94E', arc: '#E0A24E' },
+      { n: 'Soft',    sw: '#F4C56B', arc: '#E3B457' },
+      { n: 'Neutral', sw: '#F1E2AC', arc: '#CDB86A' },
+      { n: 'Cool',    sw: '#CFE1EC', arc: '#8FB6C9' },
+    ];
+    const wName = this.state.warmth[room] || 'Warm';
+    const wObj = WARM.find(w => w.n === wName) || WARM[1];
+    const warmths = WARM.map(w => {
+      const sel = w.n === wName && isOn;
+      let st = "width:34px;height:34px;border-radius:50%;cursor:pointer;padding:0;background:" + w.sw + ";border:1.5px solid rgba(0,0,0,.07);transition:transform .12s;";
+      if (sel) st += "box-shadow:0 0 0 2px var(--card,#FAF8EA),0 0 0 4.5px " + w.arc + ";transform:scale(1.08);";
+      else st += "box-shadow:0 1px 3px rgba(0,0,0,.15);";
+      return { n: w.n, style: st, onClick: () => this.setState(s => ({ warmth: { ...s.warmth, [s.room]: w.n }, on: { ...s.on, [s.room]: true } })) };
+    });
+
+    const b = this.state.bright[room] || 0;
+    const f = isOn ? b / 100 : 0;
+    const arcColor = isOn ? wObj.arc : '#cdc7ab';
+    const bulbColor = isOn ? '#FFF8E8' : '#c4bea3';
+    const bulbGlyph = isOn ? 'lightbulb' : 'light_off';
+    const warmSw = wObj.sw;
+    const brightLabel = isOn ? (b + '%') : 'Off';
+    const dialSub = (isOn ? 'Brightness · ' : 'Light off · ') + room;
+
+    // dial arc geometry
+    const cx = 130, cy = 140, R = 116;
+    const deg = 180 * (1 - f), rad = deg * Math.PI / 180;
+    const knobX = (cx + R * Math.cos(rad)).toFixed(1);
+    const knobY = (cy - R * Math.sin(rad)).toFixed(1);
+    const trackPath = "M " + (cx - R) + " " + cy + " A " + R + " " + R + " 0 0 1 " + (cx + R) + " " + cy;
+    const valuePath = "M " + (cx - R) + " " + cy + " A " + R + " " + R + " 0 0 1 " + knobX + " " + knobY;
+    const glowR = (30 + f * 20).toFixed(1);
+    const glowOpacity = isOn ? (0.12 + f * 0.33).toFixed(2) : '0';
+
+    const vol = this.state.vol[room] || 0;
+    const volStr = vol + '%';
+
+    // ---- audio: playing state + join affordance ----
+    const audioSource = 'Living room';
+    const track = 'Midnight City — M83';
+    const playing = this.state.nowPlaying[room] === true;
+    const notPlaying = !playing;
+    const audioLabel = playing ? track : 'No audio playing';
+    const audioIcon = playing ? 'music_note' : 'music_off';
+    const audioIconColor = playing ? '#839958' : '#b6b09a';
+    const audioTextColor = playing ? '#4a5540' : '#a7a88c';
+
+    const showMedia = this.state.panel === 'media';
+    const showCal = this.state.panel === 'calendar';
+    const tabBase = "display:inline-flex;align-items:center;gap:7px;padding:8px 18px;border-radius:999px;font:500 15px 'Newsreader';cursor:pointer;border:none;background:none;color:#6d7860;";
+    const tabOn = "display:inline-flex;align-items:center;gap:7px;padding:8px 18px;border-radius:999px;font:600 15px 'Newsreader';cursor:pointer;border:none;background:#fff;color:#23301c;box-shadow:0 1px 4px rgba(0,0,0,.12);";
+
+    const apps = [
+      { label: 'Budget', icon: 'account_balance_wallet', c: 0 },
+      { label: 'Alarms', icon: 'alarm', c: 1 },
+      { label: 'Timers', icon: 'timer', c: 2 },
+      { label: 'To-do', icon: 'checklist', c: 3 },
+      { label: 'Cameras', icon: 'videocam', c: 0 },
+      { label: 'Climate', icon: 'thermostat', c: 1 },
+      { label: 'Locks', icon: 'lock', c: 2 },
+      { label: 'Energy', icon: 'bolt', c: 3 },
+      { label: 'Scenes', icon: 'auto_awesome', c: 0 },
+      { label: 'Vacuum', icon: 'cleaning_services', c: 1 },
+      { label: 'Weather', icon: 'partly_cloudy_day', c: 2 },
+      { label: 'Shopping', icon: 'shopping_cart', c: 3 },
+      { label: 'Notes', icon: 'sticky_note_2', c: 0 },
+      { label: 'Wi-Fi', icon: 'wifi', c: 1 },
+      { label: 'Plants', icon: 'potted_plant', c: 2 },
+      { label: 'Guests', icon: 'group', c: 3 },
+      { label: 'Blinds', icon: 'blinds', c: 0 },
+      { label: 'Doorbell', icon: 'doorbell', c: 1 },
+    ];
+    const BG = ['#E5EAE0', '#EAEFDD', '#F4E6E2', '#DEE9EC'];
+    const FG = ['#0A3323', '#839958', '#C77A6B', '#105666'];
+    const appList = apps.map(a => ({ label: a.label, icon: a.icon, bg: BG[a.c], fg: FG[a.c] }));
+
+    const playlists = [
+      { name: 'Focus Flow', count: '42 songs', c: '#0A3323', icon: 'graphic_eq' },
+      { name: 'Evening Jazz', count: '28 songs', c: '#105666', icon: 'piano' },
+      { name: 'Indie Mix', count: '63 songs', c: '#C77A6B', icon: 'radio' },
+      { name: 'Morning Calm', count: '19 songs', c: '#839958', icon: 'wb_twilight' },
+      { name: 'Deep House', count: '55 songs', c: '#3a4633', icon: 'nightlife' },
+    ];
+
+    const queue = [
+      { title: 'Instant Crush', artist: 'Daft Punk', dur: '5:37', bg: '#105666' },
+      { title: 'Redbone', artist: 'Childish Gambino', dur: '5:26', bg: '#839958' },
+      { title: 'Nightcall', artist: 'Kavinsky', dur: '4:18', bg: '#C77A6B' },
+    ];
+
+    // calendar cells
+    const y = now.getFullYear(), m = now.getMonth();
+    const startDow = new Date(y, m, 1).getDay();
+    const dim = new Date(y, m + 1, 0).getDate();
+    const cellBase = "display:flex;align-items:center;justify-content:center;height:30px;border-radius:9px;font:500 13px 'Newsreader';";
+    const calCells = [];
+    for (let i = 0; i < 42; i++) {
+      const dn = i - startDow + 1;
+      const inM = dn >= 1 && dn <= dim;
+      const isToday = inM && dn === now.getDate();
+      let st = cellBase;
+      if (isToday) st += "background:" + AC + ";color:" + ON + ";font-weight:600;";
+      else if (inM) st += "color:#3a4633;";
+      else st += "color:#cfc8ac;";
+      calCells.push({ label: inM ? String(dn) : '', style: st });
+    }
+    const monthLabel = months[m] + ' ' + y;
+
+    return {
+      rootRef: this.rootRef,
+      greeting, dateStr, dayName, dateFull, timeStr, monthLabel,
+      room, rooms, speakers, warmths, apps: appList, playlists, queue, calCells,
+      brightLabel, dialSub, trackPath, valuePath, knobX, knobY, glowR, glowOpacity,
+      arcColor, bulbColor, bulbGlyph, warmSw,
+      volStr,
+      audioSource, audioLabel, audioIcon, audioIconColor, audioTextColor, notPlaying,
+      joinAudio: () => this.setState(s => ({ nowPlaying: { ...s.nowPlaying, [s.room]: true } })),
+      showMedia, showCal,
+      tabMediaStyle: showMedia ? tabOn : tabBase,
+      tabCalStyle: showCal ? tabOn : tabBase,
+      setMedia: () => this.setState({ panel: 'media' }),
+      setCal: () => this.setState({ panel: 'calendar' }),
+      startDial: (e) => this._startDial(e),
+      startVol: (e) => this._startVol(e),
+      toggleLight: (e) => this._toggleLight(e),
+    };
+  }
+}
+</script>
+</body>
+</html>
