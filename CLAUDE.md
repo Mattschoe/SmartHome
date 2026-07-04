@@ -52,7 +52,7 @@ Kotlin Multiplatform project with a shared Compose UI and thin per-platform entr
 - **Compose Multiplatform UI in `commonMain`** — a single Compose tree renders on both platforms. Avoid platform-specific APIs in `commonMain`; use `expect`/`actual` (see `Platform.kt`) when you genuinely need them.
 - **Manual DI via `AppContainer`** (no Hilt/Koin) — constructed in each platform entry point and passed into `App()`, then down to ViewModels. Currently an empty stub.
 - **Type-safe navigation** using `@Serializable` sealed classes in `PageNavigation.kt` with `navigation-compose`. The dashboard is effectively single-screen; the nav host exists so sub-screens (settings, per-app pages) can be added.
-- **Reactive state** — screen state should be exposed from ViewModels as `StateFlow` and collected with `collectAsStateWithLifecycle()`.
+- **Reactive state** — the adapter exposes device data (`HomeState`); the ViewModel owns UI-selection state as private `MutableStateFlow`s and `combine()`s them with the adapter flow into one public `screenState: StateFlow<HomeScreenState>` via `stateIn(viewModelScope, WhileSubscribed(5000), Loading)`. The UI collects it with `collectAsStateWithLifecycle()`.
 - **Compose resources** — fonts/images live in `shared/src/commonMain/composeResources/` and are accessed via the generated `smarthome.shared.generated.resources.Res` accessor (e.g. `Res.font.newsreader`).
 
 ## Current State
@@ -102,9 +102,9 @@ The design intent lives in two places in `app/docs/`: the **rendered screenshots
 **Signature interactions** (copy the math from the prototype):
 - **Brightness dial** — SVG-style half-arc (260×160 viewBox, center (130,140), radius 116), drag the knob to set 0–100%. Value = `round((1 − deg/180) × 100)`. Tapping the center bulb toggles the light on/off; dragging forces it on. In Compose: draw with `Canvas`/`drawArc`, handle drag with `pointerInput { detectDragGestures }`, and reproduce the pointer-angle math. The arc/knob take the current **warmth** color.
 - **Warmth swatches** — five color-temp circles (Candle→Warm→Soft→Neutral→Cool); selecting one recolors the dial and turns the light on.
-- **Volume slider** — horizontal drag; fraction = `(x − left) / width` clamped 0–1.
-- **Room chips / speaker chips** — pill toggles; active = filled accent, idle = white with sage border.
-- **Media / Calendar tabs** — pill segmented control; Media (search, now-playing + scrubber, transport, queue, horizontal playlist rail) and Calendar (month grid, agenda, to-do).
+- **Volume slider** — horizontal drag; fraction = `(x − left) / width` clamped 0–1. Sets the **active room's** volume.
+- **Room chips** — pill toggles; active = filled accent, idle = white with sage border. Selecting a room swaps the whole center/right view to that room. *(The "Whole home" speaker chip and the dashed "Join the music in {source}" affordance are **deferred from v1** — they're the multi-room grouping feature; v1 audio is strictly per-room. See the State Model CORE RULE.)*
+- **Media / Calendar tabs** — pill segmented control; Media (search, now-playing + scrubber, transport, queue, horizontal playlist rail) and Calendar (month grid, agenda, to-do). The Media panel binds to the **active room's** audio; its empty state is simply *that room has nothing playing*.
 
 **Design tokens** (centralize in `Color.kt` / `Type.kt` — the prototype hardcodes hex; don't):
 - Surface (sage) `#B2C488` · Card `#FAF8EA` · Card border `#A7BB7C` · Ink `#23301C` · Ink soft `#5C6650` · Muted `#A7A88C` · Sage green `#839958` · Teal `#105666` · Rose `#D3968C` · Warm amber `#E0A24E` · Inset fill `#ECE6CF`.
@@ -113,37 +113,61 @@ The design intent lives in two places in `app/docs/`: the **rendered screenshots
 
 ### State Model
 
-Model dashboard state as a single object keyed by room, exposed from `HomepageViewModel` as a `StateFlow`. Mirrors the prototype:
+State is split into two layers: **device data** the adapter exposes (`HomeState`) and **screen state** the ViewModel assembles (`HomeScreenState`). The ViewModel owns the UI selection (`activeRoom`/`panel`) as private `MutableStateFlow`s and `combine()`s them with the adapter's `HomeState` into `screenState`. The implemented shapes live in `data/model/DashboardModels.kt` (device) and `ui/pages/homepage/HomeScreenState.kt` (screen):
 
 ```kotlin
 enum class Warmth { Candle, Warm, Soft, Neutral, Cool }
-enum class RoomId { LivingRoom, Kitchen, Bedroom, Bathroom }
+enum class Room(val displayName: String) { LivingRoom("Stue"), Kitchen("Køkken"), … }
 
+// A room owns everything inside it — both its lights AND its own audio playback.
 data class RoomState(
-    val brightness: Int,      // 0–100
-    val on: Boolean,
-    val warmth: Warmth,
-    val volume: Int,          // 0–100
-    val audioPlaying: Boolean,
+    // lights
+    val brightnessPct: Int, val isLightOn: Boolean, val lightWarmth: Warmth,
+    // audio (per-room session; playlists are shared, see below)
+    val volumePct: Int, val isPlaying: Boolean,
+    val nowPlaying: MediaTrack?, val positionSec: Int, val queue: List<MediaTrack>,
 )
 
-data class DashboardState(
-    val activeRoom: RoomId,
-    val rooms: Map<RoomId, RoomState>,
-    val speaker: String,          // room name or "Whole home"
-    val audioSource: RoomId,      // where music originates
-    val panel: Panel,             // Media | Calendar
+// Device truth — what the HomeAdapter exposes (mock now, Home Assistant later). No UI selection.
+data class HomeState(
+    val rooms: Map<Room, RoomState>,
+    val climate: ClimateState,          // read-only glance
+    val playlists: List<Playlist>,      // shared library — any room can play from it
+    val calendar: CalendarState,
 )
+
+// Screen state — HomeState + VM-owned UI selection, collected by the UI.
+sealed interface HomeScreenState {
+    data object Loading : HomeScreenState
+    data class Ready(
+        val activeRoom: Room,           // pure UI selection: which room am I looking at
+        val rooms: Map<Room, RoomState>,
+        val panel: Panel,               // Media | Calendar (right card)
+        val climate: ClimateState,
+        val playlists: List<Playlist>,
+        val calendar: CalendarState,
+    ) : HomeScreenState
+}
 ```
+
+> **CORE RULE — do not re-break this.** Rooms own their own **lights AND audio**. There is **no**
+> global audio session, `speaker`, or `audioSource`. `activeRoom`/`panel` are **pure UI selection**
+> ("which room am I looking at" / "which right-card tab") — they live in the **ViewModel**, never in
+> the adapter or `HomeState`; the device-data layer must never define them. Selecting a room shows
+> *that room's* lights and *that room's* audio. Playlists are a shared library, not per-room.
+> Multi-room sync ("Whole home" chip / "Join the music in {source}") is a **deferred grouping
+> feature**, not part of the v1 model — reintroduce it later as an additive relation (e.g. a
+> `groupId`) *on top of* per-room ownership. (Earlier drafts put a global audio session, then
+> `activeRoom`/`panel`, into the shared state; both were wrong and were removed.)
 
 This is an **opinionated, single-home dashboard** — not a configurable product. Accent (Forest), clock format, user name, and the room list are **fixed app constants**, not runtime state or user-facing settings. Settings, if ever needed, is a navigation seam to a separate screen, never an in-dashboard surface.
 
-Switching the active room swaps the entire center-card state. Clock ticks ~every 20s. Persist the last room states so a wall tablet survives reloads (multiplatform settings/DataStore — add when needed).
+Switching the active room swaps the entire center- and right-card view to that room. Clock ticks ~every 20s. Persist the last room states so a wall tablet survives reloads (multiplatform settings/DataStore — add when needed).
 
 ### Data & Device Boundary
 
 Build UI-first against a **mock in-memory store**; define the seam now so real integration is a drop-in later.
-- Ship a `HomeAdapter` interface (`setBrightness`, `setWarmth`, `setVolume`, `toggleLight`, `subscribe()`), with a `MockAdapter` seeded from fixtures. Controls mutate the store optimistically.
+- Ship a `HomeAdapter` interface (`setBrightness`, `setWarmth`, `setVolume`, `toggleLight`, `subscribe(): StateFlow<HomeState>`) — **device setters only**, with a `MockAdapter` seeded from fixtures. Controls mutate the store optimistically. Audio is per-room; the Media panel reads the active room's `RoomState` (no global session). UI selection (`activeRoom`/`panel`) is not on the adapter — it lives in the ViewModel.
 - Climate stats (temp/humidity/energy/outdoor) are read-only display for now.
 - Leave a `MatterAdapter` / Home Assistant stub for later. Put adapters in `AppContainer`.
 

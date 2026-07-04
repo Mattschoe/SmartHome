@@ -40,7 +40,7 @@ phase says so.
 
 ## Phase 1 — Theme & design-token foundation
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `DONE` · **Completed:** 2026-07-04 (commit `1acf560`)
 
 Make the theme the single source of truth so every later phase pulls colors/type from it.
 
@@ -55,18 +55,35 @@ Make the theme the single source of truth so every later phase pulls colors/type
 
 ## Phase 2 — Foundational state + mock data layer
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `IN PROGRESS` · **Completed:** — (reopened to correct the audio model; see note)
 
 Land the reactive state layer early so all UI binds to a real `StateFlow` from day one.
 
-- [ ] **Confirm the real room list with the user** before seeding fixtures.
-- [ ] `Warmth`, `RoomId` enums, `RoomState`, trimmed `DashboardState` (no accent/clock24/userName).
-- [ ] `HomeAdapter` interface + `MockAdapter` seeded from fixtures (rooms/media/calendar/climate),
-      optimistic mutations, read-only climate.
-- [ ] `AppContainer` constructs `MockAdapter`; `HomepageViewModel` exposes `StateFlow`; `Homepage`
+> **Correction (2026-07-04):** the first pass modeled audio as a **global session** (`speaker`,
+> `audioSource`, a global `MediaState`, `joinMusic()`) — wrong. Audio is now **per-room**, folded
+> into `RoomState`; `playlists` is a shared library; there is no `speaker`/`audioSource`. Multi-room
+> sync is deferred (see `CLAUDE.md` State Model CORE RULE).
+>
+> **Correction (2026-07-04):** UI-selection state (`activeRoom`/`panel`) was moved **out of the
+> adapter** into `HomepageViewModel` — device data vs screen state separation. The adapter now
+> exposes device-only `HomeState` (no `activeRoom`/`panel`, no `setActiveRoom`/`setPanel`); the VM
+> owns the selection as `MutableStateFlow`s and `combine`+`stateIn`s them with the adapter flow into a
+> sealed `HomeScreenState` (`Loading`/`Ready`). Re-run the verification gate before re-marking this
+> phase `DONE`.
+
+- [x] **Confirm the real room list with the user** before seeding fixtures.
+      → Living Room, Kitchen, Bedroom, Bathroom, Hall.
+- [x] `Warmth`, `Room` enums, `RoomState`; device-only `HomeState` (rooms/climate/playlists/calendar)
+      from the adapter, `HomeScreenState` (VM-owned `activeRoom`/`panel`) in the ViewModel.
+      *(`RoomId`→`Room` per plan.)*
+- [x] **Audio is per-room**: `RoomState` owns `volumePct`/`isPlaying`/`nowPlaying`/`positionSec`/`queue`;
+      `HomeState` carries a shared `playlists` list. No `speaker`/`audioSource`/global `MediaState`.
+- [x] `HomeAdapter` interface + `MockAdapter` seeded from fixtures (rooms/calendar/climate, one room
+      playing), optimistic mutations, read-only climate.
+- [x] `AppContainer` constructs `MockAdapter`; `HomepageViewModel` exposes `StateFlow`; `Homepage`
       collects via `collectAsStateWithLifecycle()`.
-- [ ] Signature math as testable pure functions (dial angle→value, volume fraction, room-swap, join).
-- [ ] Unit tests cover state transitions/math; iOS compiles.
+- [x] Signature math as testable pure functions (dial angle→value, volume fraction, room-swap).
+- [ ] Unit tests cover state transitions/math; iOS compiles. *(re-verify after the audio-model fix)*
 
 ---
 
@@ -108,7 +125,9 @@ The hardest phase — brightness dial, warmth, audio (likely split into sub-step
 - [ ] Brightness dial: Canvas half-arc + `pointerInput` drag (`value = round((1 − deg/180) × 100)`),
       center-bulb toggle, drag forces on, warmth-colored arc/knob, off-state grey + "Off".
 - [ ] Warmth swatches recolor the dial + turn light on; selected = scale 1.08 + double-ring halo.
-- [ ] Audio: speaker chips, volume slider (`(x−left)/width`), dashed "Join the music in {source}".
+- [ ] Audio (**per-room** — bound to the active room): volume slider (`(x−left)/width`).
+      *Deferred from v1: the "Whole home" speaker chip and dashed "Join the music in {source}" — that's
+      the multi-room grouping feature, not part of the per-room model (see CLAUDE.md CORE RULE).*
 - [ ] `role = slider` + arrow-key a11y on dial and slider.
 - [ ] Touch drag works on-device; room-swap swaps all state; warmth↔dial linkage; iOS compiles.
 
@@ -122,6 +141,8 @@ Media/Calendar tab shell + Media content.
 
 - [ ] **Enumerate + request icons** (search, transport, shuffle/repeat).
 - [ ] Pill segmented control (Media | Calendar, one active).
+- [ ] Media binds to the **active room's** audio (`RoomState.nowPlaying`/`queue`); the empty state is
+      simply *that room has nothing playing*. Playlists rail reads the shared `DashboardState.playlists`.
 - [ ] Media: search, now-playing + scrubber, transport row, vertical "Up next" queue,
       horizontal scroll-snap "Playlists" rail, 40px bottom fade.
 - [ ] Matches `Dashboard_with_media.png`; tab switch + scroll work; iOS compiles.

@@ -25,7 +25,11 @@ fun ApplicationNavigationHost(
     ) {
         //Homepage
         composable<PageNavigation.Home> {
-            val viewModel = viewModel<HomepageViewModel> { HomepageViewModel() }
+            val viewModel = viewModel<HomepageViewModel> {
+                HomepageViewModel(
+                    adapter = appContainer.homeAdapter
+                )
+            }
             Homepage(
                 navController = navController,
                 viewModel = viewModel
