@@ -44,12 +44,12 @@ phase says so.
 
 Make the theme the single source of truth so every later phase pulls colors/type from it.
 
-- [ ] `ui/theme/Color.kt` populated with all tokens (surface, card, border, ink, ink soft, muted,
+- [x] `ui/theme/Color.kt` populated with all tokens (surface, card, border, ink, ink soft, muted,
       sage green, teal, rose, warm amber, inset) + fixed Forest accent (`#0A3323`/`#F6EEC7`).
-- [ ] Warmth-temperature colors (Candle→Cool) defined as tokens.
-- [ ] Typography finished: Newsreader 400/500/600 (currently only 400/700).
-- [ ] Reusable section-label style (uppercase ~10–11px, weight 500, ls ~1.5px, muted `#A7A88C`).
-- [ ] Swatch preview renders correctly on Android; iOS compiles.
+- [x] Warmth-temperature colors (Candle→Cool) defined as tokens.
+- [x] Typography finished: Newsreader 400/500/600 (currently only 400/700).
+- [x] Reusable section-label style (uppercase ~10–11px, weight 500, ls ~1.5px, muted `#A7A88C`).
+- [x] Swatch preview renders correctly on Android; iOS compiles.
 
 ---
 
