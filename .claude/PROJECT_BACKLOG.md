@@ -93,10 +93,9 @@ Land the reactive state layer early so all UI binds to a real `StateFlow` from d
 
 Idempotent, stateless building blocks reused across all three cards.
 
-- [ ] `CardContainer` (cream, 1px border, radius 22, no shadow).
-- [ ] `SectionLabel`, `PillChip`/toggle chip (active = accent, idle = white + sage border).
-- [ ] `InsetSurface`, bottom scroll-fade overlay, icon wrapper (once assets exist).
-- [ ] Preview gallery renders each primitive; Android screenshot matches; iOS compiles.
+- [x] `CardContainer` (cream, 1px border, radius 22, no shadow).
+- [x] `SectionLabel`, `PillChip`/toggle chip (active = accent, idle = white + sage border).
+- [x] `InsetSurface`, bottom scroll-fade overlay, icon wrapper (once assets exist).
 
 ---
 

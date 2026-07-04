@@ -20,6 +20,8 @@ val WarmAmber = Color(0xFFE0A24E)
 val Forest = Color(0xFF0A3323)
 val OnForest = Color(0xFFF6EEC7)
 
+val ChipIdle = Color(0xFFFFFFFF)
+
 val WarmthCandle = Color(0xFFFF7E00)
 val WarmthWarm = Color(0xFFFF932C)
 val WarmthSoft = Color(0xFFFFA957)
