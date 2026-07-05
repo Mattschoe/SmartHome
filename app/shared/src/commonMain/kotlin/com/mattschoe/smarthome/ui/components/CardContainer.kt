@@ -13,7 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.mattschoe.smarthome.ui.theme.Card
 import com.mattschoe.smarthome.ui.theme.CardBorder
-import com.mattschoe.smarthome.ui.theme.Dimens
+import com.mattschoe.smarthome.ui.theme.Dimensions
 
 /** Cream floating card: flat, 1px sage border, radius 22, no shadow. Caller supplies inner padding. */
 @Composable
@@ -22,7 +22,7 @@ fun CardContainer(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(Dimens.cardRadius)
+    val shape = RoundedCornerShape(Dimensions.cardRadius)
     Box(
         modifier = modifier
             .clip(shape)

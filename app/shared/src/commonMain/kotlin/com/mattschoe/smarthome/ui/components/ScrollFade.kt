@@ -8,13 +8,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import com.mattschoe.smarthome.ui.theme.Card
-import com.mattschoe.smarthome.ui.theme.Dimens
+import com.mattschoe.smarthome.ui.theme.Dimensions
 
 /**
  * Overlays a bottom fade (transparent → [color]) as a scroll affordance, without wrapping structure.
  * Apply to a scroll region so more-content-below reads clearly.
  */
-fun Modifier.bottomScrollFade(color: Color = Card, height: Dp = Dimens.scrollFadeHeight): Modifier =
+fun Modifier.bottomScrollFade(color: Color = Card, height: Dp = Dimensions.scrollFadeHeight): Modifier =
     this.drawWithContent {
         drawContent()
         val fadeH = height.toPx().coerceAtMost(size.height)

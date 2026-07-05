@@ -11,14 +11,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
-import com.mattschoe.smarthome.ui.theme.Dimens
+import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.InsetFill
 
 /** Sunken surface for tracks and search fields (`#ECE6CF`). */
 @Composable
 fun InsetSurface(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(Dimens.insetRadius),
+    shape: Shape = RoundedCornerShape(Dimensions.insetRadius),
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable BoxScope.() -> Unit,
 ) {
