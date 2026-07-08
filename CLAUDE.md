@@ -193,7 +193,7 @@ Build UI-first against a **mock in-memory store**; define the seam now so real i
 - **Common-first**: put UI and logic in `commonMain`. Only drop to `androidMain`/`iosMain` (via `expect`/`actual`) for genuinely platform-specific APIs.
 - **Compose-first UI**: screens are `@Composable` functions in `ui/pages/`, paired with a `ViewModel` exposing a `StateFlow`, collected with `collectAsStateWithLifecycle()`.
 - **Touch, not mouse**: all drags via `pointerInput` gesture detectors; ensure hit targets ≥ 44dp (chips, transport buttons, swatches already exceed this).
-- **No decorative gradients** — the only gradients are the functional dial glow and the right-panel bottom scroll fade. Cards are flat with 1px borders.
+- **No decorative gradients** — the only gradients are the functional dial glow and the right-panel bottom scroll fade. Cards keep a 1px border but now carry a subtle soft drop shadow (as do pills and the warmth swatches); elevation tokens live in `Dimensions` (`cardElevation`/`pillElevation`/`swatchElevation`). Canvas-drawn shapes (dial bulb/knob) fake the same shadow by under-drawing a low-alpha offset circle.
 - **Accessibility**: give every icon-only control a content description; the dial/slider should expose a slider semantics role + keyboard/arrow support (the prototype omits this — add it).
 - **UI verification**: after a UI change that affects what the user sees, verify it on a connected Android device/emulator with `/android-verify` before reporting done.
 

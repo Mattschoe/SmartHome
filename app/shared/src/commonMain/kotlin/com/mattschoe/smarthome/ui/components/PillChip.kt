@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -49,11 +50,12 @@ fun PillChip(
         else Modifier.background(ChipIdle, shape).border(1.dp, CardBorder, shape)
     Row(
         modifier = modifier
+            .shadow(Dimensions.pillElevation, shape)
             .clip(shape)
             .then(base)
             .selectable(selected = selected, onClick = onClick, role = Role.Tab)
             .heightIn(min = Dimensions.minTouch)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 18.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -62,14 +64,14 @@ fun PillChip(
                 painter = painterResource(leadingIcon),
                 contentDescription = null,
                 tint = contentColor,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
         Text(
             text = text,
             color = contentColor,
             fontWeight = FontWeight.Medium,
-            fontSize = 15.sp,
+            fontSize = 17.sp,
         )
     }
 }

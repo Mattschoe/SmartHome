@@ -3,6 +3,7 @@ package com.mattschoe.smarthome.ui.pages.homepage
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
@@ -28,11 +30,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -53,6 +58,7 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
@@ -133,13 +139,11 @@ fun CenterCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(Dimensions.cardGap))
-            SectionLabel("Warmth", modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(10.dp))
             WarmthSwatches(selected = lightRoomState.lightWarmth, onSelect = onWarmthChange)
-            Spacer(Modifier.height(Dimensions.cardGap))
+            Spacer(Modifier.height(Dimensions.centerSectionGap))
             HorizontalDivider(color = CardBorder, thickness = 1.dp)
-            Spacer(Modifier.height(Dimensions.cardGap))
-            SectionLabel("Audio", modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(Dimensions.centerSectionGap))
+            SectionLabel("Audio", modifier = Modifier.fillMaxWidth(), fontSize = 14.sp)
             // The now-playing summary (track – artist) shown in this row in the reference is deferred
             // to the Phase 6 Media panel — it renders the same RoomState.nowPlaying data, so it's
             // built once, there. This phase ships the audio-room selector + the per-room volume slider.
@@ -280,10 +284,19 @@ private fun BrightnessDial(
             val diameter = lerp(Dimensions.centerGrowthMinDiameter, Dimensions.centerGrowthMaxDiameter, t)
             val bulbRadius = diameter.toPx() / 2f
             val baseline = Dimensions.centerGrowthBaselineY.toPx()
+            val bulbCenterY = baseline - bulbRadius
+            // Fake soft shadow: a slightly larger, low-alpha dark circle offset below the bulb. Canvas
+            // draws can't use Modifier.shadow, and this stays multiplatform (no native shadow layer).
+            // Kept very faint so the bulb reads as sitting on the card, not floating above it.
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.05f),
+                radius = bulbRadius + 1.dp.toPx(),
+                center = Offset(cx, bulbCenterY + 1.5.dp.toPx()),
+            )
             drawCircle(
                 color = arcColor.copy(alpha = 0.45f),
                 radius = bulbRadius,
-                center = Offset(cx, baseline - bulbRadius),
+                center = Offset(cx, bulbCenterY),
             )
 
             drawArc(
@@ -312,6 +325,11 @@ private fun BrightnessDial(
             )
             val knobRadius = Dimensions.centerDialKnobDiameter.toPx() / 2f
             val knobStroke = Dimensions.centerDialKnobStroke.toPx()
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.07f),
+                radius = knobRadius + 0.5.dp.toPx(),
+                center = knobCenter + Offset(0f, 1.dp.toPx()),
+            )
             drawCircle(color = Color.White, radius = knobRadius, center = knobCenter)
             drawCircle(
                 color = arcColor,
@@ -330,7 +348,14 @@ private fun WarmthSwatches(
     onSelect: (Warmth) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    // Center-align vertically: a selected swatch's ring makes its box taller, and without this the row
+    // top-aligns children so that extra height hangs *below* — reading as the circle sliding "down"
+    // rather than scaling up in place. Centered, the growth spreads symmetrically around the row axis.
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Warmth.entries.forEach { warmth ->
             WarmthSwatch(warmth = warmth, selected = warmth == selected, onSelect = { onSelect(warmth) })
         }
@@ -347,22 +372,25 @@ private fun WarmthSwatch(warmth: Warmth, selected: Boolean, onSelect: () -> Unit
             .semantics { contentDescription = warmth.name },
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .size(Dimensions.warmthSwatchDiameter)
-                .scale(if (selected) 1.08f else 1f)
-                .then(
-                    if (selected) {
-                        Modifier
-                            .border(Dimensions.warmthHaloRingWidth, swatchColor, CircleShape)
-                            .padding(Dimensions.warmthHaloGap)
-                    } else {
-                        Modifier
-                    },
-                )
-                .clip(CircleShape)
-                .background(swatchColor),
-        )
+        // Selected swatches gain a concentric outer ring (ring + gap) drawn *around* a constant-size
+        // fill, so the selection grows the footprint without shrinking the colored circle.
+        val ringModifier =
+            if (selected) {
+                Modifier
+                    .border(Dimensions.warmthHaloRingWidth, swatchColor, CircleShape)
+                    .padding(Dimensions.warmthHaloRingWidth + Dimensions.warmthHaloGap)
+            } else {
+                Modifier
+            }
+        Box(ringModifier, contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .size(Dimensions.warmthSwatchDiameter)
+                    .shadow(Dimensions.swatchElevation, CircleShape)
+                    .clip(CircleShape)
+                    .background(swatchColor),
+            )
+        }
     }
 }
 
@@ -384,17 +412,37 @@ private fun VolumeSlider(
     // mutating a stale room after a room switch (same pattern as the dial).
     val currentOnVolumeChange by rememberUpdatedState(onVolumeChange)
 
+    // The volume level to restore when un-muting. UI-local (no isMuted model field yet): tapping the
+    // icon stashes the current level and drops to 0; tapping again restores it.
+    var preMuteVolume by remember { mutableStateOf(if (volumePct > 0) volumePct else 30) }
+
     Row(
         modifier = modifier.heightIn(min = Dimensions.volumeRowMinHeight),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(
-            painter = painterResource(volumeIcon(volumePct)),
-            contentDescription = null,
-            tint = InkSoft,
-            modifier = Modifier.size(Dimensions.volumeIconSize),
-        )
+        Box(
+            modifier = Modifier
+                .sizeIn(minWidth = Dimensions.minTouch, minHeight = Dimensions.minTouch)
+                .clip(CircleShape)
+                .clickable {
+                    if (volumePct > 0) {
+                        preMuteVolume = volumePct
+                        onVolumeChange(0)
+                    } else {
+                        onVolumeChange(preMuteVolume)
+                    }
+                }
+                .semantics { contentDescription = if (volumePct > 0) "Slå lyd fra" else "Slå lyd til" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(volumeIcon(volumePct)),
+                contentDescription = null,
+                tint = InkSoft,
+                modifier = Modifier.size(Dimensions.volumeIconSize),
+            )
+        }
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -477,6 +525,8 @@ private fun VolumeSlider(
             color = Ink,
             fontSize = 16.sp,
             fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(Dimensions.volumePctLabelWidth),
         )
     }
 }

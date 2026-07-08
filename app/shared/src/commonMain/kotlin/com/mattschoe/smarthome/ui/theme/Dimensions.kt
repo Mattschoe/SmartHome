@@ -10,11 +10,21 @@ object Dimensions {
     val minTouch = 44.dp
     val scrollFadeHeight = 40.dp
 
+    // Soft elevation shadows. Cards/pills/swatches carry a subtle shadow (a deliberate departure from
+    // the original "flat cards" spec) — see CardContainer/PillChip and CenterCard's warmth swatches.
+    val cardElevation = 6.dp
+    val pillElevation = 2.dp
+    // Warmth swatches / dial want only the faintest lift — see Task feedback: their shadow reads best
+    // barely-there, so the colored circles look scaled up rather than floating above the card.
+    val swatchElevation = 1.dp
+
     // Expanded-dashboard page geometry (fixed 1280×800 tablet). Only the `Expanded` assembly point
     // consumes these; size-agnostic composables must not hardcode layout numbers.
     val surfacePadV = 24.dp
     val surfacePadH = 26.dp
     val cardGap = 18.dp
+    // Wider breathing room around the center card's warmth↔divider↔Audio boundary than the default gap.
+    val centerSectionGap = 28.dp
     val leftCardWidth = 288.dp
 
     // Center-card brightness dial (half-arc). Geometry follows the handoff spec's 260×160 viewBox
@@ -37,15 +47,18 @@ object Dimensions {
     val centerGrowthMaxDiameter = 92.dp
     val centerBulbTapRadius = 40.dp
 
-    // Center-card warmth swatches.
-    val warmthSwatchDiameter = 34.dp
-    val warmthHaloGap = 2.dp
-    val warmthHaloRingWidth = 4.5.dp
+    // Center-card warmth swatches. The fill diameter is constant; the selected swatch adds a concentric
+    // outer ring (gap + width) *around* the fill, so its footprint grows without shrinking the fill.
+    val warmthSwatchDiameter = 46.dp
+    val warmthHaloGap = 3.dp
+    val warmthHaloRingWidth = 3.dp
 
     // Center-card volume slider (Audio section). The row keeps a [minTouch] hit height; the track is
     // a thin rounded lane with a white knob riding its center. See CenterCard.kt.
     val volumeTrackHeight = 7.dp
     val volumeKnobDiameter = 18.dp
-    val volumeIconSize = 20.dp
+    val volumeIconSize = 28.dp
     val volumeRowMinHeight = minTouch
+    // Fixed width for the trailing "100%" label so the track (weight 1f) doesn't reflow as digits change.
+    val volumePctLabelWidth = 48.dp
 }

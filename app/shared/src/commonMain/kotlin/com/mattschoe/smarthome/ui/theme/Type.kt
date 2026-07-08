@@ -7,6 +7,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import org.jetbrains.compose.resources.Font
 import smarthome.shared.generated.resources.Res
@@ -61,9 +62,9 @@ fun smartHomeTypography(): Typography {
 }
 
 @Composable
-fun sectionLabelStyle(): TextStyle = TextStyle(
+fun sectionLabelStyle(fontSize: TextUnit = 11.sp): TextStyle = TextStyle(
     fontFamily = newsreaderFamily(),
-    fontSize = 11.sp,
+    fontSize = fontSize,
     fontWeight = FontWeight.Medium,
     letterSpacing = 1.5.sp,
     color = Muted,

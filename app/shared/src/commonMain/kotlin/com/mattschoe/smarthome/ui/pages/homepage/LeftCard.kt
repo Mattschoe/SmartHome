@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -85,13 +87,13 @@ private fun DateTimeHeader() {
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(clock.weekday, color = Ink, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-            Text(clock.date, color = InkSoft, fontSize = 13.sp)
+            Text(clock.weekday, color = Ink, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
+            Text(clock.date, color = InkSoft, style = MaterialTheme.typography.headlineSmall)
         }
-        Text(clock.time, color = InkSoft, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+        Text(clock.time, color = InkSoft, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -154,7 +156,7 @@ private fun ClimateGrid(climate: ClimateState) {
     }
 }
 
-/** One climate stat: a flat cream inner-block tile with a colored icon and a large value. */
+/** One climate stat: a cream inner-block tile with a soft drop shadow, a colored icon and a large value. */
 @Composable
 private fun ClimateTile(
     icon: DrawableResource,
@@ -166,6 +168,7 @@ private fun ClimateTile(
     val shape = RoundedCornerShape(Dimensions.innerBlockRadius)
     Column(
         modifier = modifier
+            .shadow(Dimensions.cardElevation, shape)
             .clip(shape)
             .background(Card)
             .border(1.dp, CardBorder, shape)

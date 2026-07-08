@@ -10,12 +10,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.dp
 import com.mattschoe.smarthome.ui.theme.Card
 import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.Dimensions
 
-/** Cream floating card: flat, 1px sage border, radius 22, no shadow. Caller supplies inner padding. */
+/** Cream floating card: 1px sage border, radius 22, and a soft drop shadow. Caller supplies inner padding. */
 @Composable
 fun CardContainer(
     modifier: Modifier = Modifier,
@@ -25,6 +26,7 @@ fun CardContainer(
     val shape = RoundedCornerShape(Dimensions.cardRadius)
     Box(
         modifier = modifier
+            .shadow(Dimensions.cardElevation, shape)
             .clip(shape)
             .background(Card)
             .border(1.dp, CardBorder, shape)
