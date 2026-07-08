@@ -35,7 +35,7 @@ fun Homepage(
     val state by viewModel.screenState.collectAsStateWithLifecycle()
     when (val st = state) {
         HomeScreenState.Loading -> SageBackground()
-        is HomeScreenState.Ready -> DashboardRoot(st)
+        is HomeScreenState.Ready -> DashboardRoot(st, viewModel)
     }
 }
 
@@ -51,10 +51,10 @@ private fun SageBackground(modifier: Modifier = Modifier) {
  * an explicit stub so phone support drops in here later without touching the cards.
  */
 @Composable
-private fun DashboardRoot(state: HomeScreenState.Ready) {
+private fun DashboardRoot(state: HomeScreenState.Ready, viewModel: HomepageViewModel) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         when (DashboardLayout.from(maxWidth)) {
-            DashboardLayout.Expanded -> ExpandedDashboard(state)
+            DashboardLayout.Expanded -> ExpandedDashboard(state, viewModel)
             DashboardLayout.Compact -> CompactDashboard(state)
         }
     }
@@ -66,7 +66,7 @@ private fun DashboardRoot(state: HomeScreenState.Ready) {
  * center/right are placeholders filled by Phases 5–7. Geometry lives in [Dimensions].
  */
 @Composable
-private fun ExpandedDashboard(ready: HomeScreenState.Ready) {
+private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageViewModel) {
     Box(Modifier.fillMaxSize().background(SageSurface)) {
         Row(
             modifier = Modifier
@@ -78,8 +78,13 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready) {
                 climate = ready.climate,
                 modifier = Modifier.width(Dimensions.leftCardWidth),
             )
-            PlaceholderCard(
-                label = "Center",
+            CenterCard(
+                activeRoom = ready.activeRoom,
+                roomState = ready.activeRoomState,
+                onSelectRoom = viewModel::selectRoom,
+                onBrightnessChange = { value -> viewModel.setBrightness(ready.activeRoom, value) },
+                onWarmthChange = { warmth -> viewModel.setWarmth(ready.activeRoom, warmth) },
+                onToggleLight = { viewModel.toggleLight(ready.activeRoom) },
                 modifier = Modifier.weight(1f).widthIn(min = 346.dp),
             )
             PlaceholderCard(

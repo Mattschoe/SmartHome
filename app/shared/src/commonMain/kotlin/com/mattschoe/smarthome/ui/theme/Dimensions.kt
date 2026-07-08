@@ -16,4 +16,29 @@ object Dimensions {
     val surfacePadH = 26.dp
     val cardGap = 18.dp
     val leftCardWidth = 288.dp
+
+    // Center-card brightness dial (half-arc). Geometry follows the handoff spec's 260×160 viewBox
+    // almost 1:1 in dp, since the app targets one fixed 1280×800 device rather than scaling a
+    // responsive SVG — see CenterCard.kt.
+    val centerDialWidth = 260.dp
+    val centerDialHeight = 208.dp
+    val centerDialCenterY = 140.dp
+    val centerDialRadius = 116.dp
+    val centerDialArcStroke = 17.dp
+    val centerDialKnobDiameter = 24.dp
+    val centerDialKnobStroke = 3.5.dp
+
+    // Center "growth" bulb: a circle anchored by its bottom at [centerGrowthBaselineY] that scales
+    // uniformly from min→max diameter with brightness (grows upward). Its fully-grown size is
+    // reserved by [centerDialHeight] so the value text below never shifts. [centerBulbTapRadius] is
+    // a fixed hit region for the toggle tap, independent of the current (possibly tiny) bulb size.
+    val centerGrowthBaselineY = 150.dp
+    val centerGrowthMinDiameter = 14.dp
+    val centerGrowthMaxDiameter = 92.dp
+    val centerBulbTapRadius = 40.dp
+
+    // Center-card warmth swatches.
+    val warmthSwatchDiameter = 34.dp
+    val warmthHaloGap = 2.dp
+    val warmthHaloRingWidth = 4.5.dp
 }

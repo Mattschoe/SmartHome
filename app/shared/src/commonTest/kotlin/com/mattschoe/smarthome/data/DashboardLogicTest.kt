@@ -43,7 +43,8 @@ class DashboardLogicTest {
     @Test
     fun angleFromPointer_clampsBelowCenter() {
         // A touch below the dial center clamps to the nearest end rather than wrapping.
-        assertEquals(0f, angleFromPointer(130f, 140f, px = 200f, py = 220f), 0.001f)
+        assertEquals(0f, angleFromPointer(130f, 140f, px = 200f, py = 220f), 0.001f)   // below-right → 100% end
+        assertEquals(180f, angleFromPointer(130f, 140f, px = 60f, py = 220f), 0.001f)  // below-left → 0% end
     }
 
     // --- Volume slider ---

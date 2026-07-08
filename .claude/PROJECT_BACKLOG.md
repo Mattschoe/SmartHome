@@ -99,31 +99,32 @@ Idempotent, stateless building blocks reused across all three cards.
 
 ---
 
-## Phase 4 — Left card (date/time · climate · apps)
+## Phase 4 — Left card (date/time · climate · apps
+> **Correction (2026-07-04):** Apps support have moved beyond the initial project backlog
+> they should be seen as "additions" to the dashboard, and not vital for v1.
 
 **Status:** `TODO` · **Completed:** —
 
 Assemble the fixed 288px left column.
 
-- [ ] **Enumerate + request icons** (climate stats: temp/humidity/energy/outdoor; app tiles).
-- [ ] Date/time header (clock ticks ~20s, fixed format).
-- [ ] 2×2 read-only climate stat tiles bound to mock climate.
-- [ ] Apps grid as the card's scroll region (only it scrolls).
-- [ ] Matches reference screenshots; iOS compiles.
+- [x] **Enumerate + request icons** (climate stats: temp/humidity/energy/outdoor; app tiles).
+- [x] Date/time header (clock ticks ~20s, fixed format).
+- [x] 2×2 read-only climate stat tiles bound to mock climate.
+- [x] Matches reference screenshots; iOS compiles.
 
 ---
 
 ## Phase 5 — Center card (signature interactions)
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `IN PROGRESS` · **Completed:** —
 
 The hardest phase — brightness dial, warmth, audio (likely split into sub-steps).
 
-- [ ] **Enumerate + request icons** (lightbulb filled/off, volume-down, speaker/room glyphs).
-- [ ] Room chips swap the entire center-card state (per-room), no animation.
-- [ ] Brightness dial: Canvas half-arc + `pointerInput` drag (`value = round((1 − deg/180) × 100)`),
+- [ ] **Enumerate + request icons** (volume-down, speaker/room glyphs).
+- [x] Room chips swap the entire center-card state (per-room), no animation.
+- [x] Brightness dial: Canvas half-arc + `pointerInput` drag (`value = round((1 − deg/180) × 100)`),
       center-bulb toggle, drag forces on, warmth-colored arc/knob, off-state grey + "Off".
-- [ ] Warmth swatches recolor the dial + turn light on; selected = scale 1.08 + double-ring halo.
+- [x] Warmth swatches recolor the dial + turn light on; selected = scale 1.08 + double-ring halo.
 - [ ] Audio (**per-room** — bound to the active room): volume slider (`(x−left)/width`).
       *Deferred from v1: the "Whole home" speaker chip and dashed "Join the music in {source}" — that's
       the multi-room grouping feature, not part of the per-room model (see CLAUDE.md CORE RULE).*

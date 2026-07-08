@@ -26,7 +26,13 @@ fun angleFromBrightness(brightness: Int): Float =
  */
 fun angleFromPointer(cx: Float, cy: Float, px: Float, py: Float): Float {
     val degrees = atan2(cy - py, px - cx) * 180f / PI.toFloat()
-    return degrees.coerceIn(0f, 180f)
+    // Below the diameter line atan2 is negative; snap to the nearest end by x-side instead of
+    // clamping to 0° (which would read as 100%). Right of center → 0° (100%), left → 180° (0%).
+    return when {
+        degrees in 0f..180f -> degrees
+        px >= cx -> 0f
+        else -> 180f
+    }
 }
 
 /** Fraction 0–1 for a horizontal drag at [x] within a track starting at [left] of the given [width]. */
