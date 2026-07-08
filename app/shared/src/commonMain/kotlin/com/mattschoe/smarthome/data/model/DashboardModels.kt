@@ -8,13 +8,22 @@ package com.mattschoe.smarthome.data.model
 /** Color-temperature presets for a room's light, coldest -> warmest ordering */
 enum class Warmth { Candle, Warm, Soft, Neutral, Cool }
 
-/** The fixed set of rooms for this home. [displayName] is UI-facing, so it is Danish. */
-enum class Room(val displayName: String) {
-    LivingRoom("Stue"),
-    Kitchen("Køkken"),
-    Bedroom("Soveværelse"),
-    Bathroom("Badeværelse"),
-    Hall("Entré"),
+/**
+ * The fixed set of rooms for this home. [displayName] is UI-facing, so it is Danish. [hasSpeaker]
+ * marks which rooms have audio: the light selector lists every room, the AUDIO selector lists only
+ * speaker rooms ([audioRooms]). To move or add a speaker, flip the boolean on that one line.
+ */
+enum class Room(val displayName: String, val hasSpeaker: Boolean) {
+    LivingRoom("Stue", hasSpeaker = true),
+    Kitchen("Køkken", hasSpeaker = false),
+    Bedroom("Soveværelse", hasSpeaker = true),
+    Bathroom("Badeværelse", hasSpeaker = true),
+    Hall("Entré", hasSpeaker = false);
+
+    companion object {
+        /** The rooms the AUDIO selector offers — those with a speaker. Derived from [hasSpeaker]. */
+        val audioRooms: List<Room> get() = entries.filter { it.hasSpeaker }
+    }
 }
 
 /** The two mutually-exclusive right-card panels. */

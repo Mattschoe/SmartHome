@@ -13,22 +13,26 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
 /**
- * Dashboard state holder. Owns the UI-selection state (active room, panel) and combines it with the
- * [HomeAdapter]'s device data into a single [screenState] the UI collects. Device intents forward to
- * the adapter; selection intents mutate the ViewModel-owned flows.
+ * Dashboard state holder. Owns the UI-selection state and combines it with the [HomeAdapter]'s
+ * device data into a single [screenState] the UI collects. Light and audio rooms are selected
+ * **independently** (the top chips vs. the AUDIO chips); [_panel] is the right-card tab. Device
+ * intents forward to the adapter; selection intents mutate the ViewModel-owned flows.
  */
 class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
-    private val _activeRoom = MutableStateFlow(Room.LivingRoom)
+    private val _activeLightRoom = MutableStateFlow(Room.LivingRoom)
+    private val _activeAudioRoom = MutableStateFlow(Room.audioRooms.firstOrNull() ?: Room.LivingRoom)
     private val _panel = MutableStateFlow(Panel.Media)
 
     val screenState: StateFlow<HomeScreenState> =
         combine(
             adapter.subscribe(),
-            _activeRoom,
+            _activeLightRoom,
+            _activeAudioRoom,
             _panel
-        ) { home, activeRoom, panel ->
+        ) { home, lightRoom, audioRoom, panel ->
             HomeScreenState.Ready(
-                activeRoom = activeRoom,
+                activeLightRoom = lightRoom,
+                activeAudioRoom = audioRoom,
                 rooms = home.rooms,
                 panel = panel,
                 climate = home.climate,
@@ -41,7 +45,8 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
             initialValue = HomeScreenState.Loading
         )
 
-    fun selectRoom(room: Room) { _activeRoom.value = room }
+    fun selectLightRoom(room: Room) { _activeLightRoom.value = room }
+    fun selectAudioRoom(room: Room) { _activeAudioRoom.value = room }
     fun selectPanel(panel: Panel) { _panel.value = panel }
 
     fun setBrightness(room: Room, value: Int) = adapter.setBrightness(room, value)

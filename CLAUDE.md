@@ -102,9 +102,9 @@ The design intent lives in two places in `app/docs/`: the **rendered screenshots
 **Signature interactions** (copy the math from the prototype):
 - **Brightness dial** — SVG-style half-arc (260×160 viewBox, center (130,140), radius 116), drag the knob to set 0–100%. Value = `round((1 − deg/180) × 100)`. Tapping the center bulb toggles the light on/off; dragging forces it on. In Compose: draw with `Canvas`/`drawArc`, handle drag with `pointerInput { detectDragGestures }`, and reproduce the pointer-angle math. The arc/knob take the current **warmth** color.
 - **Warmth swatches** — five color-temp circles (Candle→Warm→Soft→Neutral→Cool); selecting one recolors the dial and turns the light on.
-- **Volume slider** — horizontal drag; fraction = `(x − left) / width` clamped 0–1. Sets the **active room's** volume.
-- **Room chips** — pill toggles; active = filled accent, idle = white with sage border. Selecting a room swaps the whole center/right view to that room. *(The "Whole home" speaker chip and the dashed "Join the music in {source}" affordance are **deferred from v1** — they're the multi-room grouping feature; v1 audio is strictly per-room. See the State Model CORE RULE.)*
-- **Media / Calendar tabs** — pill segmented control; Media (search, now-playing + scrubber, transport, queue, horizontal playlist rail) and Calendar (month grid, agenda, to-do). The Media panel binds to the **active room's** audio; its empty state is simply *that room has nothing playing*.
+- **Volume slider** — horizontal drag; fraction = `(x − left) / width` clamped 0–1. Sets the **active audio room's** volume.
+- **Room chips** — pill toggles; active = filled accent, idle = white with sage border. **Light and audio have separate selectors** (as in the reference PNGs): the top chip row picks the **light room** (dial + warmth); a second chip row in the AUDIO section picks the **audio room** (volume slider, and later the Media panel). The two are independent — one does **not** drive the other. The audio row lists only **speaker rooms** (`Room.audioRooms`, gated by `Room.hasSpeaker`), each with a speaker glyph. *(The "Whole home" speaker chip and the dashed "Join the music in {source}" affordance are **deferred from v1** — they're the multi-room grouping feature; v1 audio is strictly per-room. See the State Model CORE RULE.)*
+- **Media / Calendar tabs** — pill segmented control; Media (search, now-playing + scrubber, transport, queue, horizontal playlist rail) and Calendar (month grid, agenda, to-do). The Media panel binds to the **active audio room's** audio; its empty state is simply *that room has nothing playing*.
 
 **Design tokens** (centralize in `Color.kt` / `Type.kt` — the prototype hardcodes hex; don't):
 - Surface (sage) `#B2C488` · Card `#FAF8EA` · Card border `#A7BB7C` · Ink `#23301C` · Ink soft `#5C6650` · Muted `#A7A88C` · Sage green `#839958` · Teal `#105666` · Rose `#D3968C` · Warm amber `#E0A24E` · Inset fill `#ECE6CF`.
@@ -113,11 +113,12 @@ The design intent lives in two places in `app/docs/`: the **rendered screenshots
 
 ### State Model
 
-State is split into two layers: **device data** the adapter exposes (`HomeState`) and **screen state** the ViewModel assembles (`HomeScreenState`). The ViewModel owns the UI selection (`activeRoom`/`panel`) as private `MutableStateFlow`s and `combine()`s them with the adapter's `HomeState` into `screenState`. The implemented shapes live in `data/model/DashboardModels.kt` (device) and `ui/pages/homepage/HomeScreenState.kt` (screen):
+State is split into two layers: **device data** the adapter exposes (`HomeState`) and **screen state** the ViewModel assembles (`HomeScreenState`). The ViewModel owns the UI selection (`activeLightRoom`/`activeAudioRoom`/`panel`) as private `MutableStateFlow`s and `combine()`s them with the adapter's `HomeState` into `screenState`. The implemented shapes live in `data/model/DashboardModels.kt` (device) and `ui/pages/homepage/HomeScreenState.kt` (screen):
 
 ```kotlin
 enum class Warmth { Candle, Warm, Soft, Neutral, Cool }
-enum class Room(val displayName: String) { LivingRoom("Stue"), Kitchen("Køkken"), … }
+// hasSpeaker gates the audio selector; Room.audioRooms = entries.filter { it.hasSpeaker }. Flip one line to move a speaker.
+enum class Room(val displayName: String, val hasSpeaker: Boolean) { LivingRoom("Stue", true), Kitchen("Køkken", false), … }
 
 // A room owns everything inside it — both its lights AND its own audio playback.
 data class RoomState(
@@ -140,7 +141,8 @@ data class HomeState(
 sealed interface HomeScreenState {
     data object Loading : HomeScreenState
     data class Ready(
-        val activeRoom: Room,           // pure UI selection: which room am I looking at
+        val activeLightRoom: Room,      // pure UI selection: whose lights am I viewing (dial/warmth)
+        val activeAudioRoom: Room,      // pure UI selection: whose audio am I viewing (volume/media) — independent of light room
         val rooms: Map<Room, RoomState>,
         val panel: Panel,               // Media | Calendar (right card)
         val climate: ClimateState,
@@ -151,23 +153,27 @@ sealed interface HomeScreenState {
 ```
 
 > **CORE RULE — do not re-break this.** Rooms own their own **lights AND audio**. There is **no**
-> global audio session, `speaker`, or `audioSource`. `activeRoom`/`panel` are **pure UI selection**
-> ("which room am I looking at" / "which right-card tab") — they live in the **ViewModel**, never in
-> the adapter or `HomeState`; the device-data layer must never define them. Selecting a room shows
-> *that room's* lights and *that room's* audio. Playlists are a shared library, not per-room.
+> global audio session, `speaker`, or `audioSource`. **Light and audio are selected independently:**
+> `activeLightRoom` (dial/warmth) and `activeAudioRoom` (volume/Media) are **two separate pure-UI
+> selections** — the top chip row drives the first, the AUDIO chip row drives the second, and neither
+> drives the other. `activeLightRoom`/`activeAudioRoom`/`panel` live in the **ViewModel**, never in
+> the adapter or `HomeState`; the device-data layer must never define them. Selecting a light room
+> shows *that room's* lights; selecting an audio room shows *that room's* audio. Playlists are a
+> shared library, not per-room. The audio selector lists only speaker rooms (`Room.hasSpeaker`).
 > Multi-room sync ("Whole home" chip / "Join the music in {source}") is a **deferred grouping
 > feature**, not part of the v1 model — reintroduce it later as an additive relation (e.g. a
-> `groupId`) *on top of* per-room ownership. (Earlier drafts put a global audio session, then
-> `activeRoom`/`panel`, into the shared state; both were wrong and were removed.)
+> `groupId`) *on top of* per-room ownership. (Earlier drafts put a global audio session, then a
+> single `activeRoom`, into the shared state; both were wrong and were removed — do not collapse the
+> two selectors back into one.)
 
 This is an **opinionated, single-home dashboard** — not a configurable product. Accent (Forest), clock format, user name, and the room list are **fixed app constants**, not runtime state or user-facing settings. Settings, if ever needed, is a navigation seam to a separate screen, never an in-dashboard surface.
 
-Switching the active room swaps the entire center- and right-card view to that room. Clock ticks ~every 20s. Persist the last room states so a wall tablet survives reloads (multiplatform settings/DataStore — add when needed).
+Switching the light room swaps the dial/warmth; switching the audio room swaps the volume slider (and the right-card Media panel) — independently. Clock ticks ~every 20s. Persist the last room states so a wall tablet survives reloads (multiplatform settings/DataStore — add when needed).
 
 ### Data & Device Boundary
 
 Build UI-first against a **mock in-memory store**; define the seam now so real integration is a drop-in later.
-- Ship a `HomeAdapter` interface (`setBrightness`, `setWarmth`, `setVolume`, `toggleLight`, `subscribe(): StateFlow<HomeState>`) — **device setters only**, with a `MockAdapter` seeded from fixtures. Controls mutate the store optimistically. Audio is per-room; the Media panel reads the active room's `RoomState` (no global session). UI selection (`activeRoom`/`panel`) is not on the adapter — it lives in the ViewModel.
+- Ship a `HomeAdapter` interface (`setBrightness`, `setWarmth`, `setVolume`, `toggleLight`, `subscribe(): StateFlow<HomeState>`) — **device setters only**, with a `MockAdapter` seeded from fixtures. Controls mutate the store optimistically. Audio is per-room; the Media panel reads the active audio room's `RoomState` (no global session). UI selection (`activeLightRoom`/`activeAudioRoom`/`panel`) is not on the adapter — it lives in the ViewModel.
 - Climate stats (temp/humidity/energy/outdoor) are read-only display for now.
 - Leave a `MatterAdapter` / Home Assistant stub for later. Put adapters in `AppContainer`.
 

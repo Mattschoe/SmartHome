@@ -55,7 +55,7 @@ Make the theme the single source of truth so every later phase pulls colors/type
 
 ## Phase 2 — Foundational state + mock data layer
 
-**Status:** `IN PROGRESS` · **Completed:** — (reopened to correct the audio model; see note)
+**Status:** `DONE` · **Completed:** 2026-07-08 (commit `918e368`, audio-model correction verified)
 
 Land the reactive state layer early so all UI binds to a real `StateFlow` from day one.
 
@@ -83,13 +83,14 @@ Land the reactive state layer early so all UI binds to a real `StateFlow` from d
 - [x] `AppContainer` constructs `MockAdapter`; `HomepageViewModel` exposes `StateFlow`; `Homepage`
       collects via `collectAsStateWithLifecycle()`.
 - [x] Signature math as testable pure functions (dial angle→value, volume fraction, room-swap).
-- [ ] Unit tests cover state transitions/math; iOS compiles. *(re-verify after the audio-model fix)*
+- [x] Unit tests cover state transitions/math; iOS compiles. *(verified: `DashboardLogicTest`,
+      `MockAdapterTest`, `HomepageViewModelTest` pass under `allTests`; iOS simulator target compiles.)*
 
 ---
 
 ## Phase 3 — Reusable primitives (component kit)
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `DONE` · **Completed:** 2026-07-04 (commit `7eda795`)
 
 Idempotent, stateless building blocks reused across all three cards.
 
@@ -103,7 +104,7 @@ Idempotent, stateless building blocks reused across all three cards.
 > **Correction (2026-07-04):** Apps support have moved beyond the initial project backlog
 > they should be seen as "additions" to the dashboard, and not vital for v1.
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `DONE` · **Completed:** 2026-07-05 (commit `5724b8d`)
 
 Assemble the fixed 288px left column.
 
@@ -116,20 +117,30 @@ Assemble the fixed 288px left column.
 
 ## Phase 5 — Center card (signature interactions)
 
-**Status:** `IN PROGRESS` · **Completed:** —
+**Status:** `DONE` · **Completed:** 2026-07-08 (light control `b8ca62d`; audio slider + a11y verified,
+commit pending)
 
 The hardest phase — brightness dial, warmth, audio (likely split into sub-steps).
 
-- [ ] **Enumerate + request icons** (volume-down, speaker/room glyphs).
+- [x] **Enumerate + request icons** — three level-reactive volume glyphs supplied and wired
+      (`volume_off_outline`, `volume_down_outline`, `volume_up_outline`). The speaker/room glyphs the
+      original note mentioned were for the *deferred* multi-room speaker chips → not needed in v1.
 - [x] Room chips swap the entire center-card state (per-room), no animation.
 - [x] Brightness dial: Canvas half-arc + `pointerInput` drag (`value = round((1 − deg/180) × 100)`),
       center-bulb toggle, drag forces on, warmth-colored arc/knob, off-state grey + "Off".
 - [x] Warmth swatches recolor the dial + turn light on; selected = scale 1.08 + double-ring halo.
-- [ ] Audio (**per-room** — bound to the active room): volume slider (`(x−left)/width`).
+- [x] Audio (**per-room**, selected **independently** of lights): a second room-chip row in the AUDIO
+      section (speaker rooms only, `Room.hasSpeaker` → `Room.audioRooms`, with a speaker glyph) drives
+      `activeAudioRoom`; the volume slider (`(x−left)/width`, Canvas track + drag/tap, leading glyph
+      muted→down→up) binds to that room. The top chips remain lights-only.
       *Deferred from v1: the "Whole home" speaker chip and dashed "Join the music in {source}" — that's
       the multi-room grouping feature, not part of the per-room model (see CLAUDE.md CORE RULE).*
-- [ ] `role = slider` + arrow-key a11y on dial and slider.
-- [ ] Touch drag works on-device; room-swap swaps all state; warmth↔dial linkage; iOS compiles.
+- [x] Slider a11y + arrow-key adjustment on dial and slider. *(Compose has no `Role.Slider`; slider
+      semantics are conveyed by `progressBarRangeInfo` + `setProgress`, plus DirectionUp/Down/Left/Right
+      key handling that nudges ±5. Applied to both the dial and the volume slider.)*
+- [x] Touch drag works on-device; room-swap swaps all state (dial + volume); warmth↔dial linkage;
+      iOS compiles. *(Verified via `/android-verify`: tap/drag sets volume 89%→1%, glyph tracks the
+      level, switching Stue→Køkken swaps the shown volume to that room's own state.)*
 
 ---
 

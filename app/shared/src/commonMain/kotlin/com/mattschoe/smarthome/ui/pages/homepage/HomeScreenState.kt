@@ -9,20 +9,26 @@ import com.mattschoe.smarthome.data.model.RoomState
 
 /**
  * The state the dashboard UI collects: device data from the `HomeAdapter` combined with the
- * ViewModel-owned UI selection ([Ready.activeRoom]/[Ready.panel]).
+ * ViewModel-owned UI selection. Light and audio are selected **independently** — the top chip row
+ * picks [Ready.activeLightRoom] (dial/warmth), the AUDIO chip row picks [Ready.activeAudioRoom]
+ * (volume, and later the Media panel). Neither drives the other.
  */
 sealed interface HomeScreenState {
     data object Loading : HomeScreenState
 
     data class Ready(
-        val activeRoom: Room,
+        val activeLightRoom: Room,
+        val activeAudioRoom: Room,
         val rooms: Map<Room, RoomState>,
         val panel: Panel,
         val climate: ClimateState,
         val playlists: List<Playlist>,
         val calendar: CalendarState,
     ) : HomeScreenState {
-        /** The currently-selected room's device state. */
-        val activeRoomState: RoomState get() = rooms.getValue(activeRoom)
+        /** Device state of the room whose lights are being viewed (dial, warmth, brightness). */
+        val lightRoomState: RoomState get() = rooms.getValue(activeLightRoom)
+
+        /** Device state of the room whose audio is being viewed (volume slider, Media panel). */
+        val audioRoomState: RoomState get() = rooms.getValue(activeAudioRoom)
     }
 }

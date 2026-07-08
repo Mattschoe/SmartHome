@@ -41,4 +41,11 @@ object Dimensions {
     val warmthSwatchDiameter = 34.dp
     val warmthHaloGap = 2.dp
     val warmthHaloRingWidth = 4.5.dp
+
+    // Center-card volume slider (Audio section). The row keeps a [minTouch] hit height; the track is
+    // a thin rounded lane with a white knob riding its center. See CenterCard.kt.
+    val volumeTrackHeight = 7.dp
+    val volumeKnobDiameter = 18.dp
+    val volumeIconSize = 20.dp
+    val volumeRowMinHeight = minTouch
 }

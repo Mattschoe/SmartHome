@@ -79,12 +79,16 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
                 modifier = Modifier.width(Dimensions.leftCardWidth),
             )
             CenterCard(
-                activeRoom = ready.activeRoom,
-                roomState = ready.activeRoomState,
-                onSelectRoom = viewModel::selectRoom,
-                onBrightnessChange = { value -> viewModel.setBrightness(ready.activeRoom, value) },
-                onWarmthChange = { warmth -> viewModel.setWarmth(ready.activeRoom, warmth) },
-                onToggleLight = { viewModel.toggleLight(ready.activeRoom) },
+                activeLightRoom = ready.activeLightRoom,
+                lightRoomState = ready.lightRoomState,
+                activeAudioRoom = ready.activeAudioRoom,
+                audioRoomState = ready.audioRoomState,
+                onSelectLightRoom = viewModel::selectLightRoom,
+                onSelectAudioRoom = viewModel::selectAudioRoom,
+                onBrightnessChange = { value -> viewModel.setBrightness(ready.activeLightRoom, value) },
+                onWarmthChange = { warmth -> viewModel.setWarmth(ready.activeLightRoom, warmth) },
+                onToggleLight = { viewModel.toggleLight(ready.activeLightRoom) },
+                onVolumeChange = { value -> viewModel.setVolume(ready.activeAudioRoom, value) },
                 modifier = Modifier.weight(1f).widthIn(min = 346.dp),
             )
             PlaceholderCard(

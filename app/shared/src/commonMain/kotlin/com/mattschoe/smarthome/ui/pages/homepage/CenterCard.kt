@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -55,6 +58,8 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.angleFromPointer
 import com.mattschoe.smarthome.data.brightnessFromAngle
+import com.mattschoe.smarthome.data.volumeFractionFromX
+import com.mattschoe.smarthome.data.volumeFromFraction
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.Warmth
@@ -64,27 +69,41 @@ import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Ink
+import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.InsetFill
+import com.mattschoe.smarthome.ui.theme.SageGreen
 import com.mattschoe.smarthome.ui.theme.WarmthOffMuted
 import com.mattschoe.smarthome.ui.theme.color
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
+import smarthome.shared.generated.resources.Res
+import smarthome.shared.generated.resources.speaker_outline
+import smarthome.shared.generated.resources.volume_down_outline
+import smarthome.shared.generated.resources.volume_off_outline
+import smarthome.shared.generated.resources.volume_up_outline
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * The flex-1 center card: room chips, the brightness dial + warmth swatches (this phase), and an
- * "Audio" section stub reserved for the volume slider (a later phase). Width-agnostic — the
- * `Expanded` assembly point in [Homepage.kt] assigns its width; all page geometry lives there.
+ * The flex-1 center card. Light and audio are selected **independently**: the top chip row picks the
+ * light room (dial + warmth, bound to [lightRoomState]); the AUDIO chip row picks the audio room
+ * (volume slider, bound to [audioRoomState]). Neither selection drives the other. Width-agnostic —
+ * the `Expanded` assembly point in [Homepage.kt] assigns its width; all page geometry lives there.
  */
 @Composable
 fun CenterCard(
-    activeRoom: Room,
-    roomState: RoomState,
-    onSelectRoom: (Room) -> Unit,
+    activeLightRoom: Room,
+    lightRoomState: RoomState,
+    activeAudioRoom: Room,
+    audioRoomState: RoomState,
+    onSelectLightRoom: (Room) -> Unit,
+    onSelectAudioRoom: (Room) -> Unit,
     onBrightnessChange: (Int) -> Unit,
     onWarmthChange: (Warmth) -> Unit,
     onToggleLight: () -> Unit,
+    onVolumeChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     CardContainer(
@@ -96,18 +115,19 @@ fun CenterCard(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             RoomChipsRow(
-                activeRoom = activeRoom,
-                onSelectRoom = onSelectRoom,
+                rooms = Room.entries,
+                activeRoom = activeLightRoom,
+                onSelectRoom = onSelectLightRoom,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(Dimensions.cardGap))
             BrightnessDial(
-                roomState = roomState,
+                roomState = lightRoomState,
                 onBrightnessChange = onBrightnessChange,
                 onToggleLight = onToggleLight,
             )
             Text(
-                text = if (roomState.isLightOn) "${roomState.brightnessPct}%" else "Off",
+                text = if (lightRoomState.isLightOn) "${lightRoomState.brightnessPct}%" else "Off",
                 color = Ink,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -115,34 +135,56 @@ fun CenterCard(
             Spacer(Modifier.height(Dimensions.cardGap))
             SectionLabel("Warmth", modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
-            WarmthSwatches(selected = roomState.lightWarmth, onSelect = onWarmthChange)
+            WarmthSwatches(selected = lightRoomState.lightWarmth, onSelect = onWarmthChange)
             Spacer(Modifier.height(Dimensions.cardGap))
             HorizontalDivider(color = CardBorder, thickness = 1.dp)
             Spacer(Modifier.height(Dimensions.cardGap))
             SectionLabel("Audio", modifier = Modifier.fillMaxWidth())
-            // Volume slider lands here in the next phase; this stub just reserves the layout slot.
+            // The now-playing summary (track – artist) shown in this row in the reference is deferred
+            // to the Phase 6 Media panel — it renders the same RoomState.nowPlaying data, so it's
+            // built once, there. This phase ships the audio-room selector + the per-room volume slider.
+            Spacer(Modifier.height(10.dp))
+            RoomChipsRow(
+                rooms = Room.audioRooms,
+                activeRoom = activeAudioRoom,
+                onSelectRoom = onSelectAudioRoom,
+                leadingIcon = Res.drawable.speaker_outline,
+                modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(Modifier.weight(1f))
+            VolumeSlider(
+                volumePct = audioRoomState.volumePct,
+                onVolumeChange = onVolumeChange,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
 
-/** Pill toggle per room. Selecting a room swaps the whole card's state (dial/warmth) via [activeRoom]. */
+/**
+ * A wrapping row of room pill toggles. Used for both the light selector (all [Room.entries]) and the
+ * AUDIO selector ([Room.audioRooms] with a speaker [leadingIcon]); selecting swaps that section's
+ * state via [activeRoom].
+ */
 @Composable
 private fun RoomChipsRow(
+    rooms: List<Room>,
     activeRoom: Room,
     onSelectRoom: (Room) -> Unit,
     modifier: Modifier = Modifier,
+    leadingIcon: DrawableResource? = null,
 ) {
     FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Room.entries.forEach { room ->
+        rooms.forEach { room ->
             PillChip(
                 text = room.displayName,
                 selected = room == activeRoom,
                 onClick = { onSelectRoom(room) },
+                leadingIcon = leadingIcon,
             )
         }
     }
@@ -198,6 +240,8 @@ private fun BrightnessDial(
                 }
             }
             .focusable()
+            // Slider a11y in Compose is conveyed by progressBarRangeInfo + setProgress (there is no
+            // Role.Slider); the arrow-key handler below adds keyboard adjustment.
             .semantics(mergeDescendants = true) {
                 contentDescription = "Lysstyrke"
                 progressBarRangeInfo =
@@ -320,4 +364,126 @@ private fun WarmthSwatch(warmth: Warmth, selected: Boolean, onSelect: () -> Unit
                 .background(swatchColor),
         )
     }
+}
+
+/**
+ * Per-room volume slider bound to the active room. The drag/fraction math
+ * (`volumeFractionFromX`/`volumeFromFraction`) is the pure, unit-tested logic from
+ * [com.mattschoe.smarthome.data.DashboardLogic]; this composable only draws the track/knob and
+ * forwards pointer/key events. The leading glyph reflects the level via [volumeIcon] (muted→down→up).
+ * Pointer math insets the usable track by the knob radius on each end so the knob stays in bounds and
+ * the touch position lines up with where the knob renders.
+ */
+@Composable
+private fun VolumeSlider(
+    volumePct: Int,
+    onVolumeChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Keyed on Unit so the gesture survives recomposition; capture the latest callback to avoid
+    // mutating a stale room after a room switch (same pattern as the dial).
+    val currentOnVolumeChange by rememberUpdatedState(onVolumeChange)
+
+    Row(
+        modifier = modifier.heightIn(min = Dimensions.volumeRowMinHeight),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            painter = painterResource(volumeIcon(volumePct)),
+            contentDescription = null,
+            tint = InkSoft,
+            modifier = Modifier.size(Dimensions.volumeIconSize),
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(Dimensions.volumeRowMinHeight)
+                .pointerInput(Unit) {
+                    val inset = Dimensions.volumeKnobDiameter.toPx() / 2f
+                    detectTapGestures { pos ->
+                        val fraction = volumeFractionFromX(pos.x, inset, size.width - inset * 2f)
+                        currentOnVolumeChange(volumeFromFraction(fraction))
+                    }
+                }
+                .pointerInput(Unit) {
+                    val inset = Dimensions.volumeKnobDiameter.toPx() / 2f
+                    detectDragGestures { change, _ ->
+                        change.consume()
+                        val fraction = volumeFractionFromX(change.position.x, inset, size.width - inset * 2f)
+                        currentOnVolumeChange(volumeFromFraction(fraction))
+                    }
+                }
+                .focusable()
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "Lydstyrke"
+                    progressBarRangeInfo =
+                        ProgressBarRangeInfo(current = volumePct.toFloat(), range = 0f..100f)
+                    setProgress { target ->
+                        onVolumeChange(target.roundToInt().coerceIn(0, 100))
+                        true
+                    }
+                }
+                .onKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    when (event.key) {
+                        Key.DirectionUp, Key.DirectionRight -> {
+                            onVolumeChange((volumePct + 5).coerceAtMost(100))
+                            true
+                        }
+                        Key.DirectionDown, Key.DirectionLeft -> {
+                            onVolumeChange((volumePct - 5).coerceAtLeast(0))
+                            true
+                        }
+                        else -> false
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxWidth().height(Dimensions.volumeKnobDiameter)) {
+                val trackH = Dimensions.volumeTrackHeight.toPx()
+                val knobRadius = Dimensions.volumeKnobDiameter.toPx() / 2f
+                val cy = size.height / 2f
+                // Usable lane is inset by the knob radius on each end so the knob never clips.
+                val laneLeft = knobRadius
+                val laneWidth = (size.width - knobRadius * 2f).coerceAtLeast(0f)
+                val fraction = volumePct / 100f
+                val knobX = laneLeft + laneWidth * fraction
+                val corner = CornerRadius(trackH / 2f, trackH / 2f)
+
+                drawRoundRect(
+                    color = InsetFill,
+                    topLeft = Offset(laneLeft, cy - trackH / 2f),
+                    size = Size(laneWidth, trackH),
+                    cornerRadius = corner,
+                )
+                drawRoundRect(
+                    color = SageGreen,
+                    topLeft = Offset(laneLeft, cy - trackH / 2f),
+                    size = Size(laneWidth * fraction, trackH),
+                    cornerRadius = corner,
+                )
+                drawCircle(color = Color.White, radius = knobRadius, center = Offset(knobX, cy))
+                drawCircle(
+                    color = SageGreen,
+                    radius = knobRadius,
+                    center = Offset(knobX, cy),
+                    style = Stroke(width = 1.5.dp.toPx()),
+                )
+            }
+        }
+        Text(
+            text = "$volumePct%",
+            color = Ink,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+/** The slider's leading glyph reflects the level: muted at 0, low through 50, high above. */
+private fun volumeIcon(volumePct: Int): DrawableResource = when {
+    volumePct <= 0 -> Res.drawable.volume_off_outline
+    volumePct <= 50 -> Res.drawable.volume_down_outline
+    else -> Res.drawable.volume_up_outline
 }

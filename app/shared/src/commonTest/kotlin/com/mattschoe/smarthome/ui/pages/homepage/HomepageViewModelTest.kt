@@ -38,21 +38,31 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun selectRoomAndPanel_surfaceIntoScreenState() = runTest(mainDispatcher) {
+    fun audioRooms_areSpeakerRoomsOnly() {
+        assertEquals(listOf(Room.LivingRoom, Room.Bedroom, Room.Bathroom), Room.audioRooms)
+    }
+
+    @Test
+    fun lightAndAudioRoomSelection_areIndependent() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         // WhileSubscribed only emits Ready while collected.
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
-        vm.selectRoom(Room.Kitchen)
+        // Pick a light room that is NOT a speaker room, and a different audio room — proving neither
+        // selection drives the other.
+        vm.selectLightRoom(Room.Kitchen)
+        vm.selectAudioRoom(Room.Bedroom)
         vm.selectPanel(Panel.Calendar)
         advanceUntilIdle()
 
         val ready = vm.screenState.value
         assertIs<HomeScreenState.Ready>(ready)
-        assertEquals(Room.Kitchen, ready.activeRoom)
+        assertEquals(Room.Kitchen, ready.activeLightRoom)
+        assertEquals(Room.Bedroom, ready.activeAudioRoom)
         assertEquals(Panel.Calendar, ready.panel)
-        assertEquals(ready.rooms.getValue(Room.Kitchen), ready.activeRoomState)
+        assertEquals(ready.rooms.getValue(Room.Kitchen), ready.lightRoomState)
+        assertEquals(ready.rooms.getValue(Room.Bedroom), ready.audioRoomState)
     }
 
     @Test
