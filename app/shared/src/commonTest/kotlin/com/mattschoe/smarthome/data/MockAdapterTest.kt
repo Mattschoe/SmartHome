@@ -3,6 +3,7 @@ package com.mattschoe.smarthome.data
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
+import kotlinx.datetime.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -69,6 +70,35 @@ class MockAdapterTest {
         val state = adapter.subscribe().value
         assertEquals(Warmth.Cool, state.rooms.getValue(Room.Hall).lightWarmth)
         assertTrue(state.rooms.getValue(Room.Hall).isLightOn)
+    }
+
+    @Test
+    fun addTodo_generatesIdAndAppends() {
+        val adapter = MockAdapter()
+        val before = adapter.subscribe().value.calendar.todos.size
+        adapter.addTodo(LocalDate(2026, 7, 20), "Køb mælk")
+        val todos = adapter.subscribe().value.calendar.todos
+        assertEquals(before + 1, todos.size)
+        val added = todos.last()
+        assertEquals("Køb mælk", added.label)
+        assertTrue(added.id.isNotBlank())
+    }
+
+    @Test
+    fun toggleTodo_flipsThroughAdapter() {
+        val adapter = MockAdapter()
+        val todo = adapter.subscribe().value.calendar.todos.first()
+        adapter.toggleTodo(todo.id)
+        val after = adapter.subscribe().value.calendar.todos.first { it.id == todo.id }
+        assertEquals(!todo.done, after.done)
+    }
+
+    @Test
+    fun editTodo_blankRemovesThroughAdapter() {
+        val adapter = MockAdapter()
+        val id = adapter.subscribe().value.calendar.todos.first().id
+        adapter.editTodo(id, "")
+        assertNull(adapter.subscribe().value.calendar.todos.firstOrNull { it.id == id })
     }
 
     @Test

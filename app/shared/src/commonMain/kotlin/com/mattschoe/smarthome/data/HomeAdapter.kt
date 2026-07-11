@@ -5,6 +5,7 @@ import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.datetime.LocalDate
 
 /**
  * The device-data boundary. UI observes [subscribe] and issues device intents through the setters;
@@ -28,4 +29,10 @@ interface HomeAdapter {
     fun seek(room: Room, positionSec: Int)
     fun setShuffle(room: Room, shuffle: Boolean)
     fun setRepeat(room: Room, mode: RepeatMode)
+
+    // Todo intents — 1:1 with Home Assistant todo services. The adapter mints the id on add (HA `uid`);
+    // editing a todo to a blank label removes it (todo.remove_item), the escape hatch for delete.
+    fun addTodo(due: LocalDate, label: String)
+    fun toggleTodo(id: String)
+    fun editTodo(id: String, label: String)
 }

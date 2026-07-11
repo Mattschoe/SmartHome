@@ -5,7 +5,13 @@ import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
+import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.model.Warmth
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.plus
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.roundToInt
@@ -111,8 +117,55 @@ fun HomeState.previous(room: Room): HomeState = updateAudio(room) { a ->
     )
 }
 
-/** Cycle repeat: Off → All → One → Off. */
+/** Cycle repeat: Off → All → Off. */
 fun RepeatMode.cycle(): RepeatMode = when (this) {
     RepeatMode.Off -> RepeatMode.All
     RepeatMode.All -> RepeatMode.Off
+}
+
+// --- Calendar / todos ---
+
+/**
+ * The 6×7 = 42 cells of a Monday-first month grid for ([year], [month]). Each cell is the day-of-month
+ * number, or `null` for the leading/trailing blanks around the month. Leading blanks come from the
+ * 1st's weekday (Mon=1 → 0 blanks, Sun=7 → 6 blanks); the length of the month is the day distance to
+ * the next month's 1st. Pure so the grid math is unit-tested independently of the composable.
+ */
+fun calendarGrid(year: Int, month: Int): List<Int?> {
+    val first = LocalDate(year, month, 1)
+    val leading = first.dayOfWeek.isoDayNumber - 1 // Mon=0 … Sun=6
+    val daysInMonth = first.daysUntil(first.plus(1, DateTimeUnit.MONTH))
+    return List(42) { index ->
+        val day = index - leading + 1
+        if (day in 1..daysInMonth) day else null
+    }
+}
+
+/**
+ * Append a todo bound to [due]. [id] is supplied by the caller (the adapter mints a fresh one) so this
+ * stays deterministic/testable. A blank [label] is a no-op — `todo.add_item` requires a summary, so
+ * the ghost add-row never commits an empty item. New items append (stable order → rows never jump).
+ */
+fun HomeState.addTodo(id: String, due: LocalDate, label: String): HomeState {
+    val trimmed = label.trim()
+    if (trimmed.isEmpty()) return this
+    return copy(calendar = calendar.copy(todos = calendar.todos + TodoItem(id, due, trimmed, done = false)))
+}
+
+/** Flip a todo's `done` (the tap gesture ↔ HA needs_action/completed). */
+fun HomeState.toggleTodo(id: String): HomeState =
+    copy(calendar = calendar.copy(
+        todos = calendar.todos.map { if (it.id == id) it.copy(done = !it.done) else it },
+    ))
+
+/**
+ * Set a todo's label. Editing to a blank label **removes** the item — the deliberate escape hatch in
+ * place of an explicit delete.
+ */
+fun HomeState.editTodo(id: String, label: String): HomeState {
+    val trimmed = label.trim()
+    val todos =
+        if (trimmed.isEmpty()) calendar.todos.filterNot { it.id == id }
+        else calendar.todos.map { if (it.id == id) it.copy(label = trimmed) else it }
+    return copy(calendar = calendar.copy(todos = todos))
 }

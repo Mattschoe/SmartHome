@@ -16,6 +16,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.plus
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.todayIn
+import kotlin.time.Clock
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * In-memory [HomeAdapter] seeded from [seedHome]. Controls mutate the store optimistically by
@@ -39,6 +47,15 @@ class MockAdapter(
     override fun seek(room: Room, positionSec: Int) = _state.update { it.seek(room, positionSec) }
     override fun setShuffle(room: Room, shuffle: Boolean) = _state.update { it.setShuffle(room, shuffle) }
     override fun setRepeat(room: Room, mode: RepeatMode) = _state.update { it.setRepeat(room, mode) }
+
+    // The adapter owns id minting (the real backend assigns HA `uid`s); logic transitions take the id.
+    @OptIn(ExperimentalUuidApi::class)
+    override fun addTodo(due: LocalDate, label: String) {
+        val id = Uuid.random().toString()
+        _state.update { it.addTodo(id, due, label) }
+    }
+    override fun toggleTodo(id: String) = _state.update { it.toggleTodo(id) }
+    override fun editTodo(id: String, label: String) = _state.update { it.editTodo(id, label) }
 }
 
 //TODO Delete
@@ -46,7 +63,10 @@ class MockAdapter(
  * Seed data for [MockAdapter]. Values are chosen to resemble the reference screenshots; the
  * media/calendar/climate fixtures are refined in Phases 4/6/7 as those cards are built.
  */
-internal fun seedHome(): HomeState = HomeState(
+internal fun seedHome(): HomeState {
+    // Date the seed off *today* (like LeftCard's clock) so events/todos land on the visible month.
+    val today = Clock.System.todayIn(TimeZone.currentSystemDefault())
+    return HomeState(
     rooms = mapOf(
         // The Living Room is playing (matches Dashboard_with_media.png). Bedroom and Bathroom are
         // speaker rooms but idle (nowPlaying = null) so selecting one exercises the browse surface
@@ -119,18 +139,18 @@ internal fun seedHome(): HomeState = HomeState(
         Playlist("Hurry Up, We're Dreaming", trackCount = 22),
     ),
     calendar = CalendarState(
-        year = 2026,
-        month = 7,
-        today = 4,
+        // Events/todos span today + the next couple of days so the month grid shows dots on several
+        // cells and selecting a day actually re-scopes the agenda + todo list.
         events = listOf(
-            CalendarEvent("Morgenmøde", "09:00"),
-            CalendarEvent("Tandlæge", "13:30"),
-            CalendarEvent("Middag med Sam", "19:00"),
+            CalendarEvent(today, "Morgenmøde", "09:00"),
+            CalendarEvent(today, "Tandlæge", "13:30"),
+            CalendarEvent(today.plus(2, DateTimeUnit.DAY), "Middag med Sam", "19:00"),
         ),
         todos = listOf(
-            TodoItem("Vand planterne", done = false),
-            TodoItem("Svar udlejeren", done = true),
-            TodoItem("Book flybilletter", done = false),
+            TodoItem("seed-vand", today, "Vand planterne", done = false),
+            TodoItem("seed-udlejer", today, "Svar udlejeren", done = true),
+            TodoItem("seed-fly", today.plus(1, DateTimeUnit.DAY), "Book flybilletter", done = false),
         ),
     ),
-)
+    )
+}

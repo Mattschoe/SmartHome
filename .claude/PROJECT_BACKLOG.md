@@ -166,10 +166,10 @@ Media/Calendar tab shell + Media content.
 
 Calendar content behind the same tab shell.
 
-- [ ] **Enumerate + request icons** (month nav arrows, checklist/checkbox).
-- [ ] Month grid (today = accent cell) + prev/next month arrows.
-- [ ] "Today" agenda list with colored dots + "To-do" checklist.
-- [ ] Matches `Dashboard_with_calendar.png`; month nav works; iOS compiles.
+- [x] **Enumerate + request icons** (month nav arrows, checklist/checkbox).
+- [x] Month grid (today = accent cell) + prev/next month arrows.
+- [x] "Today" agenda list with colored dots + "To-do" checklist.
+- [x] Matches `Dashboard_with_calendar.png`; month nav works; iOS compiles.
 
 ---
 

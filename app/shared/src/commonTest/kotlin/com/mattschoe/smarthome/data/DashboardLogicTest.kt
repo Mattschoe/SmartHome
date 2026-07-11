@@ -3,6 +3,11 @@ package com.mattschoe.smarthome.data
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.plus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -170,8 +175,80 @@ class DashboardLogicTest {
     @Test
     fun repeatMode_cycleOrder() {
         assertEquals(RepeatMode.All, RepeatMode.Off.cycle())
-        assertEquals(RepeatMode.One, RepeatMode.All.cycle())
-        assertEquals(RepeatMode.Off, RepeatMode.One.cycle())
+        assertEquals(RepeatMode.Off, RepeatMode.All.cycle())
+    }
+
+    // --- Calendar grid ---
+
+    @Test
+    fun calendarGrid_structureMatchesMonth() {
+        val year = 2026
+        val month = 7
+        val grid = calendarGrid(year, month)
+        assertEquals(42, grid.size)
+
+        val first = LocalDate(year, month, 1)
+        val leading = first.dayOfWeek.isoDayNumber - 1
+        val daysInMonth = first.daysUntil(first.plus(1, DateTimeUnit.MONTH))
+
+        repeat(leading) { assertNull(grid[it]) }                       // leading blanks
+        for (d in 1..daysInMonth) assertEquals(d, grid[leading + d - 1]) // days in order
+        for (i in leading + daysInMonth until 42) assertNull(grid[i])  // trailing blanks
+        assertEquals(daysInMonth, grid.count { it != null })
+    }
+
+    @Test
+    fun calendarGrid_isMondayFirst() {
+        // 1 Feb 2021 is a Monday → zero leading blanks; February 2021 has 28 days.
+        val grid = calendarGrid(2021, 2)
+        assertEquals(1, grid[0])
+        assertEquals(28, grid[27])
+        assertNull(grid[28])
+    }
+
+    // --- Todos ---
+
+    @Test
+    fun addTodo_appendsTrimmedItem() {
+        val due = LocalDate(2026, 7, 15)
+        val state = seedHome().addTodo("t1", due, "  Ny opgave  ")
+        val added = state.calendar.todos.last()
+        assertEquals("t1", added.id)
+        assertEquals(due, added.due)
+        assertEquals("Ny opgave", added.label)
+        assertFalse(added.done)
+    }
+
+    @Test
+    fun addTodo_blankLabelIsNoOp() {
+        val before = seedHome()
+        val after = before.addTodo("t1", LocalDate(2026, 7, 15), "   ")
+        assertEquals(before.calendar.todos, after.calendar.todos)
+    }
+
+    @Test
+    fun toggleTodo_flipsDone() {
+        val seed = seedHome()
+        val target = seed.calendar.todos.first()
+        val after = seed.toggleTodo(target.id)
+        assertEquals(!target.done, after.calendar.todos.first { it.id == target.id }.done)
+    }
+
+    @Test
+    fun editTodo_setsLabel() {
+        val seed = seedHome()
+        val id = seed.calendar.todos.first().id
+        val after = seed.editTodo(id, "Ændret tekst")
+        assertEquals("Ændret tekst", after.calendar.todos.first { it.id == id }.label)
+    }
+
+    @Test
+    fun editTodo_blankRemovesItem() {
+        val seed = seedHome()
+        val id = seed.calendar.todos.first().id
+        val after = seed.editTodo(id, "   ")
+        assertNull(after.calendar.todos.firstOrNull { it.id == id })
+        assertEquals(seed.calendar.todos.size - 1, after.calendar.todos.size)
     }
 
     @Test

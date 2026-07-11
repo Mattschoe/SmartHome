@@ -1,5 +1,7 @@
 package com.mattschoe.smarthome.data.model
 
+import kotlinx.datetime.LocalDate
+
 /**
  * The device-data models. [HomeState] is the single object a `HomeAdapter` exposes; the UI-selection
  * state (`activeRoom`/`panel`) lives on `HomeScreenState` in the ViewModel, not here.
@@ -85,23 +87,39 @@ data class ClimateState(
     val outdoorTempC: Double,
 ) { init { require(humidityPct in 0..100) } }
 
+/**
+ * A read-only calendar event bound to a [date]. Maps onto a Home Assistant `calendar` entity event
+ * later (Phase 9); [time] is a pre-formatted display string for now.
+ */
 data class CalendarEvent(
+    val date: LocalDate,
     val title: String,
     val time: String,
 )
 
+/**
+ * A to-do item, shaped to map onto a Home Assistant `todo.*` list item: [id] ↔ HA `uid` (client-
+ * stable so backend echoes re-key existing rows instead of tearing them down), [label] ↔ `summary`,
+ * [done] ↔ `status` (needs_action/completed), [due] the day it is bound to. "Todos for a day" is a
+ * client-side filter on [due] over one shared list — the per-day bucket is a UI idea, not backend
+ * structure.
+ */
 data class TodoItem(
+    val id: String,
+    val due: LocalDate,
     val label: String,
     val done: Boolean,
 )
 
+/**
+ * The calendar payload the adapter exposes: a flat list of [events] and [todos]. The current day and
+ * the displayed month are UI selection (they come from the system clock / the ViewModel), not device
+ * data, so they are not on here.
+ */
 data class CalendarState(
-    val year: Int,
-    val month: Int,
-    val today: Int,
     val events: List<CalendarEvent>,
     val todos: List<TodoItem>,
-) { init { require(month in 1..12 && today in 1..31) } }
+)
 
 /**
  * The device-truth state for the whole home, exposed by a `HomeAdapter`

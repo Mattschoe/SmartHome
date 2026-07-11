@@ -7,10 +7,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
@@ -38,42 +42,66 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mattschoe.smarthome.data.calendarGrid
+import com.mattschoe.smarthome.data.danishMonths
 import com.mattschoe.smarthome.data.formatTrackTime
 import com.mattschoe.smarthome.data.model.AudioState
+import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.Playlist
 import com.mattschoe.smarthome.data.model.RepeatMode
+import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.volumeFractionFromX
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.components.InsetSurface
@@ -92,6 +120,8 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
 import smarthome.shared.generated.resources.calender_filled
+import smarthome.shared.generated.resources.checkbox_blank
+import smarthome.shared.generated.resources.checkbox_filled
 import smarthome.shared.generated.resources.equalizer_filled
 import smarthome.shared.generated.resources.media_outline
 import smarthome.shared.generated.resources.music_note_filled
@@ -102,6 +132,8 @@ import smarthome.shared.generated.resources.search_outline
 import smarthome.shared.generated.resources.shuffle_filled
 import smarthome.shared.generated.resources.skip_next_filled
 import smarthome.shared.generated.resources.skip_previous_filled
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.number
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -118,6 +150,12 @@ fun RightCard(
     playlists: List<Playlist>,
     quickPicks: List<Playlist>,
     keepListening: List<Playlist>,
+    today: LocalDate,
+    displayedMonth: LocalDate,
+    selectedDay: LocalDate,
+    selectedDayEvents: List<CalendarEvent>,
+    selectedDayTodos: List<TodoItem>,
+    daysWithItems: Set<Int>,
     onSelectPanel: (Panel) -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
@@ -125,6 +163,12 @@ fun RightCard(
     onSeek: (Int) -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
+    onPrevMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onSelectDay: (LocalDate) -> Unit,
+    onAddTodo: (LocalDate, String) -> Unit,
+    onToggleTodo: (String) -> Unit,
+    onEditTodo: (String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     CardContainer(
@@ -163,7 +207,20 @@ fun RightCard(
                             onToggleShuffle = onToggleShuffle,
                             onCycleRepeat = onCycleRepeat,
                         )
-                        Panel.Calendar -> CalendarPlaceholder()
+                        Panel.Calendar -> CalendarPanel(
+                            today = today,
+                            displayedMonth = displayedMonth,
+                            selectedDay = selectedDay,
+                            events = selectedDayEvents,
+                            todos = selectedDayTodos,
+                            daysWithItems = daysWithItems,
+                            onPrevMonth = onPrevMonth,
+                            onNextMonth = onNextMonth,
+                            onSelectDay = onSelectDay,
+                            onAddTodo = onAddTodo,
+                            onToggleTodo = onToggleTodo,
+                            onEditTodo = onEditTodo,
+                        )
                     }
                 }
             }
@@ -221,15 +278,358 @@ private fun PanelTab(label: String, icon: DrawableResource, selected: Boolean, o
     }
 }
 
-/** Phase-7 seam: the Calendar panel body is built later; for now a centered muted placeholder. */
+/** Danish, Monday-first weekday initials for the grid header (Man, Tir, Ons, Tor, Fre, Lør, Søn). */
+private val danishWeekdayInitials = listOf("M", "T", "O", "T", "F", "L", "S")
+
+/**
+ * The Calendar panel: month navigation over a Monday-first month grid, then the selected day's
+ * read-only agenda and its editable todo checklist. Selecting a day scopes **both** the agenda and
+ * the todos ([events]/[todos] arrive pre-filtered to [selectedDay]).
+ */
 @Composable
-private fun CalendarPlaceholder(modifier: Modifier = Modifier) {
+private fun CalendarPanel(
+    today: LocalDate,
+    displayedMonth: LocalDate,
+    selectedDay: LocalDate,
+    events: List<CalendarEvent>,
+    todos: List<TodoItem>,
+    daysWithItems: Set<Int>,
+    onPrevMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onSelectDay: (LocalDate) -> Unit,
+    onAddTodo: (LocalDate, String) -> Unit,
+    onToggleTodo: (String) -> Unit,
+    onEditTodo: (String, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth()) {
+        MonthHeader(displayedMonth)
+        Spacer(Modifier.height(16.dp))
+        WeekdayHeader()
+        Spacer(Modifier.height(4.dp))
+        MonthGrid(displayedMonth, today, selectedDay, daysWithItems, onSelectDay, onPrevMonth, onNextMonth)
+        AgendaSection(selectedDay, today, events)
+        Spacer(Modifier.height(Dimensions.mediaSectionGap))
+        TodoSection(selectedDay, todos, onAddTodo, onToggleTodo, onEditTodo)
+    }
+}
+
+/** Danish month + year (e.g. "Juli 2026"). Month changes come from swiping the grid below. */
+@Composable
+private fun MonthHeader(displayedMonth: LocalDate) {
+    val monthName = danishMonths[displayedMonth.month.number - 1].replaceFirstChar { it.uppercase() }
+    Text(
+        text = "$monthName ${displayedMonth.year}",
+        color = Ink,
+        fontSize = 22.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** Seven equal-width, muted weekday initials aligned to the [MonthGrid] columns below. */
+@Composable
+private fun WeekdayHeader() {
+    Row(Modifier.fillMaxWidth()) {
+        danishWeekdayInitials.forEach { initial ->
+            Text(
+                text = initial,
+                color = Muted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * A 6×7 Monday-first month grid. Today is the accent cell; the selected day (if not today) is ringed.
+ * A horizontal swipe changes month — right → previous, left → next; the same navigation is exposed to
+ * screen readers as custom actions since there are no on-screen month buttons.
+ */
+@Composable
+private fun MonthGrid(
+    displayedMonth: LocalDate,
+    today: LocalDate,
+    selectedDay: LocalDate,
+    daysWithItems: Set<Int>,
+    onSelectDay: (LocalDate) -> Unit,
+    onPrevMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+) {
+    val cells = calendarGrid(displayedMonth.year, displayedMonth.month.number)
+    fun sameMonth(date: LocalDate) =
+        date.year == displayedMonth.year && date.month.number == displayedMonth.month.number
+    val currentPrev by rememberUpdatedState(onPrevMonth)
+    val currentNext by rememberUpdatedState(onNextMonth)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                var totalDrag = 0f
+                val threshold = 48.dp.toPx()
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onDragEnd = {
+                        if (totalDrag > threshold) currentPrev()
+                        else if (totalDrag < -threshold) currentNext()
+                    },
+                ) { change, dragAmount ->
+                    change.consume()
+                    totalDrag += dragAmount
+                }
+            }
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Forrige måned") { onPrevMonth(); true },
+                    CustomAccessibilityAction("Næste måned") { onNextMonth(); true },
+                )
+            },
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        for (row in 0 until 6) {
+            Row(Modifier.fillMaxWidth()) {
+                for (col in 0 until 7) {
+                    val day = cells[row * 7 + col]
+                    DayCell(
+                        day = day,
+                        isToday = day != null && sameMonth(today) && today.day == day,
+                        isSelected = day != null && sameMonth(selectedDay) && selectedDay.day == day,
+                        hasItems = day != null && day in daysWithItems,
+                        onClick = {
+                            if (day != null) {
+                                onSelectDay(LocalDate(displayedMonth.year, displayedMonth.month.number, day))
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One month-grid cell. The whole cell is the touch target; a 34dp disc carries the number (filled
+ * Forest for today, ringed for the selected day) with a small item dot beneath it.
+ */
+@Composable
+private fun DayCell(
+    day: Int?,
+    isToday: Boolean,
+    isSelected: Boolean,
+    hasItems: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = modifier.fillMaxWidth().heightIn(min = 240.dp),
+        modifier = modifier
+            .height(Dimensions.minTouch)
+            .then(if (day != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .semantics { if (day != null) contentDescription = "Dag $day" },
         contentAlignment = Alignment.Center,
     ) {
-        Text("Kalender kommer snart", color = Muted, fontSize = 16.sp)
+        if (day == null) return@Box
+        val disc = when {
+            isToday -> Modifier.background(Forest, CircleShape)
+            isSelected -> Modifier.border(1.5.dp, Forest, CircleShape)
+            else -> Modifier
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(34.dp).clip(CircleShape).then(disc), contentAlignment = Alignment.Center) {
+                Text(
+                    text = day.toString(),
+                    color = if (isToday) OnForest else Ink,
+                    fontSize = 15.sp,
+                    fontWeight = if (isToday || isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+            Spacer(Modifier.height(3.dp))
+            Box(
+                Modifier
+                    .size(4.dp)
+                    .clip(CircleShape)
+                    .background(if (hasItems) Forest else Color.Transparent),
+            )
+        }
     }
+}
+
+/** "I DAG" (or the selected date) label over the day's read-only event rows. */
+@Composable
+private fun AgendaSection(selectedDay: LocalDate, today: LocalDate, events: List<CalendarEvent>) {
+    val label =
+        if (selectedDay == today) "I dag"
+        else "${selectedDay.day}. ${danishMonths[selectedDay.month.number - 1]}"
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel(label, fontSize = 18.sp)
+        Spacer(Modifier.height(12.dp))
+        if (events.isEmpty()) {
+            Text("Ingen begivenheder", color = Muted, fontSize = 15.sp)
+        } else {
+            events.forEachIndexed { index, event ->
+                AgendaRow(index, event)
+                if (index != events.lastIndex) Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgendaRow(index: Int, event: CalendarEvent) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(browseCardColor(index)))
+        Text(event.time, color = InkSoft, fontSize = 15.sp, modifier = Modifier.width(76.dp))
+        Text(
+            text = event.title,
+            color = Ink,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** "GØREMÅL" label over the day's keyed todo rows, then the ghost add row. */
+@Composable
+private fun TodoSection(
+    selectedDay: LocalDate,
+    todos: List<TodoItem>,
+    onAddTodo: (LocalDate, String) -> Unit,
+    onToggleTodo: (String) -> Unit,
+    onEditTodo: (String, String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel("Opgaver", fontSize = 18.sp)
+        Spacer(Modifier.height(4.dp))
+        // Keyed by stable id so a backend echo (Phase 9) re-keys existing rows instead of rebuilding.
+        todos.forEach { todo ->
+            key(todo.id) {
+                TodoRow(
+                    todo = todo,
+                    onToggle = { onToggleTodo(todo.id) },
+                    onCommitEdit = { text -> onEditTodo(todo.id, text) },
+                )
+            }
+        }
+        AddTodoRow(onAdd = { text -> onAddTodo(selectedDay, text) })
+    }
+}
+
+/**
+ * A todo row: **tap toggles done, long-press edits**. Done rows are struck through and muted. Editing
+ * swaps the label for an inline field; committing a blank label removes the item (the delete escape).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TodoRow(todo: TodoItem, onToggle: () -> Unit, onCommitEdit: (String) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    if (editing) {
+        TodoInlineEdit(
+            initial = todo.label,
+            checked = todo.done,
+            onCommit = { text -> editing = false; onCommitEdit(text) },
+        )
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = Dimensions.minTouch)
+                .combinedClickable(onClick = onToggle, onLongClick = { editing = true }),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            CheckboxGlyph(checked = todo.done)
+            Text(
+                text = todo.label,
+                color = if (todo.done) Muted else Ink,
+                fontSize = 16.sp,
+                textDecoration = if (todo.done) TextDecoration.LineThrough else null,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** The ghost add row: a loose unchecked box + faint placeholder that opens an inline field on tap. */
+@Composable
+private fun AddTodoRow(onAdd: (String) -> Unit) {
+    var adding by remember { mutableStateOf(false) }
+    if (adding) {
+        TodoInlineEdit(
+            initial = "",
+            checked = false,
+            // Empty commit discards without touching the backend; a non-empty one adds, then resets.
+            onCommit = { text -> adding = false; if (text.isNotBlank()) onAdd(text) },
+        )
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = Dimensions.minTouch)
+                .clickable { adding = true },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            CheckboxGlyph(checked = false)
+        }
+    }
+}
+
+/**
+ * Inline single-line editor shared by add + edit. Auto-focuses, commits on IME-Done or focus loss,
+ * and guards against a double commit (Done removes the field, which then fires focus-loss too).
+ */
+@Composable
+private fun TodoInlineEdit(initial: String, checked: Boolean, onCommit: (String) -> Unit) {
+    var value by remember { mutableStateOf(TextFieldValue(initial, TextRange(initial.length))) }
+    var committed by remember { mutableStateOf(false) }
+    var hadFocus by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+    fun commit() { if (!committed) { committed = true; onCommit(value.text) } }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = Dimensions.minTouch),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CheckboxGlyph(checked = checked)
+        BasicTextField(
+            value = value,
+            onValueChange = { value = it },
+            singleLine = true,
+            textStyle = TextStyle(color = Ink, fontSize = 16.sp),
+            cursorBrush = SolidColor(Forest),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { commit() }),
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(focusRequester)
+                .onFocusChanged { state ->
+                    if (state.isFocused) hadFocus = true else if (hadFocus) commit()
+                },
+        )
+    }
+}
+
+@Composable
+private fun CheckboxGlyph(checked: Boolean, modifier: Modifier = Modifier) {
+    Icon(
+        painter = painterResource(if (checked) Res.drawable.checkbox_filled else Res.drawable.checkbox_blank),
+        contentDescription = null,
+        tint = if (checked) Forest else Muted,
+        modifier = modifier.size(24.dp),
+    )
 }
 
 /**

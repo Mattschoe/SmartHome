@@ -7,6 +7,9 @@ import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -100,5 +103,60 @@ class HomepageViewModelTest {
         assertEquals(Warmth.Cool, living.lightWarmth)
         assertEquals(15, living.brightnessPct)
         assertTrue(living.isLightOn)
+    }
+
+    @Test
+    fun monthNav_shiftsDisplayedMonthAndStaysPinnedToFirst() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val start = (vm.screenState.value as HomeScreenState.Ready).displayedMonth
+        assertEquals(1, start.day) // initialized to the first of today's month
+
+        vm.showNextMonth()
+        advanceUntilIdle()
+        assertEquals(start.plus(1, DateTimeUnit.MONTH), (vm.screenState.value as HomeScreenState.Ready).displayedMonth)
+
+        vm.showPreviousMonth()
+        vm.showPreviousMonth()
+        advanceUntilIdle()
+        val prev = (vm.screenState.value as HomeScreenState.Ready).displayedMonth
+        assertEquals(start.minus(1, DateTimeUnit.MONTH), prev)
+        assertEquals(1, prev.day)
+    }
+
+    @Test
+    fun selectDay_scopesEventsAndTodosToThatDay() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        // Seed binds 2 events + 2 todos to today (the initial selected day).
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(2, ready.selectedDayEvents.size)
+        assertEquals(2, ready.selectedDayTodos.size)
+        assertTrue(ready.daysWithItems.contains(ready.today.day))
+
+        // A day the seed put nothing on scopes to empty.
+        vm.selectDay(ready.today.plus(10, DateTimeUnit.DAY))
+        advanceUntilIdle()
+        val empty = vm.screenState.value as HomeScreenState.Ready
+        assertTrue(empty.selectedDayEvents.isEmpty())
+        assertTrue(empty.selectedDayTodos.isEmpty())
+    }
+
+    @Test
+    fun addTodo_forwardsToAdapterAndSurfacesOnSelectedDay() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val today = (vm.screenState.value as HomeScreenState.Ready).today
+        vm.addTodo(today, "Støvsug")
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertTrue(ready.selectedDayTodos.any { it.label == "Støvsug" })
     }
 }
