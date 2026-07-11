@@ -29,9 +29,19 @@ enum class Room(val displayName: String, val hasSpeaker: Boolean) {
 /** The two mutually-exclusive right-card panels. */
 enum class Panel { Media, Calendar }
 
+/** Repeat mode for a room's audio session, mirroring Home Assistant's `media_player` repeat states. */
+enum class RepeatMode { Off, All }
+
+
+/**
+ * @param album HA media_album_name
+ * @param artworkUrl HA media_image_url
+ */
 data class MediaTrack(
     val title: String,
     val artist: String,
+    val album: String?,
+    val artworkUrl: String? = null,
     val durationSec: Int,
 )
 
@@ -42,20 +52,30 @@ data class Playlist(
 )
 
 /**
- * Per-room, mutable device state driven by the center card's controls. A room owns everything that
- * happens inside it, both its lights and its own audio playback.
- *
+ * Per-room audio session. It is `null` on a [RoomState] for rooms without a speaker (no HA
+ * `media_player` entity). Transport/volume transitions on a speaker-less room are no-ops.
  */
-data class RoomState(
-    val brightnessPct: Int,
-    val isLightOn: Boolean,
-    val lightWarmth: Warmth,
+data class AudioState(
     val volumePct: Int,
     val isPlaying: Boolean,
     val nowPlaying: MediaTrack?,
     val positionSec: Int,
     val queue: List<MediaTrack>,
-) { init { require(brightnessPct in 0..100 && volumePct in 0..100 && positionSec >= 0) } }
+    val isShuffle: Boolean = false,
+    val repeat: RepeatMode = RepeatMode.Off,
+) { init { require(volumePct in 0..100 && positionSec >= 0) } }
+
+/**
+ * Per-room, mutable device state driven by the center card's controls. A room owns everything that
+ * happens inside it, both its lights and its own audio playback ([audio], `null` when the room has
+ * no speaker).
+ */
+data class RoomState(
+    val brightnessPct: Int,
+    val isLightOn: Boolean,
+    val lightWarmth: Warmth,
+    val audio: AudioState?,
+) { init { require(brightnessPct in 0..100) } }
 
 /** Read-only climate glance shown in the left card's 2×2 tile grid. Never mutated by controls. */
 data class ClimateState(
@@ -86,13 +106,16 @@ data class CalendarState(
 /**
  * The device-truth state for the whole home, exposed by a `HomeAdapter`
  * Each room owns its own lights *and* audio in [rooms];
- * [playlists] is the shared library any room can play from;
- * [climate] is read-only.
- *
+ * @param playlists is the shared library any room can play from;
+ * @param climate is read-only.
+ * @param quickPicks HA browse_media "featured/recommended"
+ * @param keepListening HA browse_media "recently played"
  */
 data class HomeState(
     val rooms: Map<Room, RoomState>,
     val climate: ClimateState,
     val playlists: List<Playlist>,
+    val quickPicks: List<Playlist>,
+    val keepListening: List<Playlist>,
     val calendar: CalendarState,
 )

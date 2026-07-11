@@ -66,6 +66,25 @@ class HomepageViewModelTest {
     }
 
     @Test
+    fun transportForwarder_reachesAdapterAndBrowseListsSurface() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val playingBefore =
+            (vm.screenState.value as HomeScreenState.Ready).audioState.isPlaying
+        vm.togglePlay(Room.LivingRoom)
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value
+        assertIs<HomeScreenState.Ready>(ready)
+        assertEquals(!playingBefore, ready.audioState.isPlaying)
+        // Browse shelves are carried through the combine into Ready.
+        assertTrue(ready.quickPicks.isNotEmpty())
+        assertTrue(ready.keepListening.isNotEmpty())
+    }
+
+    @Test
     fun deviceMutation_flowsFromAdapterIntoScreenState() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }

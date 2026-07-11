@@ -20,11 +20,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
-import com.mattschoe.smarthome.ui.components.CardContainer
+import com.mattschoe.smarthome.data.cycle
 import com.mattschoe.smarthome.ui.layout.DashboardLayout
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.InkSoft
-import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.SageSurface
 
 @Composable
@@ -67,6 +66,14 @@ private fun DashboardRoot(state: HomeScreenState.Ready, viewModel: HomepageViewM
  */
 @Composable
 private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageViewModel) {
+    // Capture the specific stable values the callbacks need instead of closing over `ready`. A new
+    // `Ready` is emitted on every state change (e.g. flipping the right-card panel), so lambdas that
+    // capture `ready` change identity each time and force the card they're passed to to recompose.
+    // Capturing the Room/AudioState directly keeps the callbacks stable, so a panel switch no longer
+    // recomposes the center card.
+    val lightRoom = ready.activeLightRoom
+    val audioRoom = ready.activeAudioRoom
+    val audioState = ready.audioState
     Box(Modifier.fillMaxSize().background(SageSurface)) {
         Row(
             modifier = Modifier
@@ -79,20 +86,31 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
                 modifier = Modifier.width(Dimensions.leftCardWidth),
             )
             CenterCard(
-                activeLightRoom = ready.activeLightRoom,
+                activeLightRoom = lightRoom,
                 lightRoomState = ready.lightRoomState,
-                activeAudioRoom = ready.activeAudioRoom,
-                audioRoomState = ready.audioRoomState,
+                activeAudioRoom = audioRoom,
+                audioState = audioState,
                 onSelectLightRoom = viewModel::selectLightRoom,
                 onSelectAudioRoom = viewModel::selectAudioRoom,
-                onBrightnessChange = { value -> viewModel.setBrightness(ready.activeLightRoom, value) },
-                onWarmthChange = { warmth -> viewModel.setWarmth(ready.activeLightRoom, warmth) },
-                onToggleLight = { viewModel.toggleLight(ready.activeLightRoom) },
-                onVolumeChange = { value -> viewModel.setVolume(ready.activeAudioRoom, value) },
+                onBrightnessChange = { value -> viewModel.setBrightness(lightRoom, value) },
+                onWarmthChange = { warmth -> viewModel.setWarmth(lightRoom, warmth) },
+                onToggleLight = { viewModel.toggleLight(lightRoom) },
+                onVolumeChange = { value -> viewModel.setVolume(audioRoom, value) },
                 modifier = Modifier.weight(1f).widthIn(min = 346.dp),
             )
-            PlaceholderCard(
-                label = "Right",
+            RightCard(
+                panel = ready.panel,
+                audioState = audioState,
+                playlists = ready.playlists,
+                quickPicks = ready.quickPicks,
+                keepListening = ready.keepListening,
+                onSelectPanel = viewModel::selectPanel,
+                onTogglePlay = { viewModel.togglePlay(audioRoom) },
+                onNext = { viewModel.next(audioRoom) },
+                onPrevious = { viewModel.previous(audioRoom) },
+                onSeek = { sec -> viewModel.seek(audioRoom, sec) },
+                onToggleShuffle = { viewModel.setShuffle(audioRoom, !audioState.isShuffle) },
+                onCycleRepeat = { viewModel.setRepeat(audioRoom, audioState.repeat.cycle()) },
                 modifier = Modifier.weight(1.12f).widthIn(min = 392.dp),
             )
         }
@@ -107,15 +125,5 @@ private fun CompactDashboard(ready: HomeScreenState.Ready) {
         contentAlignment = Alignment.Center,
     ) {
         Text("Phone-layout er endnu ikke designet", color = InkSoft, fontSize = 16.sp)
-    }
-}
-
-/** Temporary centered-label card standing in for the center/right cards until Phases 5–7. */
-@Composable
-private fun PlaceholderCard(label: String, modifier: Modifier = Modifier) {
-    CardContainer(modifier = modifier.fillMaxHeight()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(label, color = Muted, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        }
     }
 }

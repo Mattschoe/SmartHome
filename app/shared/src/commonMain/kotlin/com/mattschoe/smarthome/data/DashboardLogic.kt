@@ -1,6 +1,8 @@
 package com.mattschoe.smarthome.data
 
+import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.HomeState
+import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.Warmth
@@ -55,10 +57,62 @@ fun HomeState.withBrightness(room: Room, value: Int): HomeState =
 fun HomeState.withWarmth(room: Room, warmth: Warmth): HomeState =
     updateRoom(room) { it.copy(lightWarmth = warmth, isLightOn = true) }
 
-/** Set a room's audio volume. Does not change playback state. */
-fun HomeState.withVolume(room: Room, value: Int): HomeState =
-    updateRoom(room) { it.copy(volumePct = value.coerceIn(0, 100)) }
-
 /** Toggle a room's light on/off (the center bulb tap). */
 fun HomeState.toggleLight(room: Room): HomeState =
     updateRoom(room) { it.copy(isLightOn = !it.isLightOn) }
+
+/**
+ * Apply an audio transition to [room], leaving a speaker-less room (`audio == null`) untouched so
+ * every transport mutation is a safe no-op there.
+ */
+private inline fun HomeState.updateAudio(room: Room, block: (AudioState) -> AudioState): HomeState =
+    updateRoom(room) { rs -> rs.audio?.let { rs.copy(audio = block(it)) } ?: rs }
+
+/** Set a room's audio volume. Does not change playback state. */
+fun HomeState.withVolume(room: Room, value: Int): HomeState =
+    updateAudio(room) { it.copy(volumePct = value.coerceIn(0, 100)) }
+
+/** Toggle play/pause on a room's audio session. */
+fun HomeState.togglePlay(room: Room): HomeState =
+    updateAudio(room) { it.copy(isPlaying = !it.isPlaying) }
+
+/** Set shuffle on/off. */
+fun HomeState.setShuffle(room: Room, on: Boolean): HomeState =
+    updateAudio(room) { it.copy(isShuffle = on) }
+
+/** Set the repeat mode. */
+fun HomeState.setRepeat(room: Room, mode: RepeatMode): HomeState =
+    updateAudio(room) { it.copy(repeat = mode) }
+
+/** Seek within the current track, clamped to `[0, duration]`. */
+fun HomeState.seek(room: Room, sec: Int): HomeState =
+    updateAudio(room) { it.copy(positionSec = sec.coerceIn(0, it.nowPlaying?.durationSec ?: 0)) }
+
+/**
+ * Advance to the next track. Round-robin so the demo cycles forever: the queue head becomes
+ * now-playing, the old current track is pushed onto the queue tail, and the position resets.
+ */
+fun HomeState.next(room: Room): HomeState = updateAudio(room) { a ->
+    a.queue.firstOrNull()?.let {
+        a.copy(nowPlaying = it, queue = a.queue.drop(1) + listOfNotNull(a.nowPlaying), positionSec = 0)
+    } ?: a
+}
+
+/**
+ * Go to the previous track. HA convention: restart the current track if more than 3s in (or the
+ * queue is empty), otherwise rotate the queue tail back to now-playing.
+ */
+fun HomeState.previous(room: Room): HomeState = updateAudio(room) { a ->
+    if (a.positionSec > 3 || a.queue.isEmpty()) a.copy(positionSec = 0)
+    else a.copy(
+        nowPlaying = a.queue.last(),
+        queue = listOfNotNull(a.nowPlaying) + a.queue.dropLast(1),
+        positionSec = 0,
+    )
+}
+
+/** Cycle repeat: Off → All → One → Off. */
+fun RepeatMode.cycle(): RepeatMode = when (this) {
+    RepeatMode.Off -> RepeatMode.All
+    RepeatMode.All -> RepeatMode.Off
+}

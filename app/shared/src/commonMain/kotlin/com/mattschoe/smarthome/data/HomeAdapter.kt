@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.HomeState
+import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.coroutines.flow.StateFlow
@@ -19,4 +20,12 @@ interface HomeAdapter {
     fun setWarmth(room: Room, warmth: Warmth)
     fun setVolume(room: Room, value: Int)
     fun toggleLight(room: Room)
+
+    // Transport intents — 1:1 with Home Assistant media_player services. No-op on speaker-less rooms.
+    fun togglePlay(room: Room)
+    fun next(room: Room)
+    fun previous(room: Room)
+    fun seek(room: Room, positionSec: Int)
+    fun setShuffle(room: Room, shuffle: Boolean)
+    fun setRepeat(room: Room, mode: RepeatMode)
 }

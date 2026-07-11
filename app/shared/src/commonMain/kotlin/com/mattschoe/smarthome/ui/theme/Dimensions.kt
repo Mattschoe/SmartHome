@@ -61,4 +61,21 @@ object Dimensions {
     val volumeRowMinHeight = minTouch
     // Fixed width for the trailing "100%" label so the track (weight 1f) doesn't reflow as digits change.
     val volumePctLabelWidth = 48.dp
+
+    // Right-card Media panel (RightCard.kt). The now-playing surface (album art + scrubber +
+    // transport + queue + playlists rail) and the idle browse surface (Quick Picks grid + Keep
+    // Listening rail) share these tokens.
+    val mediaSectionGap = 20.dp
+    val albumArtSize = 96.dp
+    val transportButtonSize = 64.dp
+    val transportIconSize = 26.dp
+    val playPauseIconSize = 30.dp
+    val queueThumbSize = 44.dp
+    val playlistCardWidth = 150.dp
+    val playlistCardHeight = 130.dp
+    val scrubberTrackHeight = 6.dp
+    val scrubberKnobDiameter = 14.dp
+    // Quick-picks 3×3 grid + Keep-listening rail spacing, and the pager dot indicator.
+    val browseGridSpacing = 12.dp
+    val pageDotSize = 7.dp
 }

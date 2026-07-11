@@ -150,13 +150,13 @@ The hardest phase — brightness dial, warmth, audio (likely split into sub-step
 
 Media/Calendar tab shell + Media content.
 
-- [ ] **Enumerate + request icons** (search, transport, shuffle/repeat).
-- [ ] Pill segmented control (Media | Calendar, one active).
-- [ ] Media binds to the **active room's** audio (`RoomState.nowPlaying`/`queue`); the empty state is
+- [x] **Enumerate + request icons** (search, transport, shuffle/repeat).
+- [x] Pill segmented control (Media | Calendar, one active).
+- [x] Media binds to the **active room's** audio (`RoomState.nowPlaying`/`queue`); the empty state is
       simply *that room has nothing playing*. Playlists rail reads the shared `DashboardState.playlists`.
-- [ ] Media: search, now-playing + scrubber, transport row, vertical "Up next" queue,
+- [x] Media: search, now-playing + scrubber, transport row, vertical "Up next" queue,
       horizontal scroll-snap "Playlists" rail, 40px bottom fade.
-- [ ] Matches `Dashboard_with_media.png`; tab switch + scroll work; iOS compiles.
+- [x] Matches `Dashboard_with_media.png`; tab switch + scroll work; iOS compiles.
 
 ---
 
@@ -173,7 +173,7 @@ Calendar content behind the same tab shell.
 
 ---
 
-## Phase 8 — Polish, persistence, nav seams, a11y & DoD
+## Phase 8 — Polish, persistence, nav seams & DoD
 
 **Status:** `TODO` · **Completed:** —
 
@@ -182,9 +182,8 @@ Close the gap to the Definition of Done (handoff spec §09) + deferred seams.
 - [ ] Settings nav seam only: `Settings` route + stub screen reachable from the dashboard
       (no settings content in v1).
 - [ ] Persist last room states (multiplatform settings / DataStore).
-- [ ] Kiosk / layout lock: edge-to-edge, exact 1280×800, page never scrolls.
-- [ ] Accessibility sweep: content descriptions on every icon-only control; slider semantics.
-- [ ] Full DoD pass against both reference screenshots on-device; iOS compiles.
+- [ ] Verify edge-to-edge
+- [ ] Full DoD pass against both reference screenshots on-device.
 
 ---
 
@@ -198,3 +197,10 @@ Replace the mock with real device I/O behind the `HomeAdapter` seam.
 - [ ] `HomeAssistantAdapter` (WebSocket/REST) mapping entities → lights, `media_player`, climate, calendar.
 - [ ] Swap `MockAdapter → HomeAssistantAdapter` in `AppContainer` (or config toggle).
 - [ ] Controls actuate real devices; state reflects live HA; verified against the live instance.
+
+## Phase 10 - After Home Assistan connection
+
+This is a loose list of things to do after HAOS backend is up and running:
+
+- [ ] Mobile phone support
+- [ ] "weekly" calendar view

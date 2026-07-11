@@ -59,6 +59,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
@@ -66,6 +67,7 @@ import com.mattschoe.smarthome.data.angleFromPointer
 import com.mattschoe.smarthome.data.brightnessFromAngle
 import com.mattschoe.smarthome.data.volumeFractionFromX
 import com.mattschoe.smarthome.data.volumeFromFraction
+import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.Warmth
@@ -77,12 +79,14 @@ import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.InsetFill
+import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.SageGreen
 import com.mattschoe.smarthome.ui.theme.WarmthOffMuted
 import com.mattschoe.smarthome.ui.theme.color
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
+import smarthome.shared.generated.resources.music_note_filled
 import smarthome.shared.generated.resources.speaker_outline
 import smarthome.shared.generated.resources.volume_down_outline
 import smarthome.shared.generated.resources.volume_off_outline
@@ -95,15 +99,16 @@ import kotlin.math.sin
 /**
  * The flex-1 center card. Light and audio are selected **independently**: the top chip row picks the
  * light room (dial + warmth, bound to [lightRoomState]); the AUDIO chip row picks the audio room
- * (volume slider, bound to [audioRoomState]). Neither selection drives the other. Width-agnostic —
- * the `Expanded` assembly point in [Homepage.kt] assigns its width; all page geometry lives there.
+ * (volume slider + now-playing status, bound to [audioState]). Neither selection drives the other.
+ * Width-agnostic — the `Expanded` assembly point in [Homepage.kt] assigns its width; all page
+ * geometry lives there.
  */
 @Composable
 fun CenterCard(
     activeLightRoom: Room,
     lightRoomState: RoomState,
     activeAudioRoom: Room,
-    audioRoomState: RoomState,
+    audioState: AudioState,
     onSelectLightRoom: (Room) -> Unit,
     onSelectAudioRoom: (Room) -> Unit,
     onBrightnessChange: (Int) -> Unit,
@@ -143,10 +148,7 @@ fun CenterCard(
             Spacer(Modifier.height(Dimensions.centerSectionGap))
             HorizontalDivider(color = CardBorder, thickness = 1.dp)
             Spacer(Modifier.height(Dimensions.centerSectionGap))
-            SectionLabel("Audio", modifier = Modifier.fillMaxWidth(), fontSize = 14.sp)
-            // The now-playing summary (track – artist) shown in this row in the reference is deferred
-            // to the Phase 6 Media panel — it renders the same RoomState.nowPlaying data, so it's
-            // built once, there. This phase ships the audio-room selector + the per-room volume slider.
+            AudioSectionHeader(audioState = audioState, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
             RoomChipsRow(
                 rooms = Room.audioRooms,
@@ -157,10 +159,49 @@ fun CenterCard(
             )
             Spacer(Modifier.weight(1f))
             VolumeSlider(
-                volumePct = audioRoomState.volumePct,
+                volumePct = audioState.volumePct,
                 onVolumeChange = onVolumeChange,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+/**
+ * The AUDIO section header: the "Audio" label with a trailing now-playing status aligned to the row
+ * end. Playing → a music-note glyph + "title — artist" (truncated); idle → just a muted-speaker glyph
+ * (no label — the glyph alone reads as "nothing playing", its a11y label carries the meaning).
+ */
+@Composable
+private fun AudioSectionHeader(audioState: AudioState, modifier: Modifier = Modifier) {
+    val track = audioState.nowPlaying
+    val glyph = if (track != null) Res.drawable.music_note_filled else Res.drawable.volume_off_outline
+    val statusColor = if (track != null) InkSoft else Muted
+
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        SectionLabel("Audio", fontSize = 14.sp)
+        Spacer(Modifier.width(12.dp))
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(glyph),
+                contentDescription = if (track == null) "Der spilles ikke musik" else null,
+                tint = statusColor,
+                modifier = Modifier.size(16.dp),
+            )
+            if (track != null) {
+                Text(
+                    text = "${track.title} — ${track.artist}",
+                    color = statusColor,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.model.Panel
+import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +38,8 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
                 panel = panel,
                 climate = home.climate,
                 playlists = home.playlists,
+                quickPicks = home.quickPicks,
+                keepListening = home.keepListening,
                 calendar = home.calendar,
             )
         }.stateIn(
@@ -53,4 +56,13 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
     fun setWarmth(room: Room, warmth: Warmth) = adapter.setWarmth(room, warmth)
     fun setVolume(room: Room, value: Int) = adapter.setVolume(room, value)
     fun toggleLight(room: Room) = adapter.toggleLight(room)
+
+    // Transport intents forward to the adapter. Shuffle-toggle / repeat-cycle are computed at the
+    // Homepage call site from the current audioState (same closure pattern as brightness/volume).
+    fun togglePlay(room: Room) = adapter.togglePlay(room)
+    fun next(room: Room) = adapter.next(room)
+    fun previous(room: Room) = adapter.previous(room)
+    fun seek(room: Room, positionSec: Int) = adapter.seek(room, positionSec)
+    fun setShuffle(room: Room, shuffle: Boolean) = adapter.setShuffle(room, shuffle)
+    fun setRepeat(room: Room, mode: RepeatMode) = adapter.setRepeat(room, mode)
 }
