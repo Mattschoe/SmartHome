@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**Smart Home Dashboard** — a wall-mounted / tablet home-control surface: lighting, audio, a climate glance, media and calendar. It is a single-screen, landscape, touch-first dashboard targeting a **Xiaomi Redmi Pad 2 (11″, 1280×800, 16:10)**, built as a **Kotlin Multiplatform / Compose Multiplatform** app (Android + iOS share one Compose UI).
+**Smart Home Dashboard** — a wall-mounted / tablet home-control surface: lighting, audio, a climate glance, media and calendar. It is a single-screen, landscape, touch-first dashboard targeting a **Xiaomi Redmi Pad 2 (11″, 1280×800, 16:10)**, built as a **Kotlin Multiplatform / Compose Multiplatform** app (Android + iOS + Desktop share one Compose UI).
 
 The full design + UX spec lives in `app/docs/` and is the source of truth for what to build — see [Design Reference](#design-reference). The project is **early-stage**: the module scaffold, navigation host, and theme plumbing exist, but most of the dashboard UI is still stubbed (see [Current State](#current-state)).
 
@@ -97,7 +97,7 @@ All paths relative to `app/shared/src/commonMain/kotlin/com/mattschoe/smarthome/
 
 The design intent lives in two places in `app/docs/`: the **rendered screenshots** (`Dashboard_with_media.png`, `Dashboard_with_calendar.png`) show exactly what to build, and the **handoff spec** (`Claude Code Handoff - Smart Home Dashboard.dc.html`, a React-ish prototyping format) carries the contracts, interactions, and DoD. **Read the screenshots for layout/color, the spec for behavior, port to Compose.** Highlights:
 
-**Layout** — One full-bleed screen at 1280×800, landscape. A sage surface fills the viewport; three cream cards float on it in a fixed row: **LEFT 288px fixed** (date/time + 2×2 climate stats + scrolling Apps grid), **CENTER flex 1, min 346px** (room chips, brightness dial, warmth swatches, audio), **RIGHT flex 1.12, min 392px** (Media / Calendar tab switch, scrolls). Only card-internal regions scroll; the page never does. Design for the fixed 1280×800 device in v1 — do not make it fluid/responsive.
+**Layout** — One full-bleed screen at 1280×800, landscape. A sage surface fills the viewport; three cream cards float on it in a fixed row: **LEFT 288px fixed** (date/time + 2×2 climate stats + scrolling Apps grid), **CENTER flex 1, min 346px** (room chips, brightness dial, warmth swatches, audio), **RIGHT flex 1.12, min 392px** (Media / Calendar tab switch, scrolls). Only card-internal regions scroll; the page never does. Design against the 1280×800 reference geometry, but the window is **resizable** (the desktop target opens at 1280×800 and can be dragged larger/smaller) — the layout should tolerate a resizable window rather than assume a locked size.
 
 **Signature interactions** (copy the math from the prototype):
 - **Brightness dial** — SVG-style half-arc (260×160 viewBox, center (130,140), radius 116), drag the knob to set 0–100%. Value = `round((1 − deg/180) × 100)`. Tapping the center bulb toggles the light on/off; dragging forces it on. In Compose: draw with `Canvas`/`drawArc`, handle drag with `pointerInput { detectDragGestures }`, and reproduce the pointer-angle math. The arc/knob take the current **warmth** color.

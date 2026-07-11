@@ -19,12 +19,14 @@ kotlin {
             isStatic = true
         }
     }
-    
+
+    jvm("desktop")
+
     androidLibrary {
        namespace = "com.mattschoe.smarthome.shared"
        compileSdk = libs.versions.android.compileSdk.get().toInt()
        minSdk = libs.versions.android.minSdk.get().toInt()
-    
+
        compilerOptions {
            jvmTarget = JvmTarget.JVM_11
        }
@@ -35,10 +37,16 @@ kotlin {
            isIncludeAndroidResources = true
        }
     }
-    
+
     sourceSets {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
+        }
+        getByName("desktopMain").dependencies {
+            implementation(compose.desktop.currentOs)
+            // Provides Dispatchers.Main on the JVM — required by lifecycle's
+            // collectAsStateWithLifecycle. Version pinned to the catalog's coroutines version.
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:${libs.versions.kotlinxCoroutines.get()}")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -65,4 +73,15 @@ kotlin {
 
 dependencies {
     androidRuntimeClasspath(libs.compose.uiTooling)
+}
+
+// Desktop (JVM) entry point. `./gradlew :shared:run` launches the dashboard in a resizable window.
+compose.desktop {
+    application {
+        mainClass = "com.mattschoe.smarthome.MainKt"
+        nativeDistributions {
+            packageName = "SmartHome"
+            packageVersion = "1.0.0"
+        }
+    }
 }
