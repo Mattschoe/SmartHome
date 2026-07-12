@@ -173,32 +173,33 @@ Calendar content behind the same tab shell.
 
 ---
 
-## Phase 8 — Polish, persistence, nav seams & DoD
 
-**Status:** `TODO` · **Completed:** —
+## Phase 8 — Real Home Assistant (HAOS) integration
 
-Close the gap to the Definition of Done (handoff spec §09) + deferred seams.
-
-- [ ] Settings nav seam only: `Settings` route + stub screen reachable from the dashboard
-      (no settings content in v1).
-- [ ] Persist last room states (multiplatform settings / DataStore).
-- [ ] Verify edge-to-edge
-- [ ] Full DoD pass against both reference screenshots on-device.
-
----
-
-## Phase 9 — Real Home Assistant (HAOS) integration
-
-**Status:** `TODO` · **Completed:** —
+**Status:** `DONE` · **Completed:** 2026-07-11 (commit pending)
 
 Replace the mock with real device I/O behind the `HomeAdapter` seam.
 
-- [ ] **Discuss HA instance, auth, and entity IDs with the user** at the start of this phase.
-- [ ] `HomeAssistantAdapter` (WebSocket/REST) mapping entities → lights, `media_player`, climate, calendar.
-- [ ] Swap `MockAdapter → HomeAssistantAdapter` in `AppContainer` (or config toggle).
-- [ ] Controls actuate real devices; state reflects live HA; verified against the live instance.
+- [x] **Discuss HA instance, auth, and entity IDs with the user** at the start of this phase.
+      → Instance `http://192.168.1.40:8123`, long-lived token in `local.properties` (`ha.url`/`ha.token`).
+      Rooms auto-discovered from HA Areas (English names match the `Room` enum constants). Speakers were
+      assigned to Areas by the user so both lights and `media_player`s discover uniformly.
+- [x] `HomeAssistantAdapter` (WebSocket) mapping entities → lights + `media_player`. Climate/calendar/todo
+      have no entities yet → emitted **blank** (climate tiles render "—"). Lights are **area-targeted**
+      (rooms have several lamps): writes hit `target: {area_id}`, reads aggregate every lamp in the area.
+      Warmth↔Kelvin, brightness 0–255↔%, volume 0–1↔% conversions are pure + unit-tested.
+- [x] Swap `MockAdapter → HomeAssistantAdapter` in `AppContainer` — **config-driven**: a non-blank
+      `ha.token` (Android `BuildConfig` from `local.properties`) selects the live adapter, else `MockAdapter`
+      (iOS/previews). Android manifest gained INTERNET + `usesCleartextTraffic` for the LAN `ws://`.
+- [x] Controls actuate real devices; state reflects live HA; verified against the live instance.
+      *(On-device: app shows live now-playing/volume/light state + blank climate; bulb-toggle turned
+      `light.stue_dining_room_lamp` off/on in HA; an HA-side brightness change pushed the dial 100%→37%
+      live. iOS compiles; `allTests` green.)*
+- [ ] **Follow-up (not blocking):** Media panel `queue`/playlists are empty on the real adapter — HA
+      `media_player` exposes no standard play-queue. Revisit if a queue source (e.g. `media_player`
+      browse or an integration attribute) is wanted.
 
-## Phase 10 - After Home Assistan connection
+## Phase 9 - After Home Assistan connection
 
 This is a loose list of things to do after HAOS backend is up and running:
 

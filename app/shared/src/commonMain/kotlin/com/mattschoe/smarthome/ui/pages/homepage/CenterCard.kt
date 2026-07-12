@@ -95,6 +95,8 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
 /**
  * The flex-1 center card. Light and audio are selected **independently**: the top chip row picks the
@@ -262,17 +264,38 @@ private fun BrightnessDial(
     val currentOnBrightnessChange by rememberUpdatedState(onBrightnessChange)
     val currentOnToggleLight by rememberUpdatedState(onToggleLight)
 
+    // While a drag is in flight the dial owns its value locally (non-null), so HA's interim echoes
+    // can't jitter it; on release it falls back to the flow (which the adapter's optimistic hold keeps
+    // at the target). See the plan's "local drag ownership".
+    var dragValue by remember { mutableStateOf<Int?>(null) }
+    val displayedPct = dragValue ?: roomState.brightnessPct
+
     val arcColor = if (roomState.isLightOn) roomState.lightWarmth.color() else WarmthOffMuted
-    val valueSweep = roomState.brightnessPct / 100f * 180f
+    val valueSweep = displayedPct / 100f * 180f
 
     Box(
         modifier = modifier
             .size(width = Dimensions.centerDialWidth, height = Dimensions.centerDialHeight)
             .pointerInput(Unit) {
-                detectDragGestures { change, _ ->
+                // Throttle mid-drag commits so HA isn't hit per-pixel; the last value always lands via
+                // onDragEnd. `lastCommit` lives for the pointer coroutine's lifetime (survives gestures).
+                var lastCommit = TimeSource.Monotonic.markNow() - DragCommitInterval
+                fun release() {
+                    dragValue?.let { currentOnBrightnessChange(it) }
+                    dragValue = null
+                }
+                detectDragGestures(
+                    onDragEnd = { release() },
+                    onDragCancel = { release() },
+                ) { change, _ ->
                     change.consume()
-                    val angle = angleFromPointer(cx, cy, change.position.x, change.position.y)
-                    currentOnBrightnessChange(brightnessFromAngle(angle))
+                    val value = brightnessFromAngle(angleFromPointer(cx, cy, change.position.x, change.position.y))
+                    dragValue = value
+                    val now = TimeSource.Monotonic.markNow()
+                    if (now - lastCommit >= DragCommitInterval) {
+                        currentOnBrightnessChange(value)
+                        lastCommit = now
+                    }
                 }
             }
             .pointerInput(Unit) {
@@ -290,7 +313,7 @@ private fun BrightnessDial(
             .semantics(mergeDescendants = true) {
                 contentDescription = "Lysstyrke"
                 progressBarRangeInfo =
-                    ProgressBarRangeInfo(current = roomState.brightnessPct.toFloat(), range = 0f..100f)
+                    ProgressBarRangeInfo(current = displayedPct.toFloat(), range = 0f..100f)
                 setProgress { target ->
                     onBrightnessChange(target.roundToInt().coerceIn(0, 100))
                     true
@@ -321,7 +344,7 @@ private fun BrightnessDial(
             // uniformly from min→max diameter with brightness (grows upward). Size is keyed to
             // brightness regardless of isLightOn — toggling off only mutes the color, per the
             // off-state spec pattern.
-            val t = roomState.brightnessPct / 100f
+            val t = displayedPct / 100f
             val diameter = lerp(Dimensions.centerGrowthMinDiameter, Dimensions.centerGrowthMaxDiameter, t)
             val bulbRadius = diameter.toPx() / 2f
             val baseline = Dimensions.centerGrowthBaselineY.toPx()
@@ -453,6 +476,11 @@ private fun VolumeSlider(
     // mutating a stale room after a room switch (same pattern as the dial).
     val currentOnVolumeChange by rememberUpdatedState(onVolumeChange)
 
+    // Local drag ownership (same pattern as the dial): the slider shows its own value mid-drag so HA
+    // echoes can't jitter it, then falls back to the flow on release.
+    var dragValue by remember { mutableStateOf<Int?>(null) }
+    val displayedPct = dragValue ?: volumePct
+
     // The volume level to restore when un-muting. UI-local (no isMuted model field yet): tapping the
     // icon stashes the current level and drops to 0; tapping again restores it.
     var preMuteVolume by remember { mutableStateOf(if (volumePct > 0) volumePct else 30) }
@@ -478,7 +506,7 @@ private fun VolumeSlider(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                painter = painterResource(volumeIcon(volumePct)),
+                painter = painterResource(volumeIcon(displayedPct)),
                 contentDescription = null,
                 tint = InkSoft,
                 modifier = Modifier.size(Dimensions.volumeIconSize),
@@ -497,17 +525,32 @@ private fun VolumeSlider(
                 }
                 .pointerInput(Unit) {
                     val inset = Dimensions.volumeKnobDiameter.toPx() / 2f
-                    detectDragGestures { change, _ ->
+                    // Throttle mid-drag commits; the release value always lands via onDragEnd.
+                    var lastCommit = TimeSource.Monotonic.markNow() - DragCommitInterval
+                    fun release() {
+                        dragValue?.let { currentOnVolumeChange(it) }
+                        dragValue = null
+                    }
+                    detectDragGestures(
+                        onDragEnd = { release() },
+                        onDragCancel = { release() },
+                    ) { change, _ ->
                         change.consume()
                         val fraction = volumeFractionFromX(change.position.x, inset, size.width - inset * 2f)
-                        currentOnVolumeChange(volumeFromFraction(fraction))
+                        val value = volumeFromFraction(fraction)
+                        dragValue = value
+                        val now = TimeSource.Monotonic.markNow()
+                        if (now - lastCommit >= DragCommitInterval) {
+                            currentOnVolumeChange(value)
+                            lastCommit = now
+                        }
                     }
                 }
                 .focusable()
                 .semantics(mergeDescendants = true) {
                     contentDescription = "Lydstyrke"
                     progressBarRangeInfo =
-                        ProgressBarRangeInfo(current = volumePct.toFloat(), range = 0f..100f)
+                        ProgressBarRangeInfo(current = displayedPct.toFloat(), range = 0f..100f)
                     setProgress { target ->
                         onVolumeChange(target.roundToInt().coerceIn(0, 100))
                         true
@@ -536,7 +579,7 @@ private fun VolumeSlider(
                 // Usable lane is inset by the knob radius on each end so the knob never clips.
                 val laneLeft = knobRadius
                 val laneWidth = (size.width - knobRadius * 2f).coerceAtLeast(0f)
-                val fraction = volumePct / 100f
+                val fraction = displayedPct / 100f
                 val knobX = laneLeft + laneWidth * fraction
                 val corner = CornerRadius(trackH / 2f, trackH / 2f)
 
@@ -562,7 +605,7 @@ private fun VolumeSlider(
             }
         }
         Text(
-            text = "$volumePct%",
+            text = "$displayedPct%",
             color = Ink,
             fontSize = 16.sp,
             fontWeight = FontWeight.Medium,
@@ -571,6 +614,9 @@ private fun VolumeSlider(
         )
     }
 }
+
+/** Minimum spacing between HA commits while dragging the dial/slider (the on-screen value stays live). */
+private val DragCommitInterval = 100.milliseconds
 
 /** The slider's leading glyph reflects the level: muted at 0, low through 50, high above. */
 private fun volumeIcon(volumePct: Int): DrawableResource = when {

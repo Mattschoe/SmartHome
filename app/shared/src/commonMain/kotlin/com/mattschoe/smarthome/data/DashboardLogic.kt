@@ -13,8 +13,11 @@ import kotlinx.datetime.daysUntil
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.plus
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.roundToInt
+import kotlin.time.ComparableTimeMark
+import kotlin.time.TimeSource
 
 /**
  * Compose-free, adapter-free pure functions for the signature interactions and state transitions.
@@ -168,4 +171,86 @@ fun HomeState.editTodo(id: String, label: String): HomeState {
         if (trimmed.isEmpty()) calendar.todos.filterNot { it.id == id }
         else calendar.todos.map { if (it.id == id) it.copy(label = trimmed) else it }
     return copy(calendar = calendar.copy(todos = todos))
+}
+
+// --- Optimistic-hold reconciliation (used by the real HA adapter) ---
+
+/** ±slack (percentage points) within which a held brightness/volume target counts as reached by HA. */
+private const val HoldMatchTolerance = 2
+
+/**
+ * A per-room optimistic overlay for the HA adapter. Each non-null field is a value the user just set
+ * that [reconcileHold] keeps on top of HA-derived state until HA reports it (confirm) or [deadline]
+ * passes (timeout). Lives here beside its pure reconciliation logic; the adapter arms and stores it.
+ */
+internal data class RoomHold(
+    val brightnessPct: Int? = null,
+    val isLightOn: Boolean? = null,
+    val lightWarmth: Warmth? = null,
+    val volumePct: Int? = null,
+    val isPlaying: Boolean? = null,
+    // Default to an already-elapsed mark; the adapter always re-arms it via copy before use.
+    val deadline: ComparableTimeMark = TimeSource.Monotonic.markNow(),
+)
+
+/**
+ * Reconcile an optimistic [hold] against the freshly HA-derived [fromHa] at time [now]. Returns the
+ * [RoomState] to display and the **reduced** hold — the same hold with every field that has *settled*
+ * dropped, or `null` when nothing is still held.
+ *
+ * Per held field: once HA reports the target (exact for on/off/warmth, within [HoldMatchTolerance]
+ * for brightness/volume) **or** [deadline] has passed, the field is released — HA's value shows and
+ * the field is dropped. Dropping a *converged* field is deliberate: it lets a genuine external change
+ * that arrives moments later through, instead of being masked back to the just-set value. Until then
+ * the held (optimistic) value shows, so HA's interim transition echoes can't jitter the control.
+ */
+internal fun reconcileHold(
+    hold: RoomHold,
+    fromHa: RoomState,
+    now: ComparableTimeMark,
+): Pair<RoomState, RoomHold?> {
+    val expired = now >= hold.deadline
+    val audio = fromHa.audio
+
+    val brightness = resolveNear(hold.brightnessPct, fromHa.brightnessPct, expired)
+    val lightOn = resolveExact(hold.isLightOn, fromHa.isLightOn, expired)
+    val warmth = resolveExact(hold.lightWarmth, fromHa.lightWarmth, expired)
+    val volume = if (audio != null) resolveNear(hold.volumePct, audio.volumePct, expired) else null to null
+    val playing = if (audio != null) resolveExact(hold.isPlaying, audio.isPlaying, expired) else null to null
+
+    val display = fromHa.copy(
+        brightnessPct = brightness.first,
+        isLightOn = lightOn.first,
+        lightWarmth = warmth.first,
+        audio = audio?.copy(
+            volumePct = volume.first ?: audio.volumePct,
+            isPlaying = playing.first ?: audio.isPlaying,
+        ),
+    )
+    val reduced = RoomHold(
+        brightnessPct = brightness.second,
+        isLightOn = lightOn.second,
+        lightWarmth = warmth.second,
+        volumePct = volume.second,
+        isPlaying = playing.second,
+        deadline = hold.deadline,
+    )
+    val stillHeld = listOf(
+        brightness.second, lightOn.second, warmth.second, volume.second, playing.second,
+    ).any { it != null }
+    return display to reduced.takeIf { stillHeld }
+}
+
+/** Resolve one numeric field → (value to display, target to keep). Releases on tolerance match or expiry. */
+private fun resolveNear(target: Int?, ha: Int, expired: Boolean): Pair<Int, Int?> = when {
+    target == null -> ha to null
+    expired || abs(target - ha) <= HoldMatchTolerance -> ha to null
+    else -> target to target
+}
+
+/** Resolve one exact-match field → (value to display, target to keep). Releases on equality or expiry. */
+private fun <T> resolveExact(target: T?, ha: T, expired: Boolean): Pair<T, T?> = when {
+    target == null -> ha to null
+    expired || target == ha -> ha to null
+    else -> target to target
 }
