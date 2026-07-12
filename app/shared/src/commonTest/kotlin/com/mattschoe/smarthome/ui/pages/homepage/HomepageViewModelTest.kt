@@ -42,7 +42,7 @@ class HomepageViewModelTest {
 
     @Test
     fun audioRooms_areSpeakerRoomsOnly() {
-        assertEquals(listOf(Room.LivingRoom, Room.Bedroom, Room.Bathroom), Room.audioRooms)
+        assertEquals(listOf(Room.LivingRoom, Room.Bedroom), Room.audioRooms)
     }
 
     @Test

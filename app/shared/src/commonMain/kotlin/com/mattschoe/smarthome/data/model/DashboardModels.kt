@@ -19,7 +19,7 @@ enum class Room(val displayName: String, val hasSpeaker: Boolean) {
     LivingRoom("Stue", hasSpeaker = true),
     Kitchen("Køkken", hasSpeaker = false),
     Bedroom("Soveværelse", hasSpeaker = true),
-    Bathroom("Badeværelse", hasSpeaker = true),
+    Bathroom("Badeværelse", hasSpeaker = false),
     Hall("Entré", hasSpeaker = false);
 
     companion object {
@@ -79,13 +79,17 @@ data class RoomState(
     val audio: AudioState?,
 ) { init { require(brightnessPct in 0..100) } }
 
-/** Read-only climate glance shown in the left card's 2×2 tile grid. Never mutated by controls. */
+/**
+ * Read-only climate glance shown in the left card's 2×2 tile grid. Never mutated by controls. A field
+ * is `null` when no sensor backs it (the real HA adapter has no climate entities yet → all null → the
+ * tiles render a "—" placeholder); the mock adapter populates every field.
+ */
 data class ClimateState(
-    val indoorTempC: Double,
-    val humidityPct: Int,
-    val energyKw: Double,
-    val outdoorTempC: Double,
-) { init { require(humidityPct in 0..100) } }
+    val indoorTempC: Double?,
+    val humidityPct: Int?,
+    val energyKw: Double?,
+    val outdoorTempC: Double?,
+) { init { require(humidityPct == null || humidityPct in 0..100) } }
 
 /**
  * A read-only calendar event bound to a [date]. Maps onto a Home Assistant `calendar` entity event

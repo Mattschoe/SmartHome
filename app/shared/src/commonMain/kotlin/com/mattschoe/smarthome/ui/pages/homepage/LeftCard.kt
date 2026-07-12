@@ -33,6 +33,7 @@ import com.mattschoe.smarthome.data.ClockText
 import com.mattschoe.smarthome.data.danishMonths
 import com.mattschoe.smarthome.data.danishWeekdays
 import com.mattschoe.smarthome.data.formatClock
+import com.mattschoe.smarthome.data.NO_VALUE
 import com.mattschoe.smarthome.data.formatEnergy
 import com.mattschoe.smarthome.data.formatHumidity
 import com.mattschoe.smarthome.data.formatTemp
@@ -120,20 +121,25 @@ private fun LaunchedEffectClockTick(onTick: () -> Unit) {
 /** 2×2 grid of read-only climate tiles bound to [climate]. */
 @Composable
 private fun ClimateGrid(climate: ClimateState) {
+    // A missing sensor reads "ukendt" (unknown) to the screen reader, not the "—" glyph.
+    fun describe(label: String, value: String) =
+        "$label ${if (value == NO_VALUE) "ukendt" else value}"
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ClimateTile(
                 icon = Res.drawable.thermometer_filled,
                 iconTint = Rose,
                 value = formatTemp(climate.indoorTempC),
-                contentDescription = "Indetemperatur ${formatTemp(climate.indoorTempC)}",
+                contentDescription = describe("Indetemperatur", formatTemp(climate.indoorTempC)),
                 modifier = Modifier.weight(1f),
             )
             ClimateTile(
                 icon = Res.drawable.humidity_filled,
                 iconTint = Teal,
                 value = formatHumidity(climate.humidityPct),
-                contentDescription = "Luftfugtighed ${climate.humidityPct} procent",
+                contentDescription = climate.humidityPct?.let { "Luftfugtighed $it procent" }
+                    ?: "Luftfugtighed ukendt",
                 modifier = Modifier.weight(1f),
             )
         }
@@ -142,14 +148,14 @@ private fun ClimateGrid(climate: ClimateState) {
                 icon = Res.drawable.energy_filled,
                 iconTint = WarmAmber,
                 value = formatEnergy(climate.energyKw),
-                contentDescription = "Energiforbrug ${formatEnergy(climate.energyKw)}",
+                contentDescription = describe("Energiforbrug", formatEnergy(climate.energyKw)),
                 modifier = Modifier.weight(1f),
             )
             ClimateTile(
                 icon = Res.drawable.sun_filled,
                 iconTint = SageGreen,
                 value = formatTemp(climate.outdoorTempC),
-                contentDescription = "Udetemperatur ${formatTemp(climate.outdoorTempC)}",
+                contentDescription = describe("Udetemperatur", formatTemp(climate.outdoorTempC)),
                 modifier = Modifier.weight(1f),
             )
         }

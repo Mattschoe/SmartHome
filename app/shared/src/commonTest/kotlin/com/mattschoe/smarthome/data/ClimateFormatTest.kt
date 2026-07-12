@@ -25,4 +25,11 @@ class ClimateFormatTest {
         assertEquals("1.2 kW", formatEnergy(1.2))
         assertEquals("2.0 kW", formatEnergy(2.0))
     }
+
+    @Test
+    fun nullValues_renderPlaceholder() {
+        assertEquals(NO_VALUE, formatTemp(null))
+        assertEquals(NO_VALUE, formatHumidity(null))
+        assertEquals(NO_VALUE, formatEnergy(null))
+    }
 }
