@@ -8,12 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The full design + UX spec lives in `app/docs/` and is the source of truth for what to build — see [Design Reference](#design-reference). The project is **early-stage**: the module scaffold, navigation host, and theme plumbing exist, but most of the dashboard UI is still stubbed (see [Current State](#current-state)).
 
-> The design was handed off (in `app/docs/`) as a Vite + React + TypeScript brief. That stack recommendation is **superseded** — we build in Compose Multiplatform. Read the handoff spec for design intent and behavior; the geometry, tokens, and dial/slider math are transcribed into the [Design Reference](#design-reference) below. Ignore any React/Vite/CSS-Modules stack guidance and re-author as idiomatic Compose.
-
-## Planning & Exploration
-
-When planning a task, use the file map and architecture section in this CLAUDE.md to identify the specific files relevant to the task, then read those files directly to get their current state. Do not do broad codebase exploration (grep sweeps, find commands, reading many files) when the relevant files are already documented here. The codebase is small — go straight to the 2–3 files that matter.
-
 ## Build & Development Commands
 
 **The Gradle project root is `app/`, not the repo root.** Run all Gradle commands from `app/` (e.g. `cd app && ./gradlew …`).
@@ -27,6 +21,9 @@ When planning a task, use the file map and architecture section in this CLAUDE.m
 
 # Build the shared KMP module (all targets)
 ./gradlew :shared:build
+
+# Run the desktop (JVM) app — a 1280×800 window, the laptop verification path
+./gradlew :shared:run
 
 # Run all tests across all KMP targets (common + android host + ios sim)
 ./gradlew allTests
@@ -105,7 +102,7 @@ The design intent lives in two places in `app/docs/`: the **rendered screenshots
 - **Warmth swatches** — five color-temp circles (Candle→Warm→Soft→Neutral→Cool); selecting one recolors the dial and turns the light on.
 - **Volume slider** — horizontal drag; fraction = `(x − left) / width` clamped 0–1. Sets the **active audio room's** volume.
 - **Room chips** — pill toggles; active = filled accent, idle = white with sage border. **Light and audio have separate selectors** (as in the reference PNGs): the top chip row picks the **light room** (dial + warmth); a second chip row in the AUDIO section picks the **audio room** (volume slider, and later the Media panel). The two are independent — one does **not** drive the other. The audio row lists only **speaker rooms** (`Room.audioRooms`, gated by `Room.hasSpeaker`), each with a speaker glyph. *(The "Whole home" speaker chip and the dashed "Join the music in {source}" affordance are **deferred from v1** — they're the multi-room grouping feature; v1 audio is strictly per-room. See the State Model CORE RULE.)*
-- **Media / Calendar tabs** — pill segmented control; Media (search, now-playing + scrubber, transport, queue, horizontal playlist rail) and Calendar (month grid, agenda, to-do). The Media panel binds to the **active audio room's** audio; its empty state is simply *that room has nothing playing*.
+- **Media / Calendar tabs** — pill segmented control; Media (search, now-playing + scrubber, transport, queue, horizontal playlist rail) and Calendar (month grid, agenda, to-do). The search field is live: typing runs a debounced Music Assistant `music/search` and replaces the browse shelves with a flat 3-per-row grid of playable results; tapping one plays it on the active audio room and clears the query. The Media panel binds to the **active audio room's** audio; its empty state is simply *that room has nothing playing*.
 
 **Design tokens** (centralize in `Color.kt` / `Type.kt` — the prototype hardcodes hex; don't):
 - Surface (sage) `#B2C488` · Card `#FAF8EA` · Card border `#A7BB7C` · Ink `#23301C` · Ink soft `#5C6650` · Muted `#A7A88C` · Sage green `#839958` · Teal `#105666` · Rose `#D3968C` · Warm amber `#E0A24E` · Inset fill `#ECE6CF`.
@@ -174,7 +171,7 @@ Switching the light room swaps the dial/warmth; switching the audio room swaps t
 ### Data & Device Boundary
 
 Build UI-first against a **mock in-memory store**; define the seam now so real integration is a drop-in later.
-- Ship a `HomeAdapter` interface (`setBrightness`, `setWarmth`, `setVolume`, `toggleLight`, `subscribe(): StateFlow<HomeState>`) — **device setters only**, with a `MockAdapter` seeded from fixtures. Controls mutate the store optimistically. Audio is per-room; the Media panel reads the active audio room's `RoomState` (no global session). UI selection (`activeLightRoom`/`activeAudioRoom`/`panel`) is not on the adapter — it lives in the ViewModel.
+- Ship a `HomeAdapter` interface (`setBrightness`, `setWarmth`, `setVolume`, `toggleLight`, `subscribe(): StateFlow<HomeState>`, plus the music intents `play`/`playQueueItem`/`moveQueueItem`/`search`) — **device intents only**, with a `MockAdapter` seeded from fixtures. Most intents are fire-and-forget; `search`, `play` and `playQueueItem` are `suspend` and propagate failure, since their caller is a user watching a spinner — Music Assistant spends seconds resolving a YouTube-Music stream before `play`/`playQueueItem` reply, and the ViewModel holds a pending/loading state (toasting on failure) until they do. Controls mutate the store optimistically. Audio is per-room; the Media panel reads the active audio room's `RoomState` (no global session). UI selection (`activeLightRoom`/`activeAudioRoom`/`panel`) is not on the adapter — it lives in the ViewModel.
 - Climate stats (temp/humidity/energy/outdoor) are read-only display for now.
 - Leave a `MatterAdapter` / Home Assistant stub for later. Put adapters in `AppContainer`.
 
@@ -194,11 +191,7 @@ Build UI-first against a **mock in-memory store**; define the seam now so real i
 - **Common-first**: put UI and logic in `commonMain`. Only drop to `androidMain`/`iosMain` (via `expect`/`actual`) for genuinely platform-specific APIs.
 - **Compose-first UI**: screens are `@Composable` functions in `ui/pages/`, paired with a `ViewModel` exposing a `StateFlow`, collected with `collectAsStateWithLifecycle()`.
 - **Touch, not mouse**: all drags via `pointerInput` gesture detectors; ensure hit targets ≥ 44dp (chips, transport buttons, swatches already exceed this).
-- **No decorative gradients** — the only gradients are the functional dial glow and the right-panel bottom scroll fade. Cards keep a 1px border but now carry a subtle soft drop shadow (as do pills and the warmth swatches); elevation tokens live in `Dimensions` (`cardElevation`/`pillElevation`/`swatchElevation`). Canvas-drawn shapes (dial bulb/knob) fake the same shadow by under-drawing a low-alpha offset circle.
-- **Accessibility**: give every icon-only control a content description; the dial/slider should expose a slider semantics role + keyboard/arrow support (the prototype omits this — add it).
-- **UI verification**: after a UI change that affects what the user sees, verify it on a connected Android device/emulator with `/android-verify` before reporting done.
-
-## SDK & Toolchain
+- **No decorative gradients** — the only gradients are the functional dial glow, the scroll fades a scroll region paints at whichever edge still has content beyond it (`verticalScrollFade`, top *and* bottom), and the legibility scrim under a title printed over cover art (`ArtScrim` → `OnArt` in `Color.kt`). Cards keep a 1px border but now carry a subtle soft drop shadow (as do pills and the warmth swatches); elevation tokens live in `Dimensions` (`cardElevation`/`pillElevation`/`swatchElevation`). Canvas-drawn shapes (dial bulb/knob) fake the same shadow by under-drawing a low-alpha offset circle.
 
 - **AGP** 9.2.1 · **Kotlin** 2.4.0 · **Compose Multiplatform** 1.11.1 · **Material3** 1.11.0-alpha07 · **navigation-compose** 2.9.2 · **lifecycle** 2.11.0-rc01 · **kotlinx-serialization-json** 1.9.0.
 - **Android**: minSdk 24, target/compileSdk 37, JVM target 11.

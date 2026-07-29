@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.AudioState
+import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlin.test.Test
@@ -104,6 +105,68 @@ class HoldReconcileTest {
 
         assertNull(reduced?.brightnessPct)
         assertEquals(Warmth.Warm, reduced?.lightWarmth)
+    }
+
+    // --- Seek anchor ---
+    // HA/Sonos only re-stamps `media_position` on a state transition, so after a seek the derived
+    // position keeps projecting from the *pre-seek* stamp — the anchor must out-hold that.
+
+    private fun playingRoom(positionSec: Int, title: String = "Nordlys", playing: Boolean = true) = RoomState(
+        brightnessPct = 0,
+        isLightOn = false,
+        lightWarmth = Warmth.Neutral,
+        audio = AudioState(
+            volumePct = 30,
+            isPlaying = playing,
+            nowPlaying = MediaTrack(title = title, artist = "Efterklang", album = null, durationSec = 300),
+            positionSec = positionSec,
+            queue = emptyList(),
+        ),
+    )
+
+    @Test
+    fun seekAnchor_outlivesStaleHaPositions_andProjectsForward() {
+        // Seeked to 180 ten seconds ago; HA still projects ~70 from the pre-seek stamp. The anchor
+        // wins — and has itself moved on to 190. The scalar deadline being expired must not matter.
+        val hold = RoomHold(seek = SeekHold(targetSec = 180, track = "Nordlys", at = now - 10.seconds), deadline = past)
+        val (display, reduced) = reconcileHold(hold, playingRoom(positionSec = 70), now)
+
+        assertEquals(190, display.audio?.positionSec)
+        assertEquals(180, reduced?.seek?.targetSec)
+    }
+
+    @Test
+    fun seekAnchor_staysAtTheTargetWhilePaused() {
+        val hold = RoomHold(seek = SeekHold(targetSec = 180, track = "Nordlys", at = now - 10.seconds), deadline = future)
+        val (display, _) = reconcileHold(hold, playingRoom(positionSec = 70, playing = false), now)
+
+        assertEquals(180, display.audio?.positionSec)
+    }
+
+    @Test
+    fun seekAnchor_releasesOnceHaAgrees() {
+        // A truth-carrying transition (the echo, or the pause that reveals truth) lands within
+        // tolerance of the projected target → HA's own value takes over.
+        val hold = RoomHold(seek = SeekHold(targetSec = 180, track = "Nordlys", at = now - 10.seconds), deadline = future)
+        val (display, reduced) = reconcileHold(hold, playingRoom(positionSec = 188), now)
+
+        assertEquals(188, display.audio?.positionSec)
+        assertNull(reduced)
+    }
+
+    @Test
+    fun seekAnchor_invalidatesOnTrackChangeAndOldAge() {
+        // The song the seek was aimed at ended → the new track's own position must show untouched.
+        val changed = RoomHold(seek = SeekHold(targetSec = 180, track = "Nordlys", at = now - 10.seconds), deadline = future)
+        val (display, reduced) = reconcileHold(changed, playingRoom(positionSec = 4, title = "Modern Drift"), now)
+        assertEquals(4, display.audio?.positionSec)
+        assertNull(reduced)
+
+        // And an anchor HA never acknowledged eventually stops lying (the seek presumably failed).
+        val ancient = RoomHold(seek = SeekHold(targetSec = 180, track = "Nordlys", at = now - 120.seconds), deadline = future)
+        val (oldDisplay, oldReduced) = reconcileHold(ancient, playingRoom(positionSec = 70), now)
+        assertEquals(70, oldDisplay.audio?.positionSec)
+        assertNull(oldReduced)
     }
 
     @Test

@@ -66,16 +66,57 @@ object Dimensions {
     // transport + queue + playlists rail) and the idle browse surface (Quick Picks grid + Keep
     // Listening rail) share these tokens.
     val mediaSectionGap = 20.dp
-    val albumArtSize = 96.dp
+    val albumArtSize = 132.dp
     val transportButtonSize = 64.dp
     val transportIconSize = 26.dp
     val playPauseIconSize = 30.dp
-    val queueThumbSize = 44.dp
+    val queueThumbSize = 56.dp
+    // The over-art title label on a browse tile: a scrim band this tall, text inset by the padding.
+    val artLabelHeight = 52.dp
+    val artLabelPadding = 8.dp
+    // Cover art is decoded at this multiple of the tile's measured size, so the final GPU downscale is
+    // gentle instead of collapsing a full-resolution bitmap in one step. See ArtTile.
+    val artOversample = 2
+    // A picked-up (long-press dragged) up-next row: lifted onto a shadowed plate and barely scaled up,
+    // so it reads as held above the rows it passes. See QueueSection.kt.
+    val queueDragElevation = 8.dp
+    val queueDragScale = 1.02f
     val playlistCardWidth = 150.dp
     val playlistCardHeight = 130.dp
     val scrubberTrackHeight = 6.dp
     val scrubberKnobDiameter = 14.dp
-    // Quick-picks 3×3 grid + Keep-listening rail spacing, and the pager dot indicator.
+    // Quick-picks 3×3 grid + browse rail spacing, and the pager dot indicator.
     val browseGridSpacing = 12.dp
     val pageDotSize = 7.dp
+    // The search field's inner row, sized so the trailing clear button is a full [minTouch] target
+    // while the pill keeps the height a plain 16sp line gave it.
+    val searchFieldRowHeight = minTouch
+    val searchFieldPadV = 4.dp
+    // Reserved for the search spinner / "no hits" line, so the surface doesn't jump between them.
+    val searchStatusHeight = 120.dp
+    // Collapsed now-playing: a Forest bar floating over the browse surface, plus the caret that
+    // collapses the full surface into it. The elevation exceeds [cardElevation] so the bar reads as
+    // hovering above the card rather than sitting in it.
+    val miniPlayerHeight = 68.dp
+    val miniPlayerRadius = 18.dp
+    val miniPlayerBarPadding = 12.dp
+    val miniPlayerElevation = 10.dp
+    val miniPlayerIconSize = 22.dp
+    // Its own thumb size rather than [queueThumbSize] — the bar is only [miniPlayerHeight] tall.
+    val miniPlayerThumbSize = 44.dp
+    val miniPlayerPlaySize = 40.dp
+    val minimizeCaretSize = 20.dp
+
+    // The browse-source badge beside the panel tabs (SourceToggle in RightCard.kt): the drawn disc,
+    // inside a full [minTouch] target.
+    val sourceBadgeSize = 32.dp
+
+    // Artist drill-in surface (ArtistSurface in RightCard.kt): the header portrait and the back arrow
+    // that leaves the surface, which is a plain full touch target rather than a drawn control.
+    val artistArtSize = 140.dp
+    val backButtonSize = minTouch
+    val backIconSize = 24.dp
+    // How far the centred glyph sits inside its touch target — the offset that re-aligns the arrow
+    // with the content edge without shrinking the target.
+    val backButtonInset = (backButtonSize - backIconSize) / 2
 }

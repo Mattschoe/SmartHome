@@ -1,12 +1,13 @@
 package com.mattschoe.smarthome.data
 
+import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.HomeState
+import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.MediaTrack
-import com.mattschoe.smarthome.data.model.Playlist
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
@@ -41,12 +42,56 @@ class MockAdapter(
     override fun setVolume(room: Room, value: Int) = _state.update { it.withVolume(room, value) }
     override fun toggleLight(room: Room) = _state.update { it.toggleLight(room) }
 
+    // No real music backend — playing a browse tile promotes it to now-playing in the store, so the
+    // pending-play flow (tap → loading surface → playing) is exercisable end to end without a server.
+    override suspend fun play(room: Room, uri: String, radio: Boolean) {
+        _state.update { home ->
+            val item = home.allShelfItems().firstOrNull { it.uri == uri }
+            if (item == null) home else home.playBrowseItem(room, item)
+        }
+    }
+
+    // There is no queue to build either, so a multi-uri play just starts the head — enough for the
+    // artist surface's "play from here" to land on a now-playing surface without a server.
+    override suspend fun playAll(room: Room, uris: List<String>) {
+        uris.firstOrNull()?.let { play(room, it, radio = false) }
+    }
+
+    // No provider to drill into either, so the artist surface is furnished from the seeded shelves —
+    // enough to render and exercise it on the desktop/iOS preview path without a server.
+    override suspend fun artistDetail(uri: String): ArtistDetail {
+        val home = _state.value
+        return ArtistDetail(topTracks = home.quickPicks, albums = home.playlists)
+    }
+
+    // Queue intents do work against the in-memory queue (fixtures have no MA handle, so the title
+    // stands in), which keeps tap-to-skip and drag-to-reorder exercisable without a server.
+    override suspend fun playQueueItem(room: Room, queueItemId: String) =
+        _state.update { it.playQueueItem(room, queueItemId) }
+    override fun moveQueueItem(room: Room, queueItemId: String, posShift: Int) =
+        _state.update { it.moveQueueItem(room, queueItemId, posShift) }
+
+    // No provider to query, so search filters the seeded shelves by name — enough to exercise the
+    // search UI end to end on the desktop target without a Music Assistant server. Both sources are
+    // searched: the toggle scopes browsing only, never search.
+    override suspend fun search(query: String): List<BrowseItem> {
+        val home = _state.value
+        return home.allShelfItems()
+            .filter { it.name.contains(query, ignoreCase = true) }
+            .distinctBy { it.uri }
+    }
+
     override fun togglePlay(room: Room) = _state.update { it.togglePlay(room) }
     override fun next(room: Room) = _state.update { it.next(room) }
     override fun previous(room: Room) = _state.update { it.previous(room) }
     override fun seek(room: Room, positionSec: Int) = _state.update { it.seek(room, positionSec) }
     override fun setShuffle(room: Room, shuffle: Boolean) = _state.update { it.setShuffle(room, shuffle) }
     override fun setRepeat(room: Room, mode: RepeatMode) = _state.update { it.setRepeat(room, mode) }
+
+    // Grouping mutates the in-memory store like every other control, so the join/leave action is
+    // exercisable end to end on the desktop preview path without a server.
+    override fun joinAudio(leader: Room, follower: Room) = _state.update { it.joinAudio(leader, follower) }
+    override fun unjoinAudio(room: Room) = _state.update { it.unjoinAudio(room) }
 
     // The adapter owns id minting (the real backend assigns HA `uid`s); logic transitions take the id.
     @OptIn(ExperimentalUuidApi::class)
@@ -112,31 +157,43 @@ internal fun seedHome(): HomeState {
         energyKw = 1.2,
         outdoorTempC = 24.0,
     ),
-    playlists = listOf(
-        Playlist("Fokus", trackCount = 24),
-        Playlist("Aftenro", trackCount = 18),
-        Playlist("Morgenkaffe", trackCount = 31),
+    playlists = mockShelf(
+        "playlist",
+        "Fokus" to "Playlist", "Aftenro" to "Playlist", "Morgenkaffe" to "Playlist",
+        "Løbetur" to "Playlist", "Fredagsbar" to "Playlist", "Søndagsbrunch" to "Playlist",
     ),
-    // Browse shelves (HA browse_media seam, Phase 9). quickPicks holds ≥ 9 so the idle 3×3 grid
-    // fills a full page and spills into a second one for the page dots; keepListening feeds the rail.
-    quickPicks = listOf(
-        Playlist("Discover Weekly", trackCount = 30),
-        Playlist("Chill Hits", trackCount = 50),
-        Playlist("Dansk Pop", trackCount = 42),
-        Playlist("Deep Focus", trackCount = 60),
-        Playlist("Indie Nyt", trackCount = 35),
-        Playlist("Jazz Vibes", trackCount = 28),
-        Playlist("Rock Klassikere", trackCount = 45),
-        Playlist("Elektronisk", trackCount = 38),
-        Playlist("Akustisk", trackCount = 22),
-        Playlist("Fest", trackCount = 55),
-        Playlist("Sommerhits", trackCount = 40),
+    // Browse shelves (real data comes from Music Assistant recommendations). quickPicks holds 27 —
+    // three full 3×3 grid pages, so the mock exercises the page dots; mixedForYou feeds a rail.
+    // Subtitles stand in for the artist/owner line the real MA data supplies.
+    quickPicks = mockShelf(
+        "track",
+        "Sunlight" to "Selma Higgins", "Nightdrive" to "Kavinsky", "Blomsterhaven" to "Ude af Takt",
+        "Static Bloom" to "Des Rocs", "Rolling Hills" to "Low Roar", "Vinterlys" to "Agnes Obel",
+        "Paper Planes" to "M.I.A.", "Slow River" to "Bonobo", "Nordlys" to "Efterklang",
+        "Golden Hour" to "Kacey Musgraves", "Midnatssol" to "Trentemøller", "Cascade" to "Floating Points",
+        "Havets Sang" to "Mø", "Ember" to "Novo Amor", "Kobber" to "Blaue Blume",
+        "Solstice" to "Khruangbin", "Regnvejr" to "The Minds of 99", "Halo Drift" to "Men I Trust",
+        "Skyggen" to "Iceage", "Lantern" to "Hiatus Kaiyote", "Fjeldet" to "Sekuoia",
+        "Neon Coast" to "The Midnight", "Stille Nu" to "Rasmus Walter", "Driftwood" to "Sylvan Esso",
+        "Tågebanke" to "Vinnie Who", "Amber Room" to "Jungle", "Nordvest" to "Kesi",
     ),
-    keepListening = listOf(
-        Playlist("Random Access Memories", trackCount = 13),
-        Playlist("OutRun", trackCount = 15),
-        Playlist("Awaken, My Love!", trackCount = 11),
-        Playlist("Hurry Up, We're Dreaming", trackCount = 22),
+    mixedForYou = mockShelf(
+        "playlist",
+        "Daft Punk-mix" to "Supermix", "Kavinsky-mix" to "Supermix",
+        "Childish Gambino-mix" to "Supermix", "M83-mix" to "Supermix",
+        "Synthwave-mix" to "Supermix", "Dansk indie-mix" to "Supermix",
+    ),
+    // The Spotify side of the source toggle. Deliberately shorter than the YT Music shelves — that
+    // provider serves no recommendation feed, so its browse side really is this thin.
+    spotifyPlaylists = mockShelf(
+        "spotify-playlist",
+        "Taylor Swift 💫" to "Playlist", "Dance 💃🏼" to "Playlist", "Hot Girl summer" to "Playlist",
+        "Fourth Wing 🤍" to "Playlist", "70's - 90's 🎇" to "Playlist",
+    ),
+    spotifyRecentlyPlayed = mockShelf(
+        "spotify-recent",
+        "Cruel Summer" to "Taylor Swift", "Espresso" to "Sabrina Carpenter",
+        "Good Luck, Babe!" to "Chappell Roan", "Birds of a Feather" to "Billie Eilish",
     ),
     calendar = CalendarState(
         // Events/todos span today + the next couple of days so the month grid shows dots on several
@@ -154,3 +211,17 @@ internal fun seedHome(): HomeState {
     ),
     )
 }
+
+/**
+ * Build a browse shelf from `name to subtitle` pairs, minting a mock uri per tile so the mock tiles
+ * are tappable (a [BrowseItem] without a uri renders inert). No artwork — the tiles fall back to
+ * their colored glyph, since the mock has no server to serve cover art.
+ */
+private fun mockShelf(kind: String, vararg items: Pair<String, String>): List<BrowseItem> =
+    items.map { (name, subtitle) ->
+        BrowseItem(name, subtitle = subtitle, uri = "mock://$kind/${name.lowercase().filter { it.isLetterOrDigit() }}")
+    }
+
+/** Every seeded tile, both sources — what the mock's play/search lookups resolve a uri against. */
+private fun HomeState.allShelfItems(): List<BrowseItem> =
+    quickPicks + playlists + mixedForYou + spotifyPlaylists + spotifyRecentlyPlayed

@@ -1,5 +1,10 @@
 package com.mattschoe.smarthome.ui.pages.homepage
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,11 +15,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -23,8 +33,11 @@ import androidx.navigation.NavController
 import com.mattschoe.smarthome.data.cycle
 import com.mattschoe.smarthome.ui.layout.DashboardLayout
 import com.mattschoe.smarthome.ui.theme.Dimensions
+import com.mattschoe.smarthome.ui.theme.Forest
 import com.mattschoe.smarthome.ui.theme.InkSoft
+import com.mattschoe.smarthome.ui.theme.OnForest
 import com.mattschoe.smarthome.ui.theme.SageSurface
+import kotlinx.coroutines.delay
 
 @Composable
 fun Homepage(
@@ -90,20 +103,33 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
                 lightRoomState = ready.lightRoomState,
                 activeAudioRoom = audioRoom,
                 audioState = audioState,
+                joinTarget = ready.joinTarget,
+                audioJoined = ready.audioJoined,
                 onSelectLightRoom = viewModel::selectLightRoom,
                 onSelectAudioRoom = viewModel::selectAudioRoom,
                 onBrightnessChange = { value -> viewModel.setBrightness(lightRoom, value) },
                 onWarmthChange = { warmth -> viewModel.setWarmth(lightRoom, warmth) },
                 onToggleLight = { viewModel.toggleLight(lightRoom) },
                 onVolumeChange = { value -> viewModel.setVolume(audioRoom, value) },
+                onToggleAudioJoin = viewModel::toggleAudioJoin,
                 modifier = Modifier.weight(1f).widthIn(min = 346.dp),
             )
             RightCard(
                 panel = ready.panel,
+                mediaMinimized = ready.mediaMinimized,
+                searchQuery = ready.searchQuery,
+                search = ready.search,
+                pendingPlay = ready.pendingPlay,
+                pendingQueueItemId = ready.pendingQueueItemId,
+                queueRefreshing = ready.queueRefreshing,
+                artist = ready.artist,
                 audioState = audioState,
+                musicSource = ready.musicSource,
                 playlists = ready.playlists,
                 quickPicks = ready.quickPicks,
-                keepListening = ready.keepListening,
+                mixedForYou = ready.mixedForYou,
+                spotifyPlaylists = ready.spotifyPlaylists,
+                spotifyRecentlyPlayed = ready.spotifyRecentlyPlayed,
                 today = ready.today,
                 displayedMonth = ready.displayedMonth,
                 selectedDay = ready.selectedDay,
@@ -111,12 +137,24 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
                 selectedDayTodos = ready.selectedDayTodos,
                 daysWithItems = ready.daysWithItems,
                 onSelectPanel = viewModel::selectPanel,
+                onSelectMusicSource = viewModel::selectMusicSource,
+                onSetMediaMinimized = viewModel::setMediaMinimized,
+                onQueryChange = viewModel::setSearchQuery,
+                onPlay = viewModel::play,
+                onOpenArtist = viewModel::openArtist,
+                onCloseArtist = viewModel::closeArtist,
+                onPlayTopHit = viewModel::playTopHits,
+                onShuffleArtist = viewModel::shuffleArtist,
                 onTogglePlay = { viewModel.togglePlay(audioRoom) },
                 onNext = { viewModel.next(audioRoom) },
                 onPrevious = { viewModel.previous(audioRoom) },
                 onSeek = { sec -> viewModel.seek(audioRoom, sec) },
                 onToggleShuffle = { viewModel.setShuffle(audioRoom, !audioState.isShuffle) },
                 onCycleRepeat = { viewModel.setRepeat(audioRoom, audioState.repeat.cycle()) },
+                // Both queue intents already resolve the active audio room inside the ViewModel, so
+                // they need no capture here (unlike the transport lambdas above).
+                onPlayQueueItem = viewModel::playQueueItem,
+                onMoveQueueItem = viewModel::moveQueueItem,
                 onPrevMonth = viewModel::showPreviousMonth,
                 onNextMonth = viewModel::showNextMonth,
                 onSelectDay = viewModel::selectDay,
@@ -126,8 +164,46 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
                 modifier = Modifier.weight(1.12f).widthIn(min = 392.dp),
             )
         }
+        ToastHost(
+            toast = ready.toast,
+            onDismiss = viewModel::dismissToast,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Dimensions.surfacePadV),
+        )
     }
 }
+
+/**
+ * Flashes the current [ToastMessage] as a floating Forest pill at the bottom of the dashboard, then
+ * auto-dismisses it. The message is latched so the pill's exit animation doesn't render blank; a new
+ * id re-arms the timer even when the text is identical.
+ */
+@Composable
+private fun ToastHost(toast: ToastMessage?, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val latched = remember { mutableStateOf(toast) }
+    if (toast != null) latched.value = toast
+    toast?.let { LaunchedEffect(it.id) { delay(TOAST_MILLIS); onDismiss() } }
+    AnimatedVisibility(
+        visible = toast != null,
+        enter = fadeIn() + slideInVertically { it / 2 },
+        exit = fadeOut() + slideOutVertically { it / 2 },
+        modifier = modifier,
+    ) {
+        latched.value?.let { message ->
+            Text(
+                text = message.text,
+                color = OnForest,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .shadow(Dimensions.pillElevation, RoundedCornerShape(percent = 50))
+                    .background(Forest, RoundedCornerShape(percent = 50))
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+private const val TOAST_MILLIS = 3_000L
 
 /** Phone layout is not designed in this phase — the seam exists so it can be built here later. */
 @Composable

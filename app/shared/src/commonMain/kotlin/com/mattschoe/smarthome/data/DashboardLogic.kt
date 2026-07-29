@@ -1,7 +1,9 @@
 package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.AudioState
+import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.HomeState
+import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
@@ -17,6 +19,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.roundToInt
 import kotlin.time.ComparableTimeMark
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 /**
@@ -93,6 +96,44 @@ fun HomeState.setShuffle(room: Room, on: Boolean): HomeState =
 fun HomeState.setRepeat(room: Room, mode: RepeatMode): HomeState =
     updateAudio(room) { it.copy(repeat = mode) }
 
+/**
+ * Put [follower] in [leader]'s sync group, so the two play as one. Both rooms record [leader] as
+ * their [AudioState.syncLeader] — the leader points at itself — which is what [audioJoined] reads.
+ * A speaker-less room on either side leaves that side untouched.
+ */
+fun HomeState.joinAudio(leader: Room, follower: Room): HomeState =
+    updateAudio(leader) { it.copy(syncLeader = leader) }
+        .updateAudio(follower) { it.copy(syncLeader = leader) }
+
+/**
+ * Take [room] out of its sync group. A follower leaving just drops itself; the **leader** leaving
+ * dissolves the group, since its followers have nothing left to follow. Either way a group left with
+ * a single member is no group at all, so its leader is cleared too.
+ */
+fun HomeState.unjoinAudio(room: Room): HomeState {
+    val leader = rooms[room]?.audio?.syncLeader ?: return this
+    val leaving =
+        if (leader == room) rooms.filterValues { it.audio?.syncLeader == room }.keys else setOf(room)
+    return leaving
+        .fold(this) { home, member -> home.updateAudio(member) { it.copy(syncLeader = null) } }
+        .dropSoloGroups()
+}
+
+/** Clear the leader of any room left alone in its group — one member is not a group. */
+private fun HomeState.dropSoloGroups(): HomeState = copy(
+    rooms = rooms.mapValues { (room, roomState) ->
+        val leader = roomState.audio?.syncLeader ?: return@mapValues roomState
+        val hasCompany = rooms.any { (other, state) -> other != room && state.audio?.syncLeader == leader }
+        if (hasCompany) roomState else roomState.copy(audio = roomState.audio.copy(syncLeader = null))
+    },
+)
+
+/** Whether [a] and [b] are playing as one — the same, non-null sync leader. */
+fun Map<Room, RoomState>.audioJoined(a: Room, b: Room): Boolean {
+    val leaderA = this[a]?.audio?.syncLeader ?: return false
+    return leaderA == this[b]?.audio?.syncLeader
+}
+
 /** Seek within the current track, clamped to `[0, duration]`. */
 fun HomeState.seek(room: Room, sec: Int): HomeState =
     updateAudio(room) { it.copy(positionSec = sec.coerceIn(0, it.nowPlaying?.durationSec ?: 0)) }
@@ -118,6 +159,91 @@ fun HomeState.previous(room: Room): HomeState = updateAudio(room) { a ->
         queue = listOfNotNull(a.nowPlaying) + a.queue.dropLast(1),
         positionSec = 0,
     )
+}
+
+/**
+ * How a queue entry is addressed in the mock store. The real backend hands out a
+ * [MediaTrack.queueItemId]; the fixtures have none, so their title stands in as the handle.
+ */
+private fun MediaTrack.queueKey(): String = queueItemId ?: title
+
+/**
+ * Skip to a queue entry: it becomes now-playing, and everything it jumped over — plus the track that
+ * was playing — rotates to the tail, the same round-robin [next] uses (skipping to the head *is*
+ * [next]). Unknown handles are a no-op.
+ */
+fun HomeState.playQueueItem(room: Room, queueItemId: String): HomeState = updateAudio(room) { a ->
+    val index = a.queue.indexOfFirst { it.queueKey() == queueItemId }
+    if (index < 0) a
+    else a.copy(
+        nowPlaying = a.queue[index],
+        queue = a.queue.drop(index + 1) + listOfNotNull(a.nowPlaying) + a.queue.take(index),
+        positionSec = 0,
+    )
+}
+
+/**
+ * Start playing a browse tile on [room] — the mock's stand-in for Music Assistant's `play_media`.
+ * The tile becomes now-playing (with a nominal duration, since a [BrowseItem] carries none) and the
+ * queue is left as-is. Unknown/blank uris are a no-op.
+ */
+fun HomeState.playBrowseItem(room: Room, item: BrowseItem): HomeState = updateAudio(room) { a ->
+    a.copy(
+        nowPlaying = MediaTrack(
+            title = item.name,
+            artist = item.subtitle.orEmpty(),
+            album = null,
+            artworkUrl = item.artworkUrl,
+            durationSec = MOCK_TRACK_DURATION_SEC,
+            uri = item.uri,
+        ),
+        isPlaying = true,
+        positionSec = 0,
+        // A play *replaces* the queue (matching MA's behavior); the previous track's up-next rows
+        // don't survive it. The real adapter's Don't-Stop-the-Music then appends a continuation —
+        // the mock refills instantly from the other browse tiles so the flow works offline.
+        queue = (quickPicks + mixedForYou)
+            .filter { it.uri != null && it.uri != item.uri }
+            .take(MOCK_CONTINUATION_SIZE)
+            .mapIndexed { i, tile ->
+                MediaTrack(
+                    title = tile.name,
+                    artist = tile.subtitle.orEmpty(),
+                    album = null,
+                    artworkUrl = tile.artworkUrl,
+                    durationSec = MOCK_TRACK_DURATION_SEC,
+                    uri = tile.uri,
+                    // Keyed on the played item so each play yields a *distinct* queue — the loader
+                    // waits for a queue that differs from the previous one.
+                    queueItemId = "mock-continuation-${item.name}-$i",
+                )
+            },
+    )
+}
+
+private const val MOCK_CONTINUATION_SIZE = 5
+
+private const val MOCK_TRACK_DURATION_SEC = 180
+
+/** Move a queue entry [posShift] positions (negative = earlier), clamped to the queue. */
+fun HomeState.moveQueueItem(room: Room, queueItemId: String, posShift: Int): HomeState = updateAudio(room) { a ->
+    val from = a.queue.indexOfFirst { it.queueKey() == queueItemId }
+    if (from < 0) a
+    else {
+        val reordered = a.queue.toMutableList()
+        reordered.add((from + posShift).coerceIn(0, a.queue.lastIndex), reordered.removeAt(from))
+        a.copy(queue = reordered)
+    }
+}
+
+/**
+ * The play order for a tapped top hit: the tapped entry and everything after it, then the entries
+ * above it at the tail — so the tap starts where the user pointed without discarding the rest of the
+ * list. An out-of-range [index] leaves the order untouched.
+ */
+fun <T> rotateFrom(items: List<T>, index: Int): List<T> {
+    if (index !in items.indices) return items
+    return items.drop(index) + items.take(index)
 }
 
 /** Cycle repeat: Off → All → Off. */
@@ -189,9 +315,30 @@ internal data class RoomHold(
     val lightWarmth: Warmth? = null,
     val volumePct: Int? = null,
     val isPlaying: Boolean? = null,
+    val seek: SeekHold? = null,
     // Default to an already-elapsed mark; the adapter always re-arms it via copy before use.
     val deadline: ComparableTimeMark = TimeSource.Monotonic.markNow(),
 )
+
+/**
+ * A committed seek, anchored in time. Unlike the scalar holds, HA often **never** echoes a seek
+ * while playback continues — Sonos only re-stamps `media_position` on a state transition (pause,
+ * track change), so until one happens HA keeps projecting from the pre-seek stamp. The anchor
+ * therefore projects the target forward itself, exempt from [RoomHold.deadline], and lets go only
+ * when HA's position agrees, the track changes, or [SeekHoldMax] passes (see [resolveSeek]).
+ */
+internal data class SeekHold(
+    val targetSec: Int,
+    /** Title of the track the seek was aimed at — a track change invalidates the anchor. */
+    val track: String?,
+    val at: ComparableTimeMark,
+)
+
+/** ±seconds within which HA's reported position counts as agreeing with a seek anchor. */
+private const val SeekMatchToleranceSec = 5
+
+/** Backstop for a seek HA never acknowledges at all (e.g. it silently failed on the speaker). */
+private val SeekHoldMax = 90.seconds
 
 /**
  * Reconcile an optimistic [hold] against the freshly HA-derived [fromHa] at time [now]. Returns the
@@ -217,6 +364,8 @@ internal fun reconcileHold(
     val warmth = resolveExact(hold.lightWarmth, fromHa.lightWarmth, expired)
     val volume = if (audio != null) resolveNear(hold.volumePct, audio.volumePct, expired) else null to null
     val playing = if (audio != null) resolveExact(hold.isPlaying, audio.isPlaying, expired) else null to null
+    // The seek anchor deliberately ignores [expired] — its release rules live in [resolveSeek].
+    val seek = if (audio != null) resolveSeek(hold.seek, audio, now) else null to null
 
     val display = fromHa.copy(
         brightnessPct = brightness.first,
@@ -225,6 +374,7 @@ internal fun reconcileHold(
         audio = audio?.copy(
             volumePct = volume.first ?: audio.volumePct,
             isPlaying = playing.first ?: audio.isPlaying,
+            positionSec = seek.first ?: audio.positionSec,
         ),
     )
     val reduced = RoomHold(
@@ -233,12 +383,34 @@ internal fun reconcileHold(
         lightWarmth = warmth.second,
         volumePct = volume.second,
         isPlaying = playing.second,
+        seek = seek.second,
         deadline = hold.deadline,
     )
     val stillHeld = listOf(
-        brightness.second, lightOn.second, warmth.second, volume.second, playing.second,
+        brightness.second, lightOn.second, warmth.second, volume.second, playing.second, seek.second,
     ).any { it != null }
     return display to reduced.takeIf { stillHeld }
+}
+
+/**
+ * Resolve a seek [anchor] → (position to display, anchor to keep). While held, the display is the
+ * seek target projected forward in real time (frozen while paused), so playback reads continuously
+ * from where the user dropped the knob. It releases when HA's own position agrees within
+ * [SeekMatchToleranceSec] — which any truth-carrying transition (the seek echo, a pause) produces —
+ * or goes stale: the track changed, or [SeekHoldMax] passed without HA ever agreeing.
+ */
+private fun resolveSeek(
+    anchor: SeekHold?,
+    audio: AudioState,
+    now: ComparableTimeMark,
+): Pair<Int?, SeekHold?> {
+    if (anchor == null) return null to null
+    val age = now - anchor.at
+    if (audio.nowPlaying?.title != anchor.track || age > SeekHoldMax) return null to null
+    val expected = anchor.targetSec +
+        if (audio.isPlaying) age.inWholeSeconds.coerceAtLeast(0L).toInt() else 0
+    return if (abs(audio.positionSec - expected) <= SeekMatchToleranceSec) null to null
+    else expected to anchor
 }
 
 /** Resolve one numeric field → (value to display, target to keep). Releases on tolerance match or expiry. */

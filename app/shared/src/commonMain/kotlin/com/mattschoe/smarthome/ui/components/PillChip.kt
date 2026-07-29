@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +33,9 @@ import org.jetbrains.compose.resources.painterResource
 /**
  * Pill toggle chip. Active = filled Forest accent; idle = white with sage border.
  * Serves room chips, audio speaker chips (with [leadingIcon]) and the Media/Calendar tabs.
+ *
+ * [contentColor] overrides the icon/text color of an **idle** pill, for the few that are actions
+ * rather than selections (the artist surface's shuffle pill) and want the accent on their glyph.
  */
 @Composable
 fun PillChip(
@@ -40,11 +44,12 @@ fun PillChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leadingIcon: DrawableResource? = null,
+    contentColor: Color? = null,
 ) {
     val shape = RoundedCornerShape(percent = 50)
-    val contentColor =
+    val resolvedContentColor =
         if (selected) OnForest
-        else Ink
+        else contentColor ?: Ink
     val base =
         if (selected) Modifier.background(Forest, shape)
         else Modifier.background(ChipIdle, shape).border(1.dp, CardBorder, shape)
@@ -63,13 +68,13 @@ fun PillChip(
             Icon(
                 painter = painterResource(leadingIcon),
                 contentDescription = null,
-                tint = contentColor,
+                tint = resolvedContentColor,
                 modifier = Modifier.size(20.dp)
             )
         }
         Text(
             text = text,
-            color = contentColor,
+            color = resolvedContentColor,
             fontWeight = FontWeight.Medium,
             fontSize = 17.sp,
         )

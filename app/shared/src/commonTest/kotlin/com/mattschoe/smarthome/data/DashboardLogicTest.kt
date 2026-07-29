@@ -158,6 +158,53 @@ class DashboardLogicTest {
     }
 
     @Test
+    fun playQueueItem_skipsToTheEntryAndRotatesWhatItJumpedOver() {
+        // Fixtures carry no MA handle, so the title is the queue key. Skip to the third entry.
+        val before = seedHome().rooms.getValue(Room.LivingRoom).audio!!
+        val target = before.queue[2]
+        val after = seedHome().playQueueItem(Room.LivingRoom, target.title)
+            .rooms.getValue(Room.LivingRoom).audio!!
+        assertEquals(target, after.nowPlaying)
+        assertEquals(listOf(before.nowPlaying!!, before.queue[0], before.queue[1]), after.queue)
+        assertEquals(0, after.positionSec)
+    }
+
+    @Test
+    fun playQueueItem_isANoOpForAnUnknownHandle() {
+        val seed = seedHome()
+        assertEquals(seed, seed.playQueueItem(Room.LivingRoom, "not-in-the-queue"))
+    }
+
+    @Test
+    fun playBrowseItem_promotesTheTileToNowPlayingAndStartsPlayback() {
+        val seed = seedHome()
+        val tile = seed.quickPicks.first()
+        val after = seed.playBrowseItem(Room.Bedroom, tile).rooms.getValue(Room.Bedroom).audio!!
+        assertEquals(tile.name, after.nowPlaying?.title)
+        assertEquals(tile.subtitle, after.nowPlaying?.artist)
+        assertEquals(tile.uri, after.nowPlaying?.uri)
+        assertTrue(after.isPlaying)
+        assertEquals(0, after.positionSec)
+        // A play replaces the queue: the previous track's rows are gone, and the mock's instant
+        // "continuation" (standing in for Don't-Stop-the-Music) never includes the played item.
+        assertTrue(after.queue.isNotEmpty())
+        assertTrue(after.queue.none { it.uri == tile.uri })
+    }
+
+    @Test
+    fun moveQueueItem_shiftsRelativelyAndClampsToTheQueue() {
+        val before = seedHome().rooms.getValue(Room.LivingRoom).audio!!.queue
+        val moved = seedHome().moveQueueItem(Room.LivingRoom, before[0].title, 2)
+            .rooms.getValue(Room.LivingRoom).audio!!.queue
+        assertEquals(listOf(before[1], before[2], before[0]), moved)
+
+        // Overshooting either end lands on it rather than throwing.
+        val clamped = seedHome().moveQueueItem(Room.LivingRoom, before[2].title, -9)
+            .rooms.getValue(Room.LivingRoom).audio!!.queue
+        assertEquals(listOf(before[2], before[0], before[1]), clamped)
+    }
+
+    @Test
     fun seek_clampsToTrackBounds() {
         val duration = seedHome().rooms.getValue(Room.LivingRoom).audio!!.nowPlaying!!.durationSec
         assertEquals(0, seedHome().seek(Room.LivingRoom, -10).rooms.getValue(Room.LivingRoom).audio!!.positionSec)
@@ -176,6 +223,56 @@ class DashboardLogicTest {
     fun repeatMode_cycleOrder() {
         assertEquals(RepeatMode.All, RepeatMode.Off.cycle())
         assertEquals(RepeatMode.Off, RepeatMode.All.cycle())
+    }
+
+    // --- Sync groups ---
+
+    @Test
+    fun joinAudio_pointsBothRoomsAtTheLeaderAndReadsAsJoined() {
+        val joined = seedHome().joinAudio(leader = Room.LivingRoom, follower = Room.Bedroom)
+
+        assertEquals(Room.LivingRoom, joined.rooms.getValue(Room.LivingRoom).audio!!.syncLeader)
+        assertEquals(Room.LivingRoom, joined.rooms.getValue(Room.Bedroom).audio!!.syncLeader)
+        assertTrue(joined.rooms.audioJoined(Room.LivingRoom, Room.Bedroom))
+        // Joining is grouping only — it doesn't touch either room's playback or volume.
+        val seededLiving = seedHome().rooms.getValue(Room.LivingRoom).audio!!
+        assertEquals(
+            seededLiving.copy(syncLeader = Room.LivingRoom),
+            joined.rooms.getValue(Room.LivingRoom).audio,
+        )
+    }
+
+    @Test
+    fun unjoinAudio_onTheFollowerLeavesTheLeaderPlaying() {
+        val joined = seedHome().joinAudio(leader = Room.LivingRoom, follower = Room.Bedroom)
+        val left = joined.unjoinAudio(Room.Bedroom)
+
+        assertNull(left.rooms.getValue(Room.Bedroom).audio!!.syncLeader)
+        // The leader is alone now, so it is no longer in a group either — but it kept playing.
+        assertNull(left.rooms.getValue(Room.LivingRoom).audio!!.syncLeader)
+        assertEquals(
+            seedHome().rooms.getValue(Room.LivingRoom).audio!!.isPlaying,
+            left.rooms.getValue(Room.LivingRoom).audio!!.isPlaying,
+        )
+        assertFalse(left.rooms.audioJoined(Room.LivingRoom, Room.Bedroom))
+    }
+
+    @Test
+    fun unjoinAudio_onTheLeaderDissolvesTheGroup() {
+        val joined = seedHome().joinAudio(leader = Room.LivingRoom, follower = Room.Bedroom)
+        val dissolved = joined.unjoinAudio(Room.LivingRoom)
+
+        assertNull(dissolved.rooms.getValue(Room.LivingRoom).audio!!.syncLeader)
+        assertNull(dissolved.rooms.getValue(Room.Bedroom).audio!!.syncLeader)
+        assertFalse(dissolved.rooms.audioJoined(Room.LivingRoom, Room.Bedroom))
+    }
+
+    @Test
+    fun audioJoined_isFalseForUngroupedRooms() {
+        // Two rooms playing alone (null leaders) are not joined — null must not match null.
+        assertFalse(seedHome().rooms.audioJoined(Room.LivingRoom, Room.Bedroom))
+        // Nor is a speaker-less room ever joined to anything.
+        assertFalse(seedHome().rooms.audioJoined(Room.LivingRoom, Room.Kitchen))
     }
 
     // --- Calendar grid ---
@@ -265,5 +362,21 @@ class DashboardLogicTest {
             .setShuffle(Room.Kitchen, true)
             .setRepeat(Room.Kitchen, RepeatMode.All)
         assertNull(mutated.rooms.getValue(Room.Kitchen).audio)
+    }
+
+    @Test
+    fun rotateFrom_startsAtTheIndexAndWrapsTheRestToTheTail() {
+        val hits = listOf("a", "b", "c", "d")
+        assertEquals(hits, rotateFrom(hits, 0))
+        assertEquals(listOf("c", "d", "a", "b"), rotateFrom(hits, 2))
+        assertEquals(listOf("d", "a", "b", "c"), rotateFrom(hits, 3))
+    }
+
+    @Test
+    fun rotateFrom_leavesAnOutOfRangeOrEmptyListUntouched() {
+        val hits = listOf("a", "b")
+        assertEquals(hits, rotateFrom(hits, -1))
+        assertEquals(hits, rotateFrom(hits, 2))
+        assertEquals(emptyList(), rotateFrom(emptyList<String>(), 0))
     }
 }
