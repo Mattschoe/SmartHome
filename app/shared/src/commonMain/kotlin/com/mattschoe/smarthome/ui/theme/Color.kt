@@ -23,6 +23,10 @@ val OnForest = Color(0xFFF6EEC7)
 
 val ChipIdle = Color(0xFFFFFFFF)
 
+/** Legibility scrim under a label printed over cover art, and the label's own color. */
+val ArtScrim = Color(0xE6000000)
+val OnArt = Color(0xFFFFFFFF)
+
 val WarmthCandle = Color(0xFFFF7E00)
 val WarmthWarm = Color(0xFFFF932C)
 val WarmthSoft = Color(0xFFFFA957)

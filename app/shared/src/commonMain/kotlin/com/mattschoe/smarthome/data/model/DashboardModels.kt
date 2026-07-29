@@ -31,6 +31,17 @@ enum class Room(val displayName: String, val hasSpeaker: Boolean) {
 /** The two mutually-exclusive right-card panels. */
 enum class Panel { Media, Calendar }
 
+/**
+ * Which provider's listening the Media panel's **browse** shelves show — the two people sharing this
+ * home each have their own account feeding one merged Music Assistant library. [badge] is the letter
+ * on the toggle; [providerDomain] is the MA `provider_domain` / `provider` prefix that identifies a
+ * row as this source's. Search is deliberately *not* scoped by this — it stays combined.
+ */
+enum class MusicSource(val badge: String, val providerDomain: String) {
+    YtMusic("M", "ytmusic"),
+    Spotify("C", "spotify"),
+}
+
 /** Repeat mode for a room's audio session, mirroring Home Assistant's `media_player` repeat states. */
 enum class RepeatMode { Off, All }
 
@@ -38,6 +49,9 @@ enum class RepeatMode { Off, All }
 /**
  * @param album HA media_album_name
  * @param artworkUrl HA media_image_url
+ * @param uri Music Assistant item uri (e.g. `ytmusic--…://track/…`); play/queue source, `null` when unknown.
+ * @param queueItemId Music Assistant queue-item handle — stable per queue entry, and what the
+ *   skip-to/reorder intents address. `null` for tracks that come from anywhere but a queue.
  */
 data class MediaTrack(
     val title: String,
@@ -45,13 +59,44 @@ data class MediaTrack(
     val album: String?,
     val artworkUrl: String? = null,
     val durationSec: Int,
+    val uri: String? = null,
+    val queueItemId: String? = null,
 )
 
-/** A shared, home-wide playlist. The library is not owned by any room; any room can play from it. */
-data class Playlist(
+/**
+ * What a browse tile actually is. The search grid routes an [Artist] tile to the artist surface
+ * instead of playing it; every other kind is a play target. Media types we don't model collapse to
+ * [Other].
+ */
+enum class BrowseKind { Track, Album, Artist, Playlist, Other }
+
+/**
+ * One tile in a browse shelf (Quick Picks, Mixed For You, Playlists). Home-wide, not owned by any
+ * room — any room can play it. [subtitle] is the secondary line (artist/owner; there is no reliable
+ * track-count source from Music Assistant). [artworkUrl] is real cover art when available (else the
+ * tile falls back to a colored glyph); [uri] is the Music Assistant uri tapped to play.
+ */
+data class BrowseItem(
     val name: String,
-    val trackCount: Int,
+    val subtitle: String? = null,
+    val artworkUrl: String? = null,
+    val uri: String? = null,
+    val kind: BrowseKind = BrowseKind.Other,
 )
+
+/**
+ * An artist's drill-in payload: [topTracks] is played as an ordered block (tap a hit and it plays
+ * from there on), [albums] are individual play targets in a rail.
+ */
+data class ArtistDetail(
+    val topTracks: List<BrowseItem>,
+    val albums: List<BrowseItem>,
+) {
+    companion object {
+        /** What an adapter without a Music Assistant connection answers with. */
+        val EMPTY = ArtistDetail(emptyList(), emptyList())
+    }
+}
 
 /**
  * Per-room audio session. It is `null` on a [RoomState] for rooms without a speaker (no HA
@@ -65,6 +110,12 @@ data class AudioState(
     val queue: List<MediaTrack>,
     val isShuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
+    /**
+     * The room leading the sync group this room plays in: itself when it leads, another room when it
+     * follows that room's playback, `null` when it plays alone. The additive grouping relation on top
+     * of per-room ownership — rooms still own their own audio.
+     */
+    val syncLeader: Room? = null,
 ) { init { require(volumePct in 0..100 && positionSec >= 0) } }
 
 /**
@@ -130,14 +181,19 @@ data class CalendarState(
  * Each room owns its own lights *and* audio in [rooms];
  * @param playlists is the shared library any room can play from;
  * @param climate is read-only.
- * @param quickPicks HA browse_media "featured/recommended"
- * @param keepListening HA browse_media "recently played"
+ * @param quickPicks single songs/albums from Music Assistant's `music/recommendations` shelves
+ * @param mixedForYou the supermixes from Music Assistant's "Mixed for you" shelf
+ * @param spotifyPlaylists the Spotify side's playlists, the [MusicSource.Spotify] counterpart to [playlists]
+ * @param spotifyRecentlyPlayed Spotify items from MA's "recently played" folder; Spotify serves no
+ *   algorithmic feed of its own, so this and [spotifyPlaylists] are all its browse side has.
  */
 data class HomeState(
     val rooms: Map<Room, RoomState>,
     val climate: ClimateState,
-    val playlists: List<Playlist>,
-    val quickPicks: List<Playlist>,
-    val keepListening: List<Playlist>,
+    val playlists: List<BrowseItem>,
+    val quickPicks: List<BrowseItem>,
+    val mixedForYou: List<BrowseItem>,
     val calendar: CalendarState,
+    val spotifyPlaylists: List<BrowseItem> = emptyList(),
+    val spotifyRecentlyPlayed: List<BrowseItem> = emptyList(),
 )

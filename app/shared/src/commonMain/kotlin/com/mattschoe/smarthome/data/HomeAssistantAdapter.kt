@@ -4,10 +4,14 @@ import com.mattschoe.smarthome.data.ha.HaAreaDto
 import com.mattschoe.smarthome.data.ha.HaDeviceDto
 import com.mattschoe.smarthome.data.ha.HaEntityRegistryDto
 import com.mattschoe.smarthome.data.ha.HaStateDto
+import com.mattschoe.smarthome.data.ha.MEDIA_PLAYER_BY_ROOM
 import com.mattschoe.smarthome.data.ha.RoomEntities
 import com.mattschoe.smarthome.data.ha.SWITCH_LIGHTS_BY_ROOM
 import com.mattschoe.smarthome.data.ha.discoverRoomEntities
+import com.mattschoe.smarthome.data.ha.resolveSyncLeaders
+import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.AudioState
+import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.HomeState
@@ -35,14 +39,17 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.concurrent.Volatile
 import kotlin.math.roundToInt
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -51,6 +58,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
@@ -137,6 +145,30 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         }
     }
 
+    // Starting a specific item requires the Music Assistant connection; the HA adapter alone has no
+    // browse/play-media source. Failing (rather than silently ignoring) lets the caller's pending-play
+    // UI resolve into its "couldn't play" notice. The composite routes play() to the MA adapter.
+    override suspend fun play(room: Room, uri: String, radio: Boolean) {
+        throw IllegalStateException("play($room, $uri): no Music Assistant connection")
+    }
+
+    // HA's media_player exposes no play-queue at all, so there is nothing to skip into or reorder —
+    // both queue intents belong to Music Assistant and the composite routes them there.
+    override suspend fun playQueueItem(room: Room, queueItemId: String) {
+        throw IllegalStateException("playQueueItem($room, $queueItemId): no Music Assistant connection")
+    }
+
+    // The queue is Music Assistant's — HA's media_player has none to reorder or replace.
+    override fun moveQueueItem(room: Room, queueItemId: String, posShift: Int) = Unit
+
+    override suspend fun playAll(room: Room, uris: List<String>) = Unit
+
+    // Searching needs the music providers, which only Music Assistant reaches — no hits without it.
+    override suspend fun search(query: String): List<BrowseItem> = emptyList()
+
+    // Likewise the artist catalogue: it comes from the music providers behind Music Assistant.
+    override suspend fun artistDetail(uri: String): ArtistDetail = ArtistDetail.EMPTY
+
     override fun togglePlay(room: Room) {
         val wasPlaying = _state.value.rooms[room]?.audio?.isPlaying ?: false
         hold(room) { it.copy(isPlaying = !wasPlaying) }
@@ -155,6 +187,11 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
     }
 
     override fun seek(room: Room, positionSec: Int) {
+        // A seek needs a projecting anchor, not just the optimistic write below: Sonos/HA won't
+        // re-stamp `media_position` until the next state transition, so every rebuild until then
+        // would revert the position to a projection from the *pre-seek* stamp.
+        val track = _state.value.rooms[room]?.audio?.nowPlaying?.title
+        hold(room) { it.copy(seek = SeekHold(positionSec, track, TimeSource.Monotonic.markNow())) }
         _state.update { it.seek(room, positionSec) }
         speaker(room)?.let {
             callService("media_player", "media_seek", buildJsonObject { put("seek_position", positionSec) }, entityTarget(it))
@@ -173,6 +210,27 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         speaker(room)?.let {
             callService("media_player", "repeat_set", buildJsonObject { put("repeat", mode.toHaRepeat()) }, entityTarget(it))
         }
+    }
+
+    // Grouping is the one pair of intents with no optimistic apply. A [RoomHold] encodes "not held"
+    // as null, so a *leave* (which sets the leader to null) can't be expressed there — and an
+    // un-held local write would be reverted by the very next rebuild, flickering the label. Instead
+    // the group state flips when HA echoes the players' new `group_members`, one normal
+    // `state_changed` away; the ViewModel guards re-taps until then.
+    override fun joinAudio(leader: Room, follower: Room) {
+        val leaderSpeaker = speaker(leader)
+        val followerSpeaker = speaker(follower)
+        if (leaderSpeaker == null || followerSpeaker == null) return
+        callService(
+            "media_player",
+            "join",
+            buildJsonObject { putJsonArray("group_members") { add(followerSpeaker) } },
+            entityTarget(leaderSpeaker),
+        )
+    }
+
+    override fun unjoinAudio(room: Room) {
+        speaker(room)?.let { callService("media_player", "unjoin", null, entityTarget(it)) }
     }
 
     // No todo list is configured in this home yet, so the todo intents are safe no-ops for now.
@@ -197,7 +255,9 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
     /** Merge [edit] into [room]'s optimistic hold and (re)arm its deadline. Also drops any expired holds. */
     private fun hold(room: Room, edit: (RoomHold) -> RoomHold) {
         holds.update { current ->
-            val kept = current.filterValues { !it.deadline.hasPassedNow() }
+            // A live seek anchor outlives the scalar deadline (it has its own release rules in
+            // resolveSeek), so an expired hold that still carries one must not be dropped here.
+            val kept = current.filterValues { !it.deadline.hasPassedNow() || it.seek != null }
             kept + (room to edit(kept[room] ?: RoomHold()).copy(deadline = TimeSource.Monotonic.markNow() + HOLD))
         }
     }
@@ -241,7 +301,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         val areas = json.decodeFromJsonElement<List<HaAreaDto>>(request("config/area_registry/list"))
         val devices = json.decodeFromJsonElement<List<HaDeviceDto>>(request("config/device_registry/list"))
         val entities = json.decodeFromJsonElement<List<HaEntityRegistryDto>>(request("config/entity_registry/list"))
-        roomEntities = discoverRoomEntities(areas, devices, entities, SWITCH_LIGHTS_BY_ROOM)
+        roomEntities = discoverRoomEntities(areas, devices, entities, SWITCH_LIGHTS_BY_ROOM, MEDIA_PLAYER_BY_ROOM)
         mappedEntityIds = roomEntities.values.flatMap { it.lightIds + it.switchIds + listOfNotNull(it.mediaPlayerId) }.toSet()
 
         val states = json.decodeFromJsonElement<List<HaStateDto>>(request("get_states"))
@@ -325,6 +385,14 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         // Holds that survive this pass (a field still held, un-settled). Rooms whose hold fully settled
         // are dropped below so a later external change is reflected instead of masked.
         val survivors = mutableMapOf<Room, RoomHold>()
+        // Whose playback each speaker room is following, read off the players' `group_members`.
+        val syncLeaders = resolveSyncLeaders(
+            groupMembersByRoom = Room.entries.filter { it.hasSpeaker }
+                .associateWith { room -> speaker(room)?.let { entityStates[it] }.attrStringList("group_members") },
+            roomByEntityId = roomEntities.entries
+                .mapNotNull { (room, entities) -> entities.mediaPlayerId?.let { it to room } }
+                .toMap(),
+        )
         _state.value = HomeState(
             rooms = Room.entries.associateWith { room ->
                 val lights = lightsOf(room)
@@ -338,7 +406,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
                     isLightOn = onLights.isNotEmpty(),
                     // Take the warmth of the first lit lamp reporting a color temperature.
                     lightWarmth = warmthFromKelvin(onLights.firstNotNullOfOrNull { it.attrInt("color_temp_kelvin") }),
-                    audio = if (room.hasSpeaker) buildAudio(speaker) else null,
+                    audio = if (room.hasSpeaker) buildAudio(speaker, syncLeaders[room]) else null,
                 )
                 val hold = activeHolds[room] ?: return@associateWith fromHa
                 val (display, reduced) = reconcileHold(hold, fromHa, now)
@@ -348,7 +416,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
             climate = ClimateState(null, null, null, null),
             playlists = emptyList(),
             quickPicks = emptyList(),
-            keepListening = emptyList(),
+            mixedForYou = emptyList(),
             calendar = CalendarState(events = emptyList(), todos = emptyList()),
         )
         pruneSettledHolds(activeHolds, survivors)
@@ -379,7 +447,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         return pcts.average().roundToInt()
     }
 
-    private fun buildAudio(mp: HaStateDto?): AudioState {
+    private fun buildAudio(mp: HaStateDto?, syncLeader: Room?): AudioState {
         if (mp == null) return AudioState(volumePct = 0, isPlaying = false, nowPlaying = null, positionSec = 0, queue = emptyList())
         val nowPlaying = mp.attrString("media_title")?.let { title ->
             MediaTrack(
@@ -390,22 +458,31 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
                 durationSec = mp.attrInt("media_duration") ?: 0,
             )
         }
-        return AudioState(
+        val audio = AudioState(
             volumePct = volumePctFromLevel(mp.attrDouble("volume_level")),
             isPlaying = mp.state == "playing",
             nowPlaying = nowPlaying,
-            positionSec = mp.attrInt("media_position") ?: 0,
+            // HA freezes `media_position` at `media_position_updated_at`; project it to now while
+            // playing, or the scrubber only moves when some other state change happens to come in.
+            positionSec = livePositionSec(
+                positionSec = mp.attrInt("media_position"),
+                updatedAtIso = mp.attrString("media_position_updated_at"),
+                isPlaying = mp.state == "playing",
+                now = Clock.System.now(),
+            ),
             queue = emptyList(), // HA media_player exposes no standard play-queue
             isShuffle = mp.attrBool("shuffle") ?: false,
             repeat = repeatModeFromHa(mp.attrString("repeat")),
+            syncLeader = syncLeader,
         )
+        return audio
     }
 
     /** Resolve HA's `entity_picture` (often a relative `/api/...` path) to an absolute URL. */
     private fun artworkUrl(path: String?): String? = when {
         path == null -> null
-        path.startsWith("http") -> path
-        else -> config.httpBase + path
+        path.startsWith("http") -> path.atFullProxySize()
+        else -> (config.httpBase + path).atFullProxySize()
     }
 
     private fun blankHome(): HomeState = HomeState(
@@ -420,7 +497,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         climate = ClimateState(null, null, null, null),
         playlists = emptyList(),
         quickPicks = emptyList(),
-        keepListening = emptyList(),
+        mixedForYou = emptyList(),
         calendar = CalendarState(events = emptyList(), todos = emptyList()),
     )
 
@@ -431,6 +508,12 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
     private fun HaStateDto?.attrBool(key: String): Boolean? = this?.prim(key)?.booleanOrNull
     private fun HaStateDto?.attrString(key: String): String? =
         this?.prim(key)?.let { if (it.isString) it.content else null }
+
+    /** A list-valued attribute (e.g. `group_members`); empty when absent, non-string entries dropped. */
+    private fun HaStateDto?.attrStringList(key: String): List<String> =
+        (this?.attributes?.get(key) as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+            .orEmpty()
 
     private fun HaStateDto.prim(key: String): JsonPrimitive? =
         (attributes[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }

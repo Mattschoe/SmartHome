@@ -8,6 +8,12 @@ import kotlin.test.assertTrue
 
 class HaDiscoveryTest {
 
+    private companion object {
+        const val STUE = "media_player.stue"
+        const val BEDROOM = "media_player.sovevaerelse"
+        val ROOM_BY_ENTITY = mapOf(STUE to Room.LivingRoom, BEDROOM to Room.Bedroom)
+    }
+
     @Test
     fun roomForAreaName_matchesEnglishAreaNamesToRoomConstants() {
         assertEquals(Room.LivingRoom, roomForAreaName("Living Room"))
@@ -85,6 +91,107 @@ class HaDiscoveryTest {
         val map = discoverRoomEntities(areas, devices = emptyList(), entities = entities)
 
         assertTrue(map[Room.LivingRoom]?.switchIds.isNullOrEmpty())
+    }
+
+    @Test
+    fun discovery_defaultsToFirstMediaPlayerByIdWhenAreaHasSeveral() {
+        // No override: the alphabetically-first media_player wins (the pre-fix behavior).
+        val areas = listOf(HaAreaDto("bedroom", "Bedroom"))
+        val entities = listOf(
+            HaEntityRegistryDto("media_player.sovevaerelse", area_id = "bedroom"),
+            HaEntityRegistryDto("media_player.apple_tv", area_id = "bedroom"),
+        )
+
+        val map = discoverRoomEntities(areas, devices = emptyList(), entities = entities)
+
+        assertEquals("media_player.apple_tv", map[Room.Bedroom]?.mediaPlayerId)
+    }
+
+    @Test
+    fun discovery_pinsSpeakerViaMediaPlayerOverrideWhenAreaHasSeveral() {
+        // With an override the configured speaker wins over the alphabetically-first id.
+        val areas = listOf(HaAreaDto("bedroom", "Bedroom"))
+        val entities = listOf(
+            HaEntityRegistryDto("media_player.sovevaerelse", area_id = "bedroom"),
+            HaEntityRegistryDto("media_player.apple_tv", area_id = "bedroom"),
+        )
+
+        val map = discoverRoomEntities(
+            areas, devices = emptyList(), entities = entities,
+            mediaPlayerByRoom = mapOf(Room.Bedroom to "media_player.sovevaerelse"),
+        )
+
+        assertEquals("media_player.sovevaerelse", map[Room.Bedroom]?.mediaPlayerId)
+    }
+
+    // --- Sync groups (`group_members`) ---
+
+    @Test
+    fun syncLeaders_readBothSidesOfAGroupWithTheFirstEntryLeading() {
+        val leaders = resolveSyncLeaders(
+            groupMembersByRoom = mapOf(
+                Room.LivingRoom to listOf(STUE, BEDROOM),
+                Room.Bedroom to listOf(STUE, BEDROOM),
+            ),
+            roomByEntityId = ROOM_BY_ENTITY,
+        )
+
+        assertEquals(Room.LivingRoom, leaders[Room.LivingRoom])
+        assertEquals(Room.LivingRoom, leaders[Room.Bedroom])
+    }
+
+    @Test
+    fun syncLeaders_areResolvedWhenOnlyOneSideReportsTheGroup() {
+        // Only the leader lists the pair — the follower reports nothing but is named by it.
+        val fromLeader = resolveSyncLeaders(
+            groupMembersByRoom = mapOf(
+                Room.LivingRoom to listOf(STUE, BEDROOM),
+                Room.Bedroom to emptyList(),
+            ),
+            roomByEntityId = ROOM_BY_ENTITY,
+        )
+        assertEquals(Room.LivingRoom, fromLeader[Room.LivingRoom])
+        assertEquals(Room.LivingRoom, fromLeader[Room.Bedroom])
+
+        // And the mirror image: only the follower lists it, still naming the leader first.
+        val fromFollower = resolveSyncLeaders(
+            groupMembersByRoom = mapOf(
+                Room.LivingRoom to emptyList(),
+                Room.Bedroom to listOf(STUE, BEDROOM),
+            ),
+            roomByEntityId = ROOM_BY_ENTITY,
+        )
+        assertEquals(Room.LivingRoom, fromFollower[Room.LivingRoom])
+        assertEquals(Room.LivingRoom, fromFollower[Room.Bedroom])
+    }
+
+    @Test
+    fun syncLeaders_areNullForRoomsPlayingAlone() {
+        val leaders = resolveSyncLeaders(
+            groupMembersByRoom = mapOf(
+                Room.LivingRoom to listOf(STUE), // the idle self-only shape
+                Room.Bedroom to emptyList(),
+            ),
+            roomByEntityId = ROOM_BY_ENTITY,
+        )
+
+        assertNull(leaders[Room.LivingRoom])
+        assertNull(leaders[Room.Bedroom])
+    }
+
+    @Test
+    fun syncLeaders_ignoreSpeakersThisDashboardDoesNotModel() {
+        val leaders = resolveSyncLeaders(
+            groupMembersByRoom = mapOf(
+                // Grouped with a speaker that backs no Room — as far as the dashboard sees, alone.
+                Room.LivingRoom to listOf(STUE, "media_player.garage"),
+                Room.Bedroom to emptyList(),
+            ),
+            roomByEntityId = ROOM_BY_ENTITY,
+        )
+
+        assertNull(leaders[Room.LivingRoom])
+        assertNull(leaders[Room.Bedroom])
     }
 
     @Test

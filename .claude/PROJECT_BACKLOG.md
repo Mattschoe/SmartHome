@@ -181,7 +181,7 @@ Calendar content behind the same tab shell.
 Replace the mock with real device I/O behind the `HomeAdapter` seam.
 
 - [x] **Discuss HA instance, auth, and entity IDs with the user** at the start of this phase.
-      → Instance `http://192.168.1.40:8123`, long-lived token in `local.properties` (`ha.url`/`ha.token`).
+      → Instance `http://192.168.1.49:8123`, long-lived token in `local.properties` (`ha.url`/`ha.token`).
       Rooms auto-discovered from HA Areas (English names match the `Room` enum constants). Speakers were
       assigned to Areas by the user so both lights and `media_player`s discover uniformly.
 - [x] `HomeAssistantAdapter` (WebSocket) mapping entities → lights + `media_player`. Climate/calendar/todo
@@ -195,9 +195,25 @@ Replace the mock with real device I/O behind the `HomeAdapter` seam.
       *(On-device: app shows live now-playing/volume/light state + blank climate; bulb-toggle turned
       `light.stue_dining_room_lamp` off/on in HA; an HA-side brightness change pushed the dial 100%→37%
       live. iOS compiles; `allTests` green.)*
-- [ ] **Follow-up (not blocking):** Media panel `queue`/playlists are empty on the real adapter — HA
-      `media_player` exposes no standard play-queue. Revisit if a queue source (e.g. `media_player`
-      browse or an integration attribute) is wanted.
+- [x] **Follow-up — done via direct Music Assistant integration.** HA `media_player` exposes no
+      standard play-queue, so a second WS connection to the **Music Assistant server** (`:8095`, own
+      `ma.token`) now supplies the rich music data: `MusicAssistantAdapter` (auth handshake +
+      pending-request dispatcher) feeds YouTube-Music **recommendations** → Quick Picks / Keep
+      Listening / Playlists shelves and the **full per-room queue** → "Up next", merged onto
+      `HomeState` by `CompositeHomeAdapter`. **Auto-suggestions are always on** (Don't Stop the Music
+      enabled per room queue by default), browse tiles are **tappable to play-as-radio**, and tiles
+      show **real album art** (Coil3). Requires `ma.token` in `local.properties` (blank → HA-only, as
+      before). *(Command shapes verified live against MA 2.9.9; unit-tested mappers. On-device
+      `/android-verify` still pending — needs a connected device + a real `ma.token`.)*
+- [x] **Artist support in the Media panel.** An artist search hit is a navigation target, not a play
+      target: tapping one opens a drill-in over the Media panel (back arrow, artist header + shuffle
+      pill, a "Top hits" paged grid and an "Albums" rail). Tapping a hit plays the list **from there**,
+      wrapping the hits above it to the tail; Don't Stop the Music continues past the last one.
+      Backed by `music/artists/top_tracks` + `artist_albums` and a `play_media` **uri array**, all
+      verified live against MA 2.9.9 / schema 31. Quick Picks reaches the same surface: MA types
+      ytmusic artist channels as `album`, so a `UC…` item id is reclassified to an artist tile.
+      *(`artist_toptracks` is a controller method, not an api_command — `error_code: 12`. Its sibling
+      `artist_tracks` replies in discography order, since ytmusic doesn't declare `ARTIST_TRACKS`.)*
 
 ## Phase 9 - After Home Assistan connection
 

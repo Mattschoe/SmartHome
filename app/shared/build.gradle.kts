@@ -22,9 +22,15 @@ val generateBuildSecrets by tasks.registering {
     }
     val haUrl = localProps.getProperty("ha.url").orEmpty()
     val haToken = localProps.getProperty("ha.token").orEmpty()
+    // Music Assistant server (its own WS API + long-lived token, distinct from HA). ma.url is
+    // optional — MaConfig derives `ws://<ha-host>:8095/ws` from ha.url when it is blank.
+    val maUrl = localProps.getProperty("ma.url").orEmpty()
+    val maToken = localProps.getProperty("ma.token").orEmpty()
     // Declare the values as inputs so the task re-runs (and stays cacheable) when they change.
     inputs.property("haUrl", haUrl)
     inputs.property("haToken", haToken)
+    inputs.property("maUrl", maUrl)
+    inputs.property("maToken", maToken)
 
     val outputDir = layout.buildDirectory.dir("generated/buildSecrets/kotlin")
     outputs.dir(outputDir)
@@ -41,6 +47,8 @@ val generateBuildSecrets by tasks.registering {
             internal object BuildSecrets {
                 const val HA_URL: String = "${haUrl.kt()}"
                 const val HA_TOKEN: String = "${haToken.kt()}"
+                const val MA_URL: String = "${maUrl.kt()}"
+                const val MA_TOKEN: String = "${maToken.kt()}"
             }
 
             """.trimIndent()
@@ -119,6 +127,13 @@ kotlin {
             // Home Assistant transport (WebSocket client, shared across platforms).
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.websockets)
+
+            // Album/browse artwork loading (multiplatform), fetching over the shared Ktor engines.
+            implementation(libs.coil.compose)
+            implementation(libs.coil.network.ktor3)
+
+            // Long-press drag-to-reorder for the up-next queue (multiplatform Compose).
+            implementation(libs.reorderable)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

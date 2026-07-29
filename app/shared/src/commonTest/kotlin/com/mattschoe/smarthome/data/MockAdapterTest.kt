@@ -59,8 +59,8 @@ class MockAdapterTest {
     @Test
     fun seed_exposesNonEmptyBrowseShelves() {
         val state = MockAdapter().subscribe().value
-        assertTrue(state.quickPicks.size >= 9)   // fills the 3×3 grid and spills to a 2nd page
-        assertTrue(state.keepListening.isNotEmpty())
+        assertTrue(state.quickPicks.size >= 19)  // fills three 3×3 grid pages, so the page dots have work to do
+        assertTrue(state.mixedForYou.isNotEmpty())
     }
 
     @Test

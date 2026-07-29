@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -76,6 +77,7 @@ import com.mattschoe.smarthome.ui.components.PillChip
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.Dimensions
+import com.mattschoe.smarthome.ui.theme.Forest
 import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.InsetFill
@@ -102,7 +104,8 @@ import kotlin.time.TimeSource
  * The flex-1 center card. Light and audio are selected **independently**: the top chip row picks the
  * light room (dial + warmth, bound to [lightRoomState]); the AUDIO chip row picks the audio room
  * (volume slider + now-playing status, bound to [audioState]). Neither selection drives the other.
- * Width-agnostic — the `Expanded` assembly point in [Homepage.kt] assigns its width; all page
+ * [joinTarget] is the room the audio room can play along with — `null` when there is nothing to
+ * offer, and then no join action shows at all. Width-agnostic — the `Expanded` assembly point in [Homepage.kt] assigns its width; all page
  * geometry lives there.
  */
 @Composable
@@ -111,12 +114,15 @@ fun CenterCard(
     lightRoomState: RoomState,
     activeAudioRoom: Room,
     audioState: AudioState,
+    joinTarget: Room?,
+    audioJoined: Boolean,
     onSelectLightRoom: (Room) -> Unit,
     onSelectAudioRoom: (Room) -> Unit,
     onBrightnessChange: (Int) -> Unit,
     onWarmthChange: (Warmth) -> Unit,
     onToggleLight: () -> Unit,
     onVolumeChange: (Int) -> Unit,
+    onToggleAudioJoin: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     CardContainer(
@@ -159,7 +165,17 @@ fun CenterCard(
                 leadingIcon = Res.drawable.speaker_outline,
                 modifier = Modifier.fillMaxWidth(),
             )
+            // Weight-1 spacers above and below center the join action in the whitespace between the
+            // audio chips and the volume slider (and collapse to one gap when there is no action).
             Spacer(Modifier.weight(1f))
+            if (joinTarget != null) {
+                JoinRoomAction(
+                    text = if (audioJoined) "Leave ${joinTarget.displayName}"
+                    else "Join ${joinTarget.displayName}",
+                    onClick = onToggleAudioJoin,
+                )
+                Spacer(Modifier.weight(1f))
+            }
             VolumeSlider(
                 volumePct = audioState.volumePct,
                 onVolumeChange = onVolumeChange,
@@ -205,6 +221,26 @@ private fun AudioSectionHeader(audioState: AudioState, modifier: Modifier = Modi
                 )
             }
         }
+    }
+}
+
+/**
+ * The join/leave action between the audio chips and the volume slider: a bare accent-colored label,
+ * no fill or border, so it reads as an offer rather than a fourth control competing with the pills.
+ * The pill-shaped clip only shapes its ripple; the padding and [Dimensions.minTouch] height are the
+ * touch target.
+ */
+@Composable
+private fun JoinRoomAction(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .clickable(role = Role.Button, onClick = onClick)
+            .heightIn(min = Dimensions.minTouch)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = text, color = Forest, fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }
 
