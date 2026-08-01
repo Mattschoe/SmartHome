@@ -3,11 +3,14 @@ package com.mattschoe.smarthome.data
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
@@ -18,6 +21,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
 import kotlinx.datetime.DateTimeUnit
@@ -101,6 +106,62 @@ class MockAdapter(
     }
     override fun toggleTodo(id: String) = _state.update { it.toggleTodo(id) }
     override fun editTodo(id: String, label: String) = _state.update { it.editTodo(id, label) }
+
+    // The fixtures are already "fetched" — there is no window to re-request.
+    override fun refreshCalendar() = Unit
+
+    // Calendar writes mutate the in-memory store like every other control, so an event-editing
+    // surface is exercisable end to end on the desktop/iOS preview path without a server. The
+    // writability check is the real one: it is what such a surface has to respect.
+    @OptIn(ExperimentalUuidApi::class)
+    override suspend fun createEvent(sourceId: String, draft: CalendarEventDraft) {
+        requireWritable(sourceId)
+        val uid = Uuid.random().toString()
+        _state.update { it.withEvents(it.calendar.events + draft.expand(sourceId, uid)) }
+    }
+
+    override suspend fun updateEvent(
+        sourceId: String,
+        uid: String,
+        draft: CalendarEventDraft,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) {
+        requireWritable(sourceId)
+        _state.update { home ->
+            home.withEvents(home.calendar.events.filterNot { it.uid == uid } + draft.expand(sourceId, uid))
+        }
+    }
+
+    override suspend fun deleteEvent(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) {
+        requireWritable(sourceId)
+        _state.update { home -> home.withEvents(home.calendar.events.filterNot { it.uid == uid }) }
+    }
+
+    private fun requireWritable(sourceId: String) {
+        val source = _state.value.calendar.sources.firstOrNull { it.id == sourceId }
+            ?: throw IllegalArgumentException("unknown calendar '$sourceId'")
+        require(source.canWrite) { "calendar '${source.displayName}' is read-only" }
+    }
+
+    private fun CalendarEventDraft.expand(sourceId: String, uid: String): List<CalendarEvent> =
+        expandCalendarEvent(
+            sourceId = sourceId,
+            title = summary,
+            start = start,
+            end = end,
+            allDay = allDay,
+            uid = uid,
+            location = location,
+        )
+
+    private fun HomeState.withEvents(events: List<CalendarEvent>): HomeState =
+        copy(calendar = calendar.copy(events = sortCalendarEvents(events)))
 }
 
 //TODO Delete
@@ -196,12 +257,38 @@ internal fun seedHome(): HomeState {
         "Good Luck, Babe!" to "Chappell Roan", "Birds of a Feather" to "Billie Eilish",
     ),
     calendar = CalendarState(
+        // Four calendars of mixed writability, mirroring the real home: three local ones plus the
+        // subscribed work roster, which no editing surface may write to. Enough distinct sources
+        // that the agenda's per-calendar dot colors are visible in previews.
+        // Colors are Home Assistant's own names, as the registry hands them over — the mock carries a
+        // set so previews exercise the mapping onto the dashboard palette, not just the index fallback.
+        sources = listOf(
+            CalendarSource("calendar.papkassehuset", "Papkassehuset", canWrite = true, color = "green"),
+            CalendarSource("calendar.matt", "Matt", canWrite = true, color = "primary"),
+            CalendarSource("calendar.cecilie", "Cecilie", canWrite = true, color = "pink"),
+            CalendarSource("calendar.c_arbejde", "C - Arbejde", canWrite = false, color = "amber"),
+        ),
         // Events/todos span today + the next couple of days so the month grid shows dots on several
-        // cells and selecting a day actually re-scopes the agenda + todo list.
-        events = listOf(
-            CalendarEvent(today, "Morgenmøde", "09:00"),
-            CalendarEvent(today, "Tandlæge", "13:30"),
-            CalendarEvent(today.plus(2, DateTimeUnit.DAY), "Middag med Sam", "19:00"),
+        // cells and selecting a day actually re-scopes the agenda + todo list. The multi-day and
+        // all-day fixtures exercise the shapes the real backend sends.
+        events = sortCalendarEvents(
+            // Built through [expandCalendarEvent], exactly as the real adapters build what Home
+            // Assistant sends, so the fixtures carry the whole-event start/end an editing surface
+            // reads back — a row assembled by hand would open prefilled with the wrong time.
+            seedEvent("calendar.matt", "Morgenmøde", today, LocalTime(9, 0), LocalTime(10, 0), "seed-1") +
+                seedEvent("calendar.cecilie", "Tandlæge", today, LocalTime(13, 30), LocalTime(14, 15), "seed-2") +
+                seedEvent("calendar.c_arbejde", "Aftenvagt", today, LocalTime(16, 0), LocalTime(23, 0), "seed-3") +
+                seedEvent(
+                    "calendar.papkassehuset", "Middag med Sam", today.plus(2, DateTimeUnit.DAY),
+                    LocalTime(19, 0), LocalTime(22, 0), "seed-4",
+                ) + expandCalendarEvent(
+                sourceId = "calendar.papkassehuset",
+                title = "Sommerhus",
+                start = LocalDateTime(today.plus(4, DateTimeUnit.DAY), LocalTime(0, 0)),
+                end = LocalDateTime(today.plus(7, DateTimeUnit.DAY), LocalTime(0, 0)),
+                allDay = true,
+                uid = "seed-5",
+            )
         ),
         todos = listOf(
             TodoItem("seed-vand", today, "Vand planterne", done = false),
@@ -211,6 +298,22 @@ internal fun seedHome(): HomeState {
     ),
     )
 }
+
+/** One timed seed event, expanded the same way the Home Assistant mapper expands a fetched one. */
+private fun seedEvent(
+    sourceId: String,
+    title: String,
+    day: LocalDate,
+    from: LocalTime,
+    to: LocalTime,
+    uid: String,
+): List<CalendarEvent> = expandCalendarEvent(
+    sourceId = sourceId,
+    title = title,
+    start = LocalDateTime(day, from),
+    end = LocalDateTime(day, to),
+    uid = uid,
+)
 
 /**
  * Build a browse shelf from `name to subtitle` pairs, minting a mock uri per tile so the mock tiles

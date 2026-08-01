@@ -1,10 +1,16 @@
 package com.mattschoe.smarthome.ui.pages.homepage
 
 import com.mattschoe.smarthome.data.HomeAdapter
+import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
 import com.mattschoe.smarthome.data.MockAdapter
+import com.mattschoe.smarthome.data.model.RecurrenceRange
+import com.mattschoe.smarthome.data.buildEventDraft
+import com.mattschoe.smarthome.data.weekStart
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.BrowseKind
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.Room
@@ -14,7 +20,12 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.minus
+import kotlinx.datetime.number
 import kotlinx.datetime.plus
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -26,6 +37,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
@@ -756,11 +768,11 @@ class HomepageViewModelTest {
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
-        // Seed binds 2 events + 2 todos to today (the initial selected day).
+        // Seed binds 3 events + 2 todos to today (the initial selected day).
         val ready = vm.screenState.value as HomeScreenState.Ready
-        assertEquals(2, ready.selectedDayEvents.size)
+        assertEquals(3, ready.selectedDayEvents.size)
         assertEquals(2, ready.selectedDayTodos.size)
-        assertTrue(ready.daysWithItems.contains(ready.today.day))
+        assertTrue(ready.dayMarks.containsKey(ready.today.day))
 
         // A day the seed put nothing on scopes to empty.
         vm.selectDay(ready.today.plus(10, DateTimeUnit.DAY))
@@ -768,6 +780,387 @@ class HomepageViewModelTest {
         val empty = vm.screenState.value as HomeScreenState.Ready
         assertTrue(empty.selectedDayEvents.isEmpty())
         assertTrue(empty.selectedDayTodos.isEmpty())
+    }
+
+    @Test
+    fun setCalendarView_flipsTheCalendarPanelBetweenMonthAndWeek() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(CalendarView.Month, (vm.screenState.value as HomeScreenState.Ready).calendarView)
+
+        vm.setCalendarView(CalendarView.Week)
+        advanceUntilIdle()
+        assertEquals(CalendarView.Week, (vm.screenState.value as HomeScreenState.Ready).calendarView)
+    }
+
+    @Test
+    fun weekNav_movesTheSelectedDayByAWeekAndKeepsTheMonthInStep() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val start = vm.screenState.value as HomeScreenState.Ready
+        val startDay = start.selectedDay
+        assertEquals(weekStart(startDay), start.weekStart)
+
+        vm.showNextWeek()
+        advanceUntilIdle()
+        val next = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(startDay.plus(7, DateTimeUnit.DAY), next.selectedDay)
+        // Weeks stay Monday-anchored, and the month grid follows the week across a month boundary,
+        // so toggling back to it lands on the month just been looked at.
+        assertEquals(DayOfWeek.MONDAY, next.weekStart.dayOfWeek)
+        assertEquals(LocalDate(next.selectedDay.year, next.selectedDay.month.number, 1), next.displayedMonth)
+        assertEquals(7, next.weekDays.size)
+        assertEquals(next.weekStart, next.weekDays.first())
+
+        vm.showPreviousWeek()
+        vm.showPreviousWeek()
+        advanceUntilIdle()
+        val prev = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(startDay.minus(7, DateTimeUnit.DAY), prev.selectedDay)
+        assertEquals(LocalDate(prev.selectedDay.year, prev.selectedDay.month.number, 1), prev.displayedMonth)
+    }
+
+    @Test
+    fun weekEvents_groupOnlyTheVisibleWeek() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        val days = ready.weekDays.toSet()
+        assertTrue(ready.weekEvents.isNotEmpty())
+        assertTrue(ready.weekEvents.keys.all { it in days })
+        assertTrue(ready.weekEvents.all { (day, events) -> events.all { it.date == day } })
+        // Nothing from the week is dropped on the way into the grouping.
+        assertEquals(
+            ready.calendar.events.count { it.date in days },
+            ready.weekEvents.values.sumOf { it.size },
+        )
+    }
+
+    @Test
+    fun openNewEvent_opensABlankFormOnTodayWhateverMonthIsBeingBrowsed() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+        assertNull((vm.screenState.value as HomeScreenState.Ready).eventEditor)
+
+        // Park the grid on another month first: the "+" must not put an event on a month somebody
+        // merely browsed past.
+        vm.showNextMonth()
+        vm.openNewEvent()
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        val target = assertIs<EventEditorTarget.New>(ready.eventEditor)
+        assertEquals(ready.today, target.date)
+        assertFalse(ready.savingEvent)
+
+        vm.closeEventEditor()
+        advanceUntilIdle()
+        assertNull((vm.screenState.value as HomeScreenState.Ready).eventEditor)
+    }
+
+    @Test
+    fun openEvent_onAWritableCalendarOpensItForEditing() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val event = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEvent(event)
+        advanceUntilIdle()
+
+        val target = assertIs<EventEditorTarget.Existing>(
+            (vm.screenState.value as HomeScreenState.Ready).eventEditor,
+        )
+        assertEquals(event, target.event)
+        assertTrue(target.canWrite)
+        // The expansion carries the whole event's bounds, which is what the form opens prefilled on.
+        assertEquals(LocalDateTime(event.date, LocalTime(9, 0)), target.event.start)
+    }
+
+    @Test
+    fun openEvent_onAReadOnlyCalendarOpensItWithoutWriteAccess() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        // The subscribed work roster: its details are still worth reaching, they just can't change.
+        val event = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.c_arbejde" }
+        vm.openEvent(event)
+        advanceUntilIdle()
+
+        val target = assertIs<EventEditorTarget.Existing>(
+            (vm.screenState.value as HomeScreenState.Ready).eventEditor,
+        )
+        assertFalse(target.canWrite)
+    }
+
+    @Test
+    fun saveEvent_writesItAndClosesTheSurface() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val today = (vm.screenState.value as HomeScreenState.Ready).today
+        vm.openNewEvent()
+        vm.saveEvent("calendar.matt", draftOn(today, "Yoga"))
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventEditor)
+        assertFalse(ready.savingEvent)
+        assertNull(ready.toast)
+        assertTrue(ready.selectedDayEvents.any { it.title == "Yoga" && it.sourceId == "calendar.matt" })
+    }
+
+    @Test
+    fun saveEvent_failure_keepsTheSurfaceOpenSoNothingTypedIsLost() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(FailingCalendarWriteAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val today = (vm.screenState.value as HomeScreenState.Ready).today
+        vm.openNewEvent()
+        vm.saveEvent("calendar.matt", draftOn(today, "Yoga"))
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertIs<EventEditorTarget.New>(ready.eventEditor)
+        assertFalse(ready.savingEvent)
+        assertEquals("Kunne ikke gemme", ready.toast?.text)
+    }
+
+    @Test
+    fun saveEvent_onAnOpenEventReplacesItRatherThanAppending() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val before = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEvent(before)
+        // The calendar argument is ignored on the edit path — the event's own calendar is written to.
+        vm.saveEvent("calendar.cecilie", draftOn(before.date, "Morgenmøde (flyttet)"))
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventEditor)
+        val same = ready.calendar.events.filter { it.uid == before.uid }
+        assertEquals(1, same.size)
+        assertEquals("Morgenmøde (flyttet)", same.single().title)
+        assertEquals("calendar.matt", same.single().sourceId)
+    }
+
+    @Test
+    fun deleteEvent_removesItAndClosesTheSurface() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val event = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEvent(event)
+        vm.deleteEvent()
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventEditor)
+        assertTrue(ready.calendar.events.none { it.uid == event.uid })
+    }
+
+    @Test
+    fun openEventDetail_thenEdit_handsTheSameEventToTheEditorAndClosesThePopup() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val event = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEventDetail(event)
+        advanceUntilIdle()
+
+        val opened = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(event, opened.eventDetail)
+        assertNull(opened.eventEditor)
+
+        vm.editEventDetail()
+        advanceUntilIdle()
+
+        val editing = vm.screenState.value as HomeScreenState.Ready
+        assertNull(editing.eventDetail)
+        val target = assertIs<EventEditorTarget.Existing>(editing.eventEditor)
+        assertEquals(event, target.event)
+        assertTrue(target.canWrite)
+    }
+
+    @Test
+    fun closeEventDetail_leavesTheEventAlone() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val event = (vm.screenState.value as HomeScreenState.Ready).selectedDayEvents.first()
+        vm.openEventDetail(event)
+        vm.closeEventDetail()
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventDetail)
+        assertNull(ready.eventEditor)
+        assertTrue(ready.calendar.events.any { it.uid == event.uid })
+    }
+
+    @Test
+    fun deleteEventDetail_removesItAndClosesThePopup() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val event = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEventDetail(event)
+        vm.deleteEventDetail()
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventDetail)
+        assertFalse(ready.savingEvent)
+        assertTrue(ready.calendar.events.none { it.uid == event.uid })
+    }
+
+    @Test
+    fun deleteEventDetail_failure_keepsThePopupOpenAndSaysSo() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(FailingCalendarDeleteAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val event = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEventDetail(event)
+        vm.deleteEventDetail()
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(event, ready.eventDetail)
+        assertFalse(ready.savingEvent)
+        assertEquals("Kunne ikke slette", ready.toast?.text)
+    }
+
+    @Test
+    fun toggleCalendarFilter_appliesToTheViewBeingShownAndIsWrittenThrough() = runTest(mainDispatcher) {
+        val store = InMemoryCalendarFilterStore()
+        val vm = HomepageViewModel(MockAdapter(), store)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        vm.toggleCalendarFilter("calendar.c_arbejde")
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(setOf("calendar.c_arbejde"), ready.calendarFilters.hidden(CalendarView.Month))
+        assertTrue(ready.calendarFilters.hidden(CalendarView.Week).isEmpty())
+        // Written through on every change — a wall tablet is restarted by a power cut, not by anyone
+        // closing a settings screen.
+        assertEquals(ready.calendarFilters, store.read())
+    }
+
+    @Test
+    fun hiddenCalendar_dropsOutOfEverythingTheViewShows_andOnlyThatView() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter(), InMemoryCalendarFilterStore())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val roster = "calendar.c_arbejde"
+        val before = vm.screenState.value as HomeScreenState.Ready
+        assertTrue(before.selectedDayEvents.any { it.sourceId == roster })
+        assertTrue(before.dayMarks.getValue(before.today.day).sourceIds.contains(roster))
+
+        vm.toggleCalendarFilter(roster)
+        advanceUntilIdle()
+
+        // Month view: the agenda rows *and* the grid's dots.
+        val month = vm.screenState.value as HomeScreenState.Ready
+        assertTrue(month.selectedDayEvents.none { it.sourceId == roster })
+        assertTrue(month.dayMarks.values.none { roster in it.sourceIds })
+
+        // The week keeps its own setting — the roster is the point of that grid.
+        vm.setCalendarView(CalendarView.Week)
+        advanceUntilIdle()
+        val week = vm.screenState.value as HomeScreenState.Ready
+        assertTrue(week.weekEvents.values.flatten().any { it.sourceId == roster })
+    }
+
+    @Test
+    fun calendarSettings_openAndClose() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+        assertFalse((vm.screenState.value as HomeScreenState.Ready).calendarSettingsOpen)
+
+        vm.openCalendarSettings()
+        advanceUntilIdle()
+        assertTrue((vm.screenState.value as HomeScreenState.Ready).calendarSettingsOpen)
+
+        vm.closeCalendarSettings()
+        advanceUntilIdle()
+        assertFalse((vm.screenState.value as HomeScreenState.Ready).calendarSettingsOpen)
+    }
+
+    @Test
+    fun selectedDayTodos_putWhatIsLeftToDoFirst() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val today = (vm.screenState.value as HomeScreenState.Ready).today
+        vm.addTodo(today, "Nyeste opgave")
+        advanceUntilIdle()
+
+        val added = (vm.screenState.value as HomeScreenState.Ready).selectedDayTodos
+        val first = added.first { !it.done }
+        vm.toggleTodo(first.id)
+        advanceUntilIdle()
+
+        val after = (vm.screenState.value as HomeScreenState.Ready).selectedDayTodos
+        assertEquals(first.id, after.last().id)
+        assertTrue(after.map { it.done } == after.map { it.done }.sortedBy { it })
+    }
+
+    /** A one-hour event on [day], the shape the editor's wheels hand up. */
+    private fun draftOn(day: LocalDate, title: String): CalendarEventDraft = buildEventDraft(
+        summary = title,
+        start = LocalDateTime(day, LocalTime(8, 30)),
+        end = LocalDateTime(day, LocalTime(9, 30)),
+        allDay = false,
+        location = null,
+    )
+
+    /** Writes that fail the way a Home Assistant round trip does when the connection is down. */
+    private class FailingCalendarWriteAdapter(
+        delegate: HomeAdapter = MockAdapter(),
+    ) : HomeAdapter by delegate {
+        override suspend fun createEvent(sourceId: String, draft: CalendarEventDraft): Unit =
+            throw IllegalStateException("no Home Assistant connection")
+    }
+
+    /** The same, for the delete path — what the detail popup's trash runs into offline. */
+    private class FailingCalendarDeleteAdapter(
+        delegate: HomeAdapter = MockAdapter(),
+    ) : HomeAdapter by delegate {
+        override suspend fun deleteEvent(
+            sourceId: String,
+            uid: String,
+            recurrenceId: String?,
+            range: RecurrenceRange,
+        ): Unit = throw IllegalStateException("no Home Assistant connection")
     }
 
     @Test

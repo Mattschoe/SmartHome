@@ -1,6 +1,11 @@
 package com.mattschoe.smarthome.data.ha
 
+import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.Room
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 
 /**
  * The Home Assistant entities that back one [Room]'s controls. A room typically has several lights, so
@@ -34,6 +39,67 @@ val SWITCH_LIGHTS_BY_ROOM: Map<Room, List<String>> = mapOf(
 val MEDIA_PLAYER_BY_ROOM: Map<Room, String> = mapOf(
     Room.Bedroom to "media_player.sovevaerelse",
 )
+
+/** Home Assistant's `CalendarEntityFeature.CREATE_EVENT` bit — what makes a calendar writable. */
+private const val CalendarCreateEvent = 1
+
+/**
+ * Home Assistant's `TodoListEntityFeature.SET_DUE_DATE_ON_ITEM` bit. The dashboard's todos are
+ * bucketed by day, so a list that cannot carry a due date (the HAOS-default `todo.shopping_list`
+ * reports 15 — create/delete/update/move and nothing else) structurally cannot back the panel.
+ */
+private const val TodoSetDueDate = 16
+
+/**
+ * The home's calendars, from the `get_states` snapshot: every `calendar.*` entity, labelled by its
+ * `friendly_name` and marked writable from its own `supported_features`. Derived rather than
+ * configured, so adding a calendar in Home Assistant is all it takes for the app to see it — and a
+ * read-only subscription (an external ICS feed) is correctly refused as a write target.
+ *
+ * Ordered by entity id so each calendar keeps the same agenda dot color across sessions.
+ */
+fun discoverCalendarSources(
+    states: List<HaStateDto>,
+    entities: List<HaEntityRegistryDto> = emptyList(),
+): List<CalendarSource> {
+    val colorById = entities.associate { it.entity_id to it.calendarColor() }
+    return states
+        .filter { it.entity_id.startsWith("calendar.") }
+        .sortedBy { it.entity_id }
+        .map { state ->
+            CalendarSource(
+                id = state.entity_id,
+                displayName = state.attrString("friendly_name") ?: state.entity_id.removePrefix("calendar."),
+                canWrite = (state.attrInt("supported_features") ?: 0) and CalendarCreateEvent != 0,
+                color = colorById[state.entity_id],
+            )
+        }
+}
+
+/**
+ * The color set on a calendar in Home Assistant, one of its own color *names* (`amber`, `primary`,
+ * `dark-grey`, …) — it is a registry option rather than an entity attribute, so it arrives with
+ * `config/entity_registry/list` and not with `get_states`. `null` when no color has been picked.
+ */
+private fun HaEntityRegistryDto.calendarColor(): String? =
+    ((options["calendar"] as? JsonObject)?.get("color") as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.contentOrNull
+
+/**
+ * The `todo.*` list backing the dashboard's checklist: the first that supports due dates (see
+ * [TodoSetDueDate]). `null` when the home has no such list, which leaves the todo intents inert
+ * rather than writing into the wrong list.
+ */
+fun discoverTodoEntity(states: List<HaStateDto>): String? = states
+    .filter { it.entity_id.startsWith("todo.") }
+    .sortedBy { it.entity_id }
+    .firstOrNull { (it.attrInt("supported_features") ?: 0) and TodoSetDueDate != 0 }
+    ?.entity_id
+
+private fun HaStateDto.attr(key: String): JsonPrimitive? = attributes[key] as? JsonPrimitive
+private fun HaStateDto.attrInt(key: String): Int? = attr(key)?.intOrNull
+private fun HaStateDto.attrString(key: String): String? = attr(key)?.takeIf { it.isString }?.contentOrNull
 
 /**
  * Normalize an area or room name for matching: lowercase, keep only letters/digits. So the HA area

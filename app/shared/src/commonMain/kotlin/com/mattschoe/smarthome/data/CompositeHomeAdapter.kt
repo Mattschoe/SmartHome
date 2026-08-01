@@ -3,8 +3,10 @@ package com.mattschoe.smarthome.data
 import com.mattschoe.smarthome.data.ma.MusicData
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.BrowseItem
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
@@ -72,6 +74,25 @@ class CompositeHomeAdapter(
     override fun addTodo(due: LocalDate, label: String) = ha.addTodo(due, label)
     override fun toggleTodo(id: String) = ha.toggleTodo(id)
     override fun editTodo(id: String, label: String) = ha.editTodo(id, label)
+
+    // The calendar is entirely HA's — Music Assistant has no part in it, and [withMusic] leaves
+    // `calendar` untouched, so the merged state carries HA's events and todos through unchanged.
+    override fun refreshCalendar() = ha.refreshCalendar()
+    override suspend fun createEvent(sourceId: String, draft: CalendarEventDraft) =
+        ha.createEvent(sourceId, draft)
+    override suspend fun updateEvent(
+        sourceId: String,
+        uid: String,
+        draft: CalendarEventDraft,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) = ha.updateEvent(sourceId, uid, draft, recurrenceId, range)
+    override suspend fun deleteEvent(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) = ha.deleteEvent(sourceId, uid, recurrenceId, range)
 }
 
 /**

@@ -1,35 +1,55 @@
 package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.ha.HaAreaDto
+import com.mattschoe.smarthome.data.ha.HaCalendarEventDto
 import com.mattschoe.smarthome.data.ha.HaDeviceDto
 import com.mattschoe.smarthome.data.ha.HaEntityRegistryDto
 import com.mattschoe.smarthome.data.ha.HaStateDto
+import com.mattschoe.smarthome.data.ha.HaTodoItemsDto
 import com.mattschoe.smarthome.data.ha.MEDIA_PLAYER_BY_ROOM
 import com.mattschoe.smarthome.data.ha.RoomEntities
 import com.mattschoe.smarthome.data.ha.SWITCH_LIGHTS_BY_ROOM
+import com.mattschoe.smarthome.data.ha.discoverCalendarSources
 import com.mattschoe.smarthome.data.ha.discoverRoomEntities
+import com.mattschoe.smarthome.data.ha.discoverTodoEntity
+import com.mattschoe.smarthome.data.ha.mapCalendarEvents
+import com.mattschoe.smarthome.data.ha.mapTodoItems
 import com.mattschoe.smarthome.data.ha.resolveSyncLeaders
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
+import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
+import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.model.Warmth
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
+import io.ktor.http.isSuccess
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,21 +57,34 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import kotlin.concurrent.Volatile
 import kotlin.math.roundToInt
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.plus
+import kotlinx.datetime.todayIn
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -70,15 +103,42 @@ import kotlinx.serialization.json.putJsonObject
  * snappy dial/slider feel, then fire the matching `call_service`; HA's echoed event reconciles truth.
  * Only entities we mapped are tracked — sensor churn never triggers a rebuild.
  *
- * Climate, calendar and todos have no entities in this home yet, so they are emitted **blank** (the
- * left card's climate tiles render "—", the calendar/todo lists are empty). The Media panel's queue
- * is likewise empty: HA's `media_player` exposes no standard play-queue.
+ * Calendars and todos come from the same instance but over their own channels: events are fetched
+ * over REST for a rolling window (HA has no WebSocket command that lists a date range), while the
+ * todo list arrives as a push subscription. Climate has no entities in this home yet, so it is
+ * emitted **blank** (the left card's tiles render "—"), and the Media panel's queue is likewise
+ * empty: HA's `media_player` exposes no standard play-queue.
  */
-class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
+class HomeAssistantAdapter(
+    private val config: HaConfig,
+    private val cache: CalendarCache? = null,
+) : HomeAdapter {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val client = HttpClient { install(WebSockets) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // Calendar/todo data, kept beside the entity states as the other half of what `rebuild()` reads.
+    // Flows rather than plain fields: todo writes apply optimistically from the caller's thread while
+    // the connection coroutine writes the backend's echo.
+    private val calendarSources = MutableStateFlow<List<CalendarSource>>(emptyList())
+    private val calendarEvents = MutableStateFlow<List<CalendarEvent>>(emptyList())
+    private val todoItems = MutableStateFlow<List<TodoItem>>(emptyList())
+    // True until a live fetch lands — what the panel labels as showing cached, possibly outdated data.
+    private val calendarStale = MutableStateFlow(true)
+    @Volatile private var todoEntityId: String? = null
+    // The list the live subscription follows; null before one is taken out and after every drop,
+    // since a socket takes its subscriptions with it.
+    @Volatile private var subscribedTodoEntity: String? = null
+
+    // Coalesces calendar refetch requests (panel opened, month navigated, after a write, the slow
+    // poll) into one fetch at a time. Conflated, so a request made while disconnected fires on
+    // reconnect instead of piling up.
+    private val calendarRefreshTrigger = Channel<Unit>(Channel.CONFLATED)
+
+    // Same shape for registry changes: HA reports them one entity at a time, and the whole burst
+    // should cost a single re-discovery.
+    private val rediscoverTrigger = Channel<Unit>(Channel.CONFLATED)
 
     private val _state = MutableStateFlow(blankHome())
 
@@ -87,16 +147,32 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
     // a value mid-drag. A thread-safe StateFlow (setter thread writes, connection thread reads) — no lock.
     private val holds = MutableStateFlow<Map<Room, RoomHold>>(emptyMap())
 
-    // All touched only from the single connection coroutine (setup + read loop), so no locking needed.
-    private var roomEntities: Map<Room, RoomEntities> = emptyMap()
-    private var mappedEntityIds: Set<String> = emptySet()
-    private val entityStates = mutableMapOf<String, HaStateDto>()
+    // The discovered shape of the home, and the live states of the entities it maps. Written by both
+    // the read loop (`state_changed`) and re-discovery (a registry change), so all three are published
+    // rather than mutated: an immutable map swapped atomically needs no lock on either side.
+    @Volatile private var roomEntities: Map<Room, RoomEntities> = emptyMap()
+    @Volatile private var mappedEntityIds: Set<String> = emptySet()
+    private val entityStates = MutableStateFlow<Map<String, HaStateDto>>(emptyMap())
 
+    // Request/response correlation, plus the per-subscription event handlers. The single read loop
+    // completes the deferreds and fans events to their handler; [request] awaits its own reply.
+    private val pendingMutex = Mutex()
     private var nextId = 1
+    private val pending = mutableMapOf<Int, CompletableDeferred<JsonObject>>()
+    private val eventHandlers = mutableMapOf<Int, (JsonObject) -> Unit>()
+
     private var reconnectDelay = INITIAL_RECONNECT_MS
     @Volatile private var session: DefaultClientWebSocketSession? = null
 
     init {
+        // Render the last-known calendar (marked stale) before the socket is even up: the household
+        // has no other calendar client, so an unreachable box must not mean an empty calendar.
+        cache?.read()?.let { cached ->
+            calendarSources.value = cached.sources
+            calendarEvents.value = cached.events
+            todoItems.value = cached.todos
+            _state.value = blankHome()
+        }
         scope.launch { connectionLoop() }
     }
 
@@ -233,15 +309,172 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         speaker(room)?.let { callService("media_player", "unjoin", null, entityTarget(it)) }
     }
 
-    // No todo list is configured in this home yet, so the todo intents are safe no-ops for now.
-    override fun addTodo(due: LocalDate, label: String) {}
-    override fun toggleTodo(id: String) {}
-    override fun editTodo(id: String, label: String) {}
+    /**
+     * Ask the backend for a fresh calendar window. Unlike lights and media, calendar events are not
+     * pushed — the window is fetched — so opening the panel or navigating months is a hint that now
+     * is a good moment to refetch (and to force a subscribed calendar's coordinator to re-poll).
+     * Which panel is showing stays entirely the ViewModel's business; this only receives the nudge.
+     */
+    override fun refreshCalendar() {
+        calendarRefreshTrigger.trySend(Unit)
+    }
+
+    // Todo intents. Each applies the matching pure transition optimistically (so the checkbox never
+    // lags the tap) and then calls the HA service; the list's push subscription re-publishes the
+    // whole list moments later, replacing the optimistic row — and its id — with HA's own.
+
+    /**
+     * Add a todo due on [due]. HA mints the real `uid`, so the optimistic row carries a temporary one
+     * until the echo lands (rows are keyed by id, so it re-keys rather than rebuilds).
+     */
+    @OptIn(ExperimentalUuidApi::class)
+    override fun addTodo(due: LocalDate, label: String) {
+        val entityId = todoEntityId ?: return
+        val trimmed = label.trim()
+        if (trimmed.isEmpty()) return
+        mutateTodos { it.addTodo(Uuid.random().toString(), due, trimmed) }
+        callService(
+            "todo",
+            "add_item",
+            buildJsonObject { put("item", trimmed); put("due_date", due.toString()) },
+            entityTarget(entityId),
+        )
+    }
+
+    override fun toggleTodo(id: String) {
+        val entityId = todoEntityId ?: return
+        val wasDone = todoItems.value.firstOrNull { it.id == id }?.done ?: return
+        mutateTodos { it.toggleTodo(id) }
+        callService(
+            "todo",
+            "update_item",
+            // Always address by uid: `update_item` matches on uid *or* summary, and two todos may
+            // well share a summary.
+            buildJsonObject { put("item", id); put("status", if (wasDone) "needs_action" else "completed") },
+            entityTarget(entityId),
+        )
+    }
+
+    /** Set a todo's label; committing a blank one removes it — the UI's delete escape hatch. */
+    override fun editTodo(id: String, label: String) {
+        val entityId = todoEntityId ?: return
+        val trimmed = label.trim()
+        mutateTodos { it.editTodo(id, trimmed) }
+        if (trimmed.isEmpty()) {
+            // `remove_item` takes a *list* of items, unlike the other two.
+            callService(
+                "todo",
+                "remove_item",
+                buildJsonObject { putJsonArray("item") { add(id) } },
+                entityTarget(entityId),
+            )
+        } else {
+            callService(
+                "todo",
+                "update_item",
+                buildJsonObject { put("item", id); put("rename", trimmed) },
+                entityTarget(entityId),
+            )
+        }
+    }
+
+    /**
+     * Apply a pure todo transition to the published state *and* to the adapter's own todo field, so
+     * the optimistic edit survives the next `rebuild()` (which reads the field, not the old state).
+     */
+    private fun mutateTodos(transform: (HomeState) -> HomeState) {
+        val next = transform(_state.value)
+        todoItems.value = next.calendar.todos
+        _state.value = next
+    }
+
+    // Calendar writes. No optimistic apply: unlike a checkbox, a saved event is worth being sure
+    // about, and the caller is already waiting on the reply — so the panel updates from the refetch
+    // these trigger, which is also the only way an expanded recurring series comes back correct.
+
+    override suspend fun createEvent(sourceId: String, draft: CalendarEventDraft) {
+        writableSource(sourceId)
+        request("calendar/event/create", buildJsonObject {
+            put("entity_id", sourceId)
+            put("event", draft.toEventJson())
+        })
+        refreshCalendar()
+    }
+
+    override suspend fun updateEvent(
+        sourceId: String,
+        uid: String,
+        draft: CalendarEventDraft,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) {
+        writableSource(sourceId)
+        request("calendar/event/update", buildJsonObject {
+            put("entity_id", sourceId)
+            put("uid", uid)
+            putRecurrence(recurrenceId, range)
+            put("event", draft.toEventJson())
+        })
+        refreshCalendar()
+    }
+
+    override suspend fun deleteEvent(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) {
+        writableSource(sourceId)
+        request("calendar/event/delete", buildJsonObject {
+            put("entity_id", sourceId)
+            put("uid", uid)
+            putRecurrence(recurrenceId, range)
+        })
+        refreshCalendar()
+    }
+
+    /** The calendar [sourceId] names, or a failure — a read-only calendar is never a write target. */
+    private fun writableSource(sourceId: String): CalendarSource {
+        val source = calendarSources.value.firstOrNull { it.id == sourceId }
+            ?: throw IllegalArgumentException("unknown calendar '$sourceId'")
+        require(source.canWrite) { "calendar '${source.displayName}' is read-only" }
+        return source
+    }
+
+    /**
+     * Scope a write to one occurrence of a recurring series. Both keys are omitted for a plain event:
+     * a `recurrence_id` on a non-recurring event is meaningless, and an empty range is HA's own
+     * "just this one".
+     */
+    private fun JsonObjectBuilder.putRecurrence(recurrenceId: String?, range: RecurrenceRange) {
+        if (recurrenceId == null) return
+        put("recurrence_id", recurrenceId)
+        if (range == RecurrenceRange.ThisAndFuture) put("recurrence_range", "THISANDFUTURE")
+    }
+
+    /**
+     * The `event` payload of a calendar write. All-day events carry plain dates, timed ones local
+     * date-times — the same either/or Home Assistant sends back on the read side.
+     */
+    private fun CalendarEventDraft.toEventJson(): JsonObject = buildJsonObject {
+        put("summary", summary)
+        if (allDay) {
+            put("dtstart", start.date.toString())
+            put("dtend", end.date.toString())
+        } else {
+            put("dtstart", start.toString())
+            put("dtend", end.toString())
+        }
+        description?.let { put("description", it) }
+        location?.let { put("location", it) }
+        rrule?.let { put("rrule", it) }
+    }
 
     private fun areaId(room: Room): String? = roomEntities[room]?.areaId
     // Reads aggregate over both real lights and switch-backed lamps (a lit switch counts as 100%).
     private fun lightsOf(room: Room): List<HaStateDto> =
-        (roomEntities[room]?.lightIds.orEmpty() + roomEntities[room]?.switchIds.orEmpty()).mapNotNull { entityStates[it] }
+        (roomEntities[room]?.lightIds.orEmpty() + roomEntities[room]?.switchIds.orEmpty())
+            .mapNotNull { entityStates.value[it] }
     private fun switchesOf(room: Room): List<String> = roomEntities[room]?.switchIds.orEmpty()
     private fun speaker(room: Room): String? = roomEntities[room]?.mediaPlayerId
 
@@ -273,6 +506,13 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
                         runSession()
                     } finally {
                         session = null
+                        failPending()
+                        // Subscriptions die with the socket; the next session takes them out again.
+                        subscribedTodoEntity = null
+                        // Whatever calendar is on screen is now last-known, not live — say so rather
+                        // than let it read as current until the socket comes back.
+                        calendarStale.value = true
+                        rebuild()
                     }
                 }
             } catch (e: HaAuthException) {
@@ -289,15 +529,46 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         }
     }
 
-    /** Auth handshake → discovery → snapshot → subscribe → read loop. Returns when the socket closes. */
-    private suspend fun DefaultClientWebSocketSession.runSession() {
+    /**
+     * Auth handshake → read loop → discovery → snapshot → subscriptions. Returns when the socket
+     * closes. The handshake runs *before* the read loop starts: its frames carry no `id`, so the
+     * dispatcher has nothing to correlate them by, and they are strictly sequential anyway.
+     */
+    private suspend fun DefaultClientWebSocketSession.runSession() = coroutineScope {
         receiveJson() // auth_required
-        send(buildJsonObject { put("type", "auth"); put("access_token", config.token) }.toString())
+        sendText(buildJsonObject { put("type", "auth"); put("access_token", config.token) }.toString())
         val auth = receiveJson()
         if (auth["type"]?.jsonPrimitive?.content != "auth_ok") {
             throw HaAuthException(auth["message"]?.jsonPrimitive?.content ?: "auth_invalid")
         }
 
+        val reader = launch { readLoop() }
+
+        discover()
+
+        request("subscribe_events", buildJsonObject { put("event_type", "state_changed") }) {
+            handleStateChanged(it)
+        }
+        // Registry edits — a calendar recolored or renamed, a lamp moved into a room, a todo list
+        // created — are not `state_changed` events, so without these the home's shape would stay
+        // frozen as it was at connect: on a wall tablet, until someone restarts the app.
+        REGISTRY_EVENTS.forEach { eventType ->
+            request("subscribe_events", buildJsonObject { put("event_type", eventType) }) {
+                rediscoverTrigger.trySend(Unit)
+            }
+        }
+        reconnectDelay = INITIAL_RECONNECT_MS // healthy connection — reset backoff
+        onConnected()
+
+        reader.join() // returns when `incoming` closes; lets the webSocket block end and reconnect
+    }
+
+    /**
+     * Read the home's shape: which entities back each room, the calendars (with the colors set on them
+     * in Home Assistant) and which todo list can carry due dates. Runs at connect and again on every
+     * registry change, so an edit made in HA lands without a reconnect.
+     */
+    private suspend fun discover() {
         val areas = json.decodeFromJsonElement<List<HaAreaDto>>(request("config/area_registry/list"))
         val devices = json.decodeFromJsonElement<List<HaDeviceDto>>(request("config/device_registry/list"))
         val entities = json.decodeFromJsonElement<List<HaEntityRegistryDto>>(request("config/entity_registry/list"))
@@ -305,47 +576,238 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         mappedEntityIds = roomEntities.values.flatMap { it.lightIds + it.switchIds + listOfNotNull(it.mediaPlayerId) }.toSet()
 
         val states = json.decodeFromJsonElement<List<HaStateDto>>(request("get_states"))
-        entityStates.clear()
-        states.forEach { if (it.entity_id in mappedEntityIds) entityStates[it.entity_id] = it }
+        entityStates.value = states.filter { it.entity_id in mappedEntityIds }.associateBy { it.entity_id }
+        // Calendars and the todo list are discovered from the same snapshot — no second round-trip.
+        // Their colors are a registry option rather than an entity attribute, hence both inputs.
+        calendarSources.value = discoverCalendarSources(states, entities)
+        todoEntityId = discoverTodoEntity(states)
+        // A home that lost its todo list keeps no rows from it: the checklist says there is no list.
+        if (todoEntityId == null) todoItems.value = emptyList()
         rebuild()
+        // Follows the list across a change, and re-subscribes on a fresh socket (which drops them all).
+        if (todoEntityId != subscribedTodoEntity) subscribeTodos()
+    }
 
-        request("subscribe_events", buildJsonObject { put("event_type", "state_changed") })
-        reconnectDelay = INITIAL_RECONNECT_MS // healthy connection — reset backoff
+    /** Background work kicked off once the session is live: keeping the calendar window fetched. */
+    private fun CoroutineScope.onConnected() {
+        launch { calendarRefreshConsumer() }
+        launch { calendarPollLoop() }
+        launch { rediscoverConsumer() }
+    }
 
+    /**
+     * Re-read the registries after Home Assistant reports a change. Debounced ahead of the work: HA
+     * emits one event per entity, so adding an integration arrives as a burst that should cost a
+     * single pass. A newly added or recolored calendar also wants its events now rather than at the
+     * next slow poll.
+     */
+    private suspend fun rediscoverConsumer() {
+        for (unit in rediscoverTrigger) {
+            delay(REDISCOVER_DEBOUNCE_MS)
+            runCatching { discover() }
+                .onFailure { println("HomeAssistantAdapter: re-discovery failed: ${it.message}") }
+            calendarRefreshTrigger.trySend(Unit)
+        }
+    }
+
+    /**
+     * The todo list pushes its **whole** contents on every change, so there is nothing to diff and
+     * no polling — a change made on the other phone lands here as the next event. A home with no
+     * due-date-capable list simply has no subscription (and inert todo intents).
+     *
+     * The handler checks that it still speaks for the current list: when the list changes under a
+     * live session the old subscription keeps pushing (it is only dropped with the socket), and its
+     * events must not overwrite the new list's.
+     */
+    private suspend fun subscribeTodos() {
+        val entityId = todoEntityId ?: return
+        runCatching {
+            request("todo/item/subscribe", buildJsonObject { put("entity_id", entityId) }) { event ->
+                if (todoEntityId == entityId) handleTodoItems(event)
+            }
+        }
+            .onSuccess { subscribedTodoEntity = entityId }
+            .onFailure { println("HomeAssistantAdapter: todo subscribe failed: ${it.message}") }
+    }
+
+    private fun handleTodoItems(event: JsonObject) {
+        val dto = runCatching { json.decodeFromJsonElement<HaTodoItemsDto>(event) }.getOrNull() ?: return
+        todoItems.value = mapTodoItems(dto.items, fallbackDue = today())
+        persistCalendar()
+        rebuild()
+    }
+
+    // --- Calendar reads (REST; HA has no WebSocket command that lists a date range) ---
+
+    /** Serialize refetches: one at a time, with a short trailing debounce to coalesce bursts. */
+    private suspend fun calendarRefreshConsumer() {
+        for (unit in calendarRefreshTrigger) {
+            runCatching { refreshCalendarNow() }
+                .onFailure { println("HomeAssistantAdapter: calendar fetch failed: ${it.message}") }
+            delay(CALENDAR_DEBOUNCE_MS)
+        }
+    }
+
+    /**
+     * Keeps the window fresh without anything having to ask. Also how the window follows the date:
+     * it is recomputed from *today* on every fetch, so a wall tablet left running rolls over on its
+     * own. The first tick fires the initial load immediately.
+     */
+    private suspend fun calendarPollLoop() {
+        while (true) {
+            calendarRefreshTrigger.trySend(Unit)
+            delay(CALENDAR_POLL_MS)
+        }
+    }
+
+    /**
+     * Fetch every calendar's window and republish. Read-only sources are poked first: a subscribed
+     * calendar is coordinator-backed and polled once a day by default, which is far too stale for a
+     * work roster, and `homeassistant.update_entity` is what forces it to refresh now.
+     */
+    private suspend fun refreshCalendarNow() {
+        val sources = calendarSources.value
+        if (sources.isEmpty()) {
+            // A home with no calendar entities has nothing to fetch — that is an empty calendar, not
+            // an out-of-date one, so it must not be labelled offline.
+            calendarStale.value = false
+            rebuild()
+            return
+        }
+        val readOnly = sources.filterNot { it.canWrite }.map { it.id }
+        if (readOnly.isNotEmpty()) {
+            runCatching {
+                request("call_service", buildJsonObject {
+                    put("domain", "homeassistant")
+                    put("service", "update_entity")
+                    putJsonObject("target") { putJsonArray("entity_id") { readOnly.forEach { add(it) } } }
+                })
+            }
+        }
+        val today = today()
+        val start = today.plus(-CALENDAR_WINDOW_BACK_MONTHS, DateTimeUnit.MONTH)
+        val end = today.plus(CALENDAR_WINDOW_FORWARD_MONTHS, DateTimeUnit.MONTH)
+        val events = sources.flatMap { source ->
+            mapCalendarEvents(source.id, fetchEvents(source.id, start, end), TimeZone.currentSystemDefault())
+        }
+        calendarEvents.value = sortCalendarEvents(events)
+        calendarStale.value = false
+        persistCalendar()
+        rebuild()
+    }
+
+    /** One calendar's events between [start] and [end] (both days inclusive of their whole span). */
+    private suspend fun fetchEvents(entityId: String, start: LocalDate, end: LocalDate): List<HaCalendarEventDto> {
+        val response = client.get("${config.httpBase}/api/calendars/$entityId") {
+            header(HttpHeaders.Authorization, "Bearer ${config.token}")
+            parameter("start", LocalDateTime(start, LocalTime(0, 0)).toString())
+            parameter("end", LocalDateTime(end, LocalTime(0, 0)).toString())
+        }
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException("GET /api/calendars/$entityId -> ${response.status}")
+        }
+        return json.decodeFromString(response.bodyAsText())
+    }
+
+    private fun today(): LocalDate = Clock.System.todayIn(TimeZone.currentSystemDefault())
+
+    /** Write the current calendar window to the offline cache, if one is configured. */
+    private fun persistCalendar() {
+        cache?.write(
+            CachedCalendar(
+                sources = calendarSources.value,
+                events = calendarEvents.value,
+                todos = todoItems.value,
+            )
+        )
+    }
+
+    /**
+     * The single consumer of `incoming`. Every frame carries the `id` of the request or subscription
+     * it belongs to: a `result` completes that request's awaiter, an `event` goes to the handler
+     * registered for that subscription — so several subscriptions can run side by side.
+     */
+    private suspend fun DefaultClientWebSocketSession.readLoop() {
         for (frame in incoming) {
-            if (frame is Frame.Text) handleEvent(frame.readText())
+            if (frame !is Frame.Text) continue
+            val obj = runCatching { json.parseToJsonElement(frame.readText()).jsonObject }.getOrNull() ?: continue
+            val id = obj["id"]?.jsonPrimitive?.intOrNull ?: continue
+            when (obj["type"]?.jsonPrimitive?.content) {
+                // A reply with no awaiter is one whose caller already timed out — drop it.
+                "result" -> pendingMutex.withLock { pending.remove(id) }?.complete(obj)
+                "event" -> {
+                    val handler = pendingMutex.withLock { eventHandlers[id] }
+                    val event = obj["event"]?.jsonObject
+                    if (handler != null && event != null) handler(event)
+                }
+            }
         }
     }
 
     /** A `state_changed` event for a mapped entity patches its state and rebuilds; others are ignored. */
-    private fun handleEvent(text: String) {
-        val obj = json.parseToJsonElement(text).jsonObject
-        if (obj["type"]?.jsonPrimitive?.content != "event") return
-        val data = obj["event"]?.jsonObject?.get("data")?.jsonObject ?: return
+    private fun handleStateChanged(event: JsonObject) {
+        val data = event["data"]?.jsonObject ?: return
         val entityId = data["entity_id"]?.jsonPrimitive?.content ?: return
         if (entityId !in mappedEntityIds) return
 
         val newState = data["new_state"]
-        if (newState == null || newState is JsonNull) entityStates.remove(entityId)
-        else entityStates[entityId] = json.decodeFromJsonElement<HaStateDto>(newState)
+        if (newState == null || newState is JsonNull) entityStates.update { it - entityId }
+        else entityStates.update { it + (entityId to json.decodeFromJsonElement<HaStateDto>(newState)) }
         rebuild()
     }
 
-    /** Send a request with a fresh id and wait for its `result`, skipping unrelated frames. */
-    private suspend fun DefaultClientWebSocketSession.request(type: String, extra: JsonObject? = null): JsonElement {
-        val id = nextId++
-        send(buildJsonObject {
-            put("id", id)
-            put("type", type)
-            extra?.forEach { (k, v) -> put(k, v) }
-        }.toString())
-        while (true) {
-            val msg = receiveJson()
-            if (msg["type"]?.jsonPrimitive?.content == "result" &&
-                msg["id"]?.jsonPrimitive?.intOrNull == id
-            ) {
-                return msg["result"] ?: JsonNull
+    /**
+     * Send a command with a fresh id and await its `result`, correlated by that id. Passing [onEvent]
+     * makes it a **subscription**: the handler stays registered for the life of the session and
+     * receives every `event` frame HA pushes under the same id. Throws [HaCommandException] on an
+     * unsuccessful reply, on timeout, and when the socket is down.
+     */
+    private suspend fun request(
+        type: String,
+        extra: JsonObject? = null,
+        onEvent: ((JsonObject) -> Unit)? = null,
+    ): JsonElement {
+        val deferred = CompletableDeferred<JsonObject>()
+        val id = pendingMutex.withLock {
+            val i = nextId++
+            pending[i] = deferred
+            if (onEvent != null) eventHandlers[i] = onEvent
+            i
+        }
+        var failed = true
+        try {
+            sendText(buildJsonObject {
+                put("id", id)
+                put("type", type)
+                extra?.forEach { (k, v) -> put(k, v) }
+            }.toString())
+            val reply = withTimeout(REQUEST_TIMEOUT_MS) { deferred.await() }
+            if (reply["success"]?.jsonPrimitive?.booleanOrNull == false) {
+                val error = reply["error"]?.jsonObject
+                throw HaCommandException(
+                    type,
+                    error?.get("code")?.jsonPrimitive?.contentOrNull,
+                    error?.get("message")?.jsonPrimitive?.contentOrNull,
+                )
             }
+            failed = false
+            return reply["result"] ?: JsonNull
+        } finally {
+            // A subscription that never got its acknowledgement is not subscribed — drop its handler
+            // so a later id reuse (after a reconnect) can't inherit it.
+            pendingMutex.withLock {
+                pending.remove(id)
+                if (failed) eventHandlers.remove(id)
+            }
+        }
+    }
+
+    /** Fail every awaiting request when the socket drops, so callers don't hang until timeout. */
+    private suspend fun failPending() {
+        pendingMutex.withLock {
+            pending.values.forEach { it.completeExceptionally(HaCommandException("*", null, "connection closed")) }
+            pending.clear()
+            eventHandlers.clear()
         }
     }
 
@@ -356,24 +818,29 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         }
     }
 
+    /**
+     * Fire a service call and forget it — the truth comes back as a `state_changed` echo, not as this
+     * reply, so the reply is only read to log a rejection.
+     */
     private fun callService(domain: String, service: String, data: JsonObject?, target: JsonObject) {
         scope.launch {
-            send(buildJsonObject {
-                put("id", nextId++)
-                put("type", "call_service")
-                put("domain", domain)
-                put("service", service)
-                if (data != null) put("service_data", data)
-                put("target", target)
-            }.toString())
+            runCatching {
+                request("call_service", buildJsonObject {
+                    put("domain", domain)
+                    put("service", service)
+                    if (data != null) put("service_data", data)
+                    put("target", target)
+                })
+            }.onFailure { println("HomeAssistantAdapter: $domain.$service failed: ${it.message}") }
         }
     }
 
     private fun areaTarget(areaId: String): JsonObject = buildJsonObject { put("area_id", areaId) }
     private fun entityTarget(entityId: String): JsonObject = buildJsonObject { put("entity_id", entityId) }
 
-    private suspend fun send(text: String) {
-        session?.send(Frame.Text(text))
+    private suspend fun sendText(text: String) {
+        val open = session ?: throw HaCommandException("send", null, "no connection")
+        open.send(Frame.Text(text))
     }
 
     // --- HA entity states -> domain HomeState ---
@@ -388,7 +855,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         // Whose playback each speaker room is following, read off the players' `group_members`.
         val syncLeaders = resolveSyncLeaders(
             groupMembersByRoom = Room.entries.filter { it.hasSpeaker }
-                .associateWith { room -> speaker(room)?.let { entityStates[it] }.attrStringList("group_members") },
+                .associateWith { room -> speaker(room)?.let { entityStates.value[it] }.attrStringList("group_members") },
             roomByEntityId = roomEntities.entries
                 .mapNotNull { (room, entities) -> entities.mediaPlayerId?.let { it to room } }
                 .toMap(),
@@ -396,7 +863,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         _state.value = HomeState(
             rooms = Room.entries.associateWith { room ->
                 val lights = lightsOf(room)
-                val speaker = speaker(room)?.let { entityStates[it] }
+                val speaker = speaker(room)?.let { entityStates.value[it] }
                 val onLights = lights.filter { it.state == "on" }
                 val fromHa = RoomState(
                     // When the room's lamps are all off HA drops the brightness attribute; carry the
@@ -417,7 +884,7 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
             playlists = emptyList(),
             quickPicks = emptyList(),
             mixedForYou = emptyList(),
-            calendar = CalendarState(events = emptyList(), todos = emptyList()),
+            calendar = calendarState(),
         )
         pruneSettledHolds(activeHolds, survivors)
     }
@@ -498,7 +965,22 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         playlists = emptyList(),
         quickPicks = emptyList(),
         mixedForYou = emptyList(),
-        calendar = CalendarState(events = emptyList(), todos = emptyList()),
+        calendar = calendarState(),
+    )
+
+    /**
+     * The calendar payload `rebuild()` (and the pre-connection blank state) publishes, assembled from
+     * the adapter's own calendar fields — which may already hold the offline cache before the socket
+     * is up, hence the [CalendarState.stale] flag rather than an empty calendar.
+     */
+    private fun calendarState(): CalendarState = CalendarState(
+        events = calendarEvents.value,
+        todos = todoItems.value,
+        sources = calendarSources.value,
+        stale = calendarStale.value,
+        // Stale means nothing has been discovered yet (or the socket is down), and an unreached box is
+        // not the same as a home without a list — only claim the absence once we have actually looked.
+        hasTodoList = todoEntityId != null || calendarStale.value,
     )
 
     // --- Safe attribute readers (an absent or null attribute yields null, never throws) ---
@@ -519,10 +1001,32 @@ class HomeAssistantAdapter(private val config: HaConfig) : HomeAdapter {
         (attributes[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }
 
     private class HaAuthException(message: String) : Exception(message)
+    private class HaCommandException(type: String, code: String?, message: String?) :
+        Exception("HA command '$type' failed (code=$code): $message")
 
     private companion object {
         const val INITIAL_RECONNECT_MS = 1_000L
         const val MAX_RECONNECT_MS = 30_000L
+        // Registry lists are the slowest of these and answer well inside a second on a healthy box.
+        const val REQUEST_TIMEOUT_MS = 20_000L
         val HOLD = 3_000.milliseconds
+
+        // A generous rolling window: a household calendar is tiny, and fetching a year ahead means
+        // month navigation never has to reach the adapter (see the CORE RULE — the VM filters).
+        const val CALENDAR_WINDOW_BACK_MONTHS = 1
+        const val CALENDAR_WINDOW_FORWARD_MONTHS = 12
+        // Only a safety net: the panel asks for a refetch when it opens and after every write.
+        const val CALENDAR_POLL_MS = 15 * 60 * 1_000L
+        const val CALENDAR_DEBOUNCE_MS = 750L
+
+        // The registries whose changes redefine what the dashboard is looking at. Entity changes
+        // carry the calendar colors and names; area/device changes move entities between rooms.
+        val REGISTRY_EVENTS = listOf(
+            "entity_registry_updated",
+            "device_registry_updated",
+            "area_registry_updated",
+        )
+        // Long enough to swallow the burst HA emits while an integration is being set up.
+        const val REDISCOVER_DEBOUNCE_MS = 2_000L
     }
 }

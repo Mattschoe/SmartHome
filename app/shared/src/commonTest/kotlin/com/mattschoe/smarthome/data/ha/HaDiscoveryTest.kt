@@ -1,6 +1,9 @@
 package com.mattschoe.smarthome.data.ha
 
 import com.mattschoe.smarthome.data.model.Room
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -192,6 +195,84 @@ class HaDiscoveryTest {
 
         assertNull(leaders[Room.LivingRoom])
         assertNull(leaders[Room.Bedroom])
+    }
+
+    /** A `get_states` row carrying just the attributes calendar/todo discovery reads. */
+    private fun stateOf(entityId: String, name: String?, supportedFeatures: Int?) = HaStateDto(
+        entity_id = entityId,
+        state = "off",
+        attributes = buildJsonObject {
+            name?.let { put("friendly_name", it) }
+            supportedFeatures?.let { put("supported_features", it) }
+        },
+    )
+
+    @Test
+    fun calendarDiscovery_readsWritabilityFromSupportedFeatures() {
+        val states = listOf(
+            // A Local Calendar: create | delete | update.
+            stateOf("calendar.papkassehuset", "Papkassehuset", 7),
+            // A subscribed remote calendar declares nothing — read-only.
+            stateOf("calendar.c_arbejde", "C - Arbejde", 0),
+            stateOf("light.floor_lamp", "Gulvlampe", null), // not a calendar
+        )
+
+        val sources = discoverCalendarSources(states)
+
+        assertEquals(listOf("calendar.c_arbejde", "calendar.papkassehuset"), sources.map { it.id })
+        assertEquals(listOf("C - Arbejde", "Papkassehuset"), sources.map { it.displayName })
+        assertEquals(listOf(false, true), sources.map { it.canWrite })
+    }
+
+    @Test
+    fun calendarDiscovery_readsTheColorFromTheEntityRegistry() {
+        val states = listOf(
+            stateOf("calendar.m_arbejde", "M - Arbejde", 7),
+            stateOf("calendar.m_skole", "M - Skole", 7),
+            stateOf("calendar.papkassehuset", "Papkassehuset", 7),
+        )
+        val entities = listOf(
+            registryEntry("calendar.m_arbejde", color = "amber"),
+            // A calendar whose color was never picked carries no `calendar` options block at all.
+            HaEntityRegistryDto(entity_id = "calendar.m_skole"),
+            registryEntry("calendar.papkassehuset", color = "dark-grey"),
+        )
+
+        val sources = discoverCalendarSources(states, entities)
+
+        assertEquals(listOf("amber", null, "dark-grey"), sources.map { it.color })
+    }
+
+    /** An entity-registry row carrying a calendar color under `options.calendar.color`. */
+    private fun registryEntry(entityId: String, color: String) = HaEntityRegistryDto(
+        entity_id = entityId,
+        options = buildJsonObject {
+            putJsonObject("conversation") { put("should_expose", false) }
+            putJsonObject("calendar") { put("color", color) }
+        },
+    )
+
+    @Test
+    fun calendarDiscovery_fallsBackToTheEntityIdWhenUnnamed() {
+        val sources = discoverCalendarSources(listOf(stateOf("calendar.matt", name = null, supportedFeatures = 1)))
+
+        assertEquals("matt", sources.single().displayName)
+    }
+
+    @Test
+    fun todoDiscovery_picksTheListThatCanCarryDueDates() {
+        val states = listOf(
+            // The HAOS default: create/delete/update/move, no due-date bit — cannot back the panel.
+            stateOf("todo.shopping_list", "Shopping List", 15),
+            stateOf("todo.huset", "Huset", 127),
+        )
+
+        assertEquals("todo.huset", discoverTodoEntity(states))
+    }
+
+    @Test
+    fun todoDiscovery_yieldsNullRatherThanWritingIntoTheWrongList() {
+        assertNull(discoverTodoEntity(listOf(stateOf("todo.shopping_list", "Shopping List", 15))))
     }
 
     @Test

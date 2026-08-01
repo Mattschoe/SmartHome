@@ -1,11 +1,16 @@
 package com.mattschoe.smarthome.data
 
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
+import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -99,6 +104,74 @@ class MockAdapterTest {
         val id = adapter.subscribe().value.calendar.todos.first().id
         adapter.editTodo(id, "")
         assertNull(adapter.subscribe().value.calendar.todos.firstOrNull { it.id == id })
+    }
+
+    @Test
+    fun createEvent_landsOnEveryDayItCovers() = runTest {
+        val adapter = MockAdapter()
+        val start = LocalDate(2026, 8, 4)
+
+        adapter.createEvent(
+            "calendar.papkassehuset",
+            CalendarEventDraft(
+                summary = "Sommerhus",
+                start = LocalDateTime(start, LocalTime(0, 0)),
+                end = LocalDateTime(LocalDate(2026, 8, 7), LocalTime(0, 0)),
+                allDay = true,
+            ),
+        )
+
+        val added = adapter.subscribe().value.calendar.events.filter { it.title == "Sommerhus" }
+        assertEquals(
+            listOf(start, LocalDate(2026, 8, 5), LocalDate(2026, 8, 6)),
+            added.map { it.date },
+        )
+    }
+
+    @Test
+    fun calendarWrites_refuseAReadOnlySource() = runTest {
+        val adapter = MockAdapter()
+        val draft = CalendarEventDraft(
+            summary = "Vagt",
+            start = LocalDateTime(LocalDate(2026, 8, 4), LocalTime(16, 0)),
+            end = LocalDateTime(LocalDate(2026, 8, 4), LocalTime(23, 0)),
+        )
+
+        // The subscribed work roster is not a write target, and neither is a calendar that isn't there.
+        assertFailsWith<IllegalArgumentException> { adapter.createEvent("calendar.c_arbejde", draft) }
+        assertFailsWith<IllegalArgumentException> { adapter.createEvent("calendar.nonexistent", draft) }
+        assertFailsWith<IllegalArgumentException> { adapter.deleteEvent("calendar.c_arbejde", "seed-3") }
+    }
+
+    @Test
+    fun deleteEvent_removesEveryDayOfTheEvent() = runTest {
+        val adapter = MockAdapter()
+        val uid = adapter.subscribe().value.calendar.events.first { it.title == "Sommerhus" }.uid!!
+
+        adapter.deleteEvent("calendar.papkassehuset", uid)
+
+        assertTrue(adapter.subscribe().value.calendar.events.none { it.uid == uid })
+    }
+
+    @Test
+    fun updateEvent_replacesTheWholeEventRatherThanAppending() = runTest {
+        val adapter = MockAdapter()
+        val original = adapter.subscribe().value.calendar.events.first { it.uid == "seed-1" }
+
+        adapter.updateEvent(
+            "calendar.matt",
+            uid = "seed-1",
+            draft = CalendarEventDraft(
+                summary = "Morgenmøde (flyttet)",
+                start = LocalDateTime(original.date, LocalTime(11, 0)),
+                end = LocalDateTime(original.date, LocalTime(12, 0)),
+            ),
+        )
+
+        val replaced = adapter.subscribe().value.calendar.events.filter { it.uid == "seed-1" }
+        assertEquals(1, replaced.size)
+        assertEquals("Morgenmøde (flyttet)", replaced.single().title)
+        assertEquals("11:00", replaced.single().time)
     }
 
     @Test

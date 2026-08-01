@@ -1,12 +1,18 @@
 package com.mattschoe.smarthome
 
+import com.mattschoe.smarthome.data.CalendarFilterStore
 import com.mattschoe.smarthome.data.CompositeHomeAdapter
 import com.mattschoe.smarthome.data.HaConfig
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.HomeAssistantAdapter
+import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
+import com.mattschoe.smarthome.data.KeyValueCalendarCache
+import com.mattschoe.smarthome.data.KeyValueCalendarFilterStore
+import com.mattschoe.smarthome.data.KeyValueStore
 import com.mattschoe.smarthome.data.MaConfig
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.MusicAssistantAdapter
+import com.mattschoe.smarthome.data.platformKeyValueStore
 
 /**
  * Manual DI container. Holds shared dependencies (adapters, repositories) and is constructed in each
@@ -19,17 +25,33 @@ import com.mattschoe.smarthome.data.MusicAssistantAdapter
 class AppContainer(
     haConfig: HaConfig? = haConfigFromSecrets(),
     maConfig: MaConfig? = maConfigFromSecrets(haConfig),
-    val homeAdapter: HomeAdapter = buildHomeAdapter(haConfig, maConfig),
+    /**
+     * Where the offline calendar snapshot is kept. Defaults to the platform's own store; Android has
+     * no ambient context to build one from, so `AppApplication` passes a
+     * [com.mattschoe.smarthome.data.SharedPreferencesStore] instead. `null` simply disables the cache.
+     */
+    keyValueStore: KeyValueStore? = platformKeyValueStore(),
+    val homeAdapter: HomeAdapter = buildHomeAdapter(haConfig, maConfig, keyValueStore),
+    /**
+     * Which calendars each Calendar view draws. Kept beside the snapshot in the same store; without
+     * one the filters simply last as long as the process does.
+     */
+    val calendarFilters: CalendarFilterStore =
+        keyValueStore?.let(::KeyValueCalendarFilterStore) ?: InMemoryCalendarFilterStore(),
 )
 
 /**
  * Pick the adapter stack: no HA token → [MockAdapter]; HA only → [HomeAssistantAdapter]; HA + MA →
  * the [CompositeHomeAdapter] (HA devices + MA music). MA never runs without HA — it only enriches an
- * existing live home.
+ * existing live home. The mock needs no calendar cache: its fixtures are always there.
  */
-private fun buildHomeAdapter(haConfig: HaConfig?, maConfig: MaConfig?): HomeAdapter {
+private fun buildHomeAdapter(
+    haConfig: HaConfig?,
+    maConfig: MaConfig?,
+    keyValueStore: KeyValueStore?,
+): HomeAdapter {
     if (haConfig?.hasToken != true) return MockAdapter()
-    val ha = HomeAssistantAdapter(haConfig)
+    val ha = HomeAssistantAdapter(haConfig, keyValueStore?.let(::KeyValueCalendarCache))
     return if (maConfig?.hasToken == true) CompositeHomeAdapter(ha, MusicAssistantAdapter(maConfig)) else ha
 }
 

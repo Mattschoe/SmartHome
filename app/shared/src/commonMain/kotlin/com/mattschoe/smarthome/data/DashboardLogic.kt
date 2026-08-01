@@ -2,6 +2,7 @@ package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
+import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.RepeatMode
@@ -11,8 +12,11 @@ import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlin.math.PI
 import kotlin.math.abs
@@ -269,6 +273,166 @@ fun calendarGrid(year: Int, month: Int): List<Int?> {
         if (day in 1..daysInMonth) day else null
     }
 }
+
+/**
+ * The Monday of the week [date] falls in — the anchor the week view's seven columns are laid out
+ * from. The single place week boundaries are computed; nothing else may re-derive them.
+ */
+fun weekStart(date: LocalDate): LocalDate = date.minus(date.dayOfWeek.isoDayNumber - 1, DateTimeUnit.DAY)
+
+/**
+ * How many days the week view shows — Monday through Sunday.
+ */
+const val DaysPerWeek = 7
+
+/**
+ * One event placed in a day column of the week grid: its resolved [startMinute]/[endMinute] bounds
+ * (never shorter than [MinEventSpanMinutes]) plus which of the day's overlap [lane]s it takes and how
+ * many lanes that cluster of overlapping events splits the column into.
+ */
+data class PositionedEvent(
+    val event: CalendarEvent,
+    val startMinute: Int,
+    val endMinute: Int,
+    val lane: Int,
+    val laneCount: Int,
+)
+
+/**
+ * Shortest block the week grid draws. A zero-length event (or one of a few minutes) would otherwise
+ * be a hairline nobody can read or hit, so it is given this much room — and it takes that room in the
+ * overlap math too, so the neighbour it would visually collide with is moved aside.
+ */
+const val MinEventSpanMinutes = 20
+
+/**
+ * Split a day's [events] into overlap lanes, the column-splitting every week/day calendar does: walk
+ * them in start order, group the ones that (transitively) overlap into a cluster, give each the
+ * lowest lane no earlier event still occupies, and stamp every member of the cluster with the number
+ * of lanes it ended up needing — so a column of two overlapping events halves cleanly.
+ *
+ * All-day entries (`startMinute == null`) are not placed: they live in the strip above the grid.
+ */
+fun layoutDayEvents(events: List<CalendarEvent>): List<PositionedEvent> {
+    val timed = events
+        .mapNotNull { event ->
+            val start = event.startMinute ?: return@mapNotNull null
+            val end = (event.endMinute ?: start).coerceAtLeast(start + MinEventSpanMinutes)
+            Triple(event, start, end)
+        }
+        .sortedWith(compareBy({ it.second }, { it.third }))
+
+    val placed = mutableListOf<PositionedEvent>()
+    // Cluster scratch: the events placed so far, the end minute each lane is busy until, and how far
+    // the cluster as a whole reaches (an event starting at or after that opens a fresh cluster).
+    val cluster = mutableListOf<PositionedEvent>()
+    val laneEnds = mutableListOf<Int>()
+    var clusterEnd = Int.MIN_VALUE
+
+    fun flush() {
+        cluster.forEach { placed += it.copy(laneCount = laneEnds.size) }
+        cluster.clear()
+        laneEnds.clear()
+    }
+
+    for ((event, start, end) in timed) {
+        if (start >= clusterEnd) flush()
+        val free = laneEnds.indexOfFirst { it <= start }
+        val lane = if (free >= 0) free else laneEnds.size
+        if (free >= 0) laneEnds[free] = end else laneEnds += end
+        // laneCount is unknown until the cluster closes; [flush] stamps the final one.
+        cluster += PositionedEvent(event, start, end, lane, laneCount = 1)
+        clusterEnd = maxOf(clusterEnd, end)
+    }
+    flush()
+    return placed
+}
+
+/**
+ * How many days one event may be expanded across. A calendar can hold an event spanning a year;
+ * expanding it would put a dot on every cell of every month and dominate every agenda, so a run this
+ * long is truncated rather than allowed to swamp the panel.
+ */
+private const val MaxEventDays = 62
+
+/**
+ * Expand one backend event into the per-day [CalendarEvent]s the panel renders — a multi-day event
+ * becomes one entry per day it covers, or it would be missing from every day but its first. [end] is
+ * **exclusive** in both forms (iCal's convention, and Home Assistant's): an all-day event ending on
+ * the 8th covers through the 7th, and a timed one ending exactly at midnight belongs to the day
+ * before, not to a sliver of the next.
+ *
+ * Pure, and shared by the Home Assistant mapper and the mock store so both expand identically.
+ */
+fun expandCalendarEvent(
+    sourceId: String,
+    title: String,
+    start: LocalDateTime,
+    end: LocalDateTime,
+    allDay: Boolean = false,
+    uid: String? = null,
+    recurrenceId: String? = null,
+    location: String? = null,
+): List<CalendarEvent> {
+    val firstDay = start.date
+    val endsExclusively = allDay || end.time == LocalTime(0, 0)
+    val lastDay = end.date
+        .let { if (endsExclusively && it > firstDay) it.plus(-1, DateTimeUnit.DAY) else it }
+        .coerceAtLeast(firstDay)
+
+    val dayCount = (firstDay.daysUntil(lastDay) + 1).coerceIn(1, MaxEventDays)
+    return List(dayCount) { offset ->
+        val position = when {
+            dayCount == 1 -> EventDayPosition.Only
+            offset == 0 -> EventDayPosition.First
+            offset == dayCount - 1 -> EventDayPosition.Last
+            else -> EventDayPosition.Middle
+        }
+        val time = formatEventTime(start.time, end.time, position, allDay)
+        // The bounds of the part that falls on *this* day, which is what gives a week-grid block its
+        // position and height. A day the event merely spans reads as a full day and carries none (it
+        // belongs in the all-day strip, above the day's timed entries); a day it runs into starts at
+        // midnight, and a day it runs out of ends there.
+        val fullDay = time == AllDayLabel
+        CalendarEvent(
+            date = firstDay.plus(offset, DateTimeUnit.DAY),
+            title = title.ifBlank { UntitledEventTitle },
+            time = time,
+            sourceId = sourceId,
+            startMinute = when {
+                fullDay -> null
+                position == EventDayPosition.Last -> 0
+                else -> minutesOfDay(start.time)
+            },
+            endMinute = when {
+                fullDay -> null
+                position == EventDayPosition.First -> MinutesPerDay
+                else -> minutesOfDay(end.time)
+            },
+            uid = uid,
+            recurrenceId = recurrenceId,
+            location = location,
+            allDay = allDay,
+            // The whole event's bounds, on every day of it: the edit surface opens from whichever day
+            // was tapped and still has to show — and re-save — the event's real start and end.
+            start = start,
+            end = end,
+        )
+    }
+}
+
+/** What an event with no summary is shown as, rather than an empty agenda row. */
+const val UntitledEventTitle = "(uden titel)"
+
+/** Agenda order: by day, all-day entries first, then by start time, then alphabetically. */
+fun sortCalendarEvents(events: List<CalendarEvent>): List<CalendarEvent> =
+    events.sortedWith(compareBy({ it.date }, { it.startMinute ?: -1 }, { it.title }))
+
+/**
+ * Checklist order: what is left to do first, done items sunk to the bottom. The sort is stable, so
+ * [addTodo]'s append order survives inside each group and a row only ever moves when it is ticked.
+ */
+fun sortTodos(todos: List<TodoItem>): List<TodoItem> = todos.sortedBy { it.done }
 
 /**
  * Append a todo bound to [due]. [id] is supplied by the caller (the adapter mints a fresh one) so this

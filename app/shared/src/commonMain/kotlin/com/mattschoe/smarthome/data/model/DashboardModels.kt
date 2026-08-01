@@ -1,6 +1,8 @@
 package com.mattschoe.smarthome.data.model
 
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.serialization.Serializable
 
 /**
  * The device-data models. [HomeState] is the single object a `HomeAdapter` exposes; the UI-selection
@@ -30,6 +32,9 @@ enum class Room(val displayName: String, val hasSpeaker: Boolean) {
 
 /** The two mutually-exclusive right-card panels. */
 enum class Panel { Media, Calendar }
+
+/** How the Calendar panel draws the days: the month grid, or the selected day's week as a time grid. */
+enum class CalendarView { Month, Week }
 
 /**
  * Which provider's listening the Media panel's **browse** shelves show — the two people sharing this
@@ -143,13 +148,79 @@ data class ClimateState(
 ) { init { require(humidityPct == null || humidityPct in 0..100) } }
 
 /**
- * A read-only calendar event bound to a [date]. Maps onto a Home Assistant `calendar` entity event
- * later (Phase 9); [time] is a pre-formatted display string for now.
+ * One of the home's calendars, as exposed by a Home Assistant `calendar.*` entity. [canWrite] comes
+ * from the entity's `supported_features` (HA's `CREATE_EVENT` bit) rather than from any hardcoded
+ * list, so a read-only subscription (a work roster fed from an external ICS feed) is distinguishable
+ * from a locally-stored calendar the app may add events to.
  */
+@Serializable
+data class CalendarSource(
+    val id: String,
+    val displayName: String,
+    val canWrite: Boolean,
+    /**
+     * The calendar's color as Home Assistant names it (`amber`, `primary`, `dark-grey`, …), read from
+     * the entity registry's `options.calendar.color`. `null` for a calendar with no color set, which
+     * leaves its dot the one assigned by position.
+     */
+    val color: String? = null,
+)
+
+/**
+ * A calendar event **as it appears on one day**: an event spanning several days is expanded to one
+ * of these per day, so a day's agenda and the month grid's dots are plain filters on [date]. [time]
+ * is a pre-formatted display string ("09:00", "Hele dagen", "til 02:00"); [startMinute] and
+ * [endMinute] are that day's bounds in minutes from midnight — what the week grid gives a block its
+ * position and height from — and are both `null` for an all-day entry (which sorts first).
+ *
+ * [sourceId] is the [CalendarSource] it came from — what the agenda dot is colored by, and what a
+ * write intent targets. [uid] plus [recurrenceId] address it on the backend: a recurring series
+ * shares one uid across occurrences, and the recurrence id picks out a single one.
+ *
+ * [start] and [end] are the **whole** event's real bounds, repeated on every day it was expanded to.
+ * The per-day fields above are display truth and can't be reversed into them ("til 02:00" says
+ * nothing about which day it started), so the edit surface reads these instead of parsing its own
+ * rows back. Nullable: an entry read from a cache written before they existed simply has none.
+ */
+@Serializable
 data class CalendarEvent(
     val date: LocalDate,
     val title: String,
     val time: String,
+    val sourceId: String = "",
+    val startMinute: Int? = null,
+    val endMinute: Int? = null,
+    val uid: String? = null,
+    val recurrenceId: String? = null,
+    val location: String? = null,
+    val allDay: Boolean = false,
+    val start: LocalDateTime? = null,
+    val end: LocalDateTime? = null,
+)
+
+/**
+ * Which occurrences of a recurring series a write applies to — Home Assistant's `recurrence_range`.
+ * [ThisEvent] edits or deletes the single occurrence addressed; [ThisAndFuture] splits the series at
+ * that occurrence and applies to it and everything after.
+ */
+enum class RecurrenceRange { ThisEvent, ThisAndFuture }
+
+/**
+ * An event to create or to replace an existing one with — what a create/edit surface fills in and
+ * hands to the write intents. Times are wall-clock in the home's own zone; an all-day event
+ * ([allDay]) ignores the time parts. [end] is **exclusive**, matching iCal and Home Assistant.
+ * Attendees are deliberately absent: Home Assistant's calendar model has no such field, and which
+ * calendar an event lives on already says whose it is.
+ */
+data class CalendarEventDraft(
+    val summary: String,
+    val start: LocalDateTime,
+    val end: LocalDateTime,
+    val allDay: Boolean = false,
+    val description: String? = null,
+    val location: String? = null,
+    /** An iCal RRULE (e.g. `FREQ=WEEKLY;BYDAY=MO`), or `null` for a one-off. */
+    val rrule: String? = null,
 )
 
 /**
@@ -159,6 +230,7 @@ data class CalendarEvent(
  * client-side filter on [due] over one shared list — the per-day bucket is a UI idea, not backend
  * structure.
  */
+@Serializable
 data class TodoItem(
     val id: String,
     val due: LocalDate,
@@ -167,14 +239,29 @@ data class TodoItem(
 )
 
 /**
- * The calendar payload the adapter exposes: a flat list of [events] and [todos]. The current day and
- * the displayed month are UI selection (they come from the system clock / the ViewModel), not device
- * data, so they are not on here.
+ * The calendar payload the adapter exposes: a flat list of [events] and [todos] over whatever window
+ * the adapter fetched, plus the [sources] those events came from. The current day and the displayed
+ * month are UI selection (they come from the system clock / the ViewModel), not device data, so they
+ * are not on here.
+ *
+ * [stale] marks data being rendered from the offline cache rather than from a live backend — the
+ * panel still shows the last-known calendar, labelled as such, instead of going blank.
  */
 data class CalendarState(
     val events: List<CalendarEvent>,
     val todos: List<TodoItem>,
-)
+    val sources: List<CalendarSource> = emptyList(),
+    val stale: Boolean = false,
+    /**
+     * Whether the home has a todo list the panel can actually write to (one that carries due dates).
+     * `false` makes the checklist say so instead of offering an add row whose input nothing stores —
+     * the todo intents are inert without such a list.
+     */
+    val hasTodoList: Boolean = true,
+) {
+    /** The calendars an event may be written to — the add/edit surface's only legal targets. */
+    val writableSources: List<CalendarSource> get() = sources.filter { it.canWrite }
+}
 
 /**
  * The device-truth state for the whole home, exposed by a `HomeAdapter`

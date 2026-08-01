@@ -2,9 +2,17 @@ package com.mattschoe.smarthome.ui.pages.homepage
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mattschoe.smarthome.data.CalendarFilterStore
+import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.HomeAdapter
+import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
 import com.mattschoe.smarthome.data.audioJoined
+import com.mattschoe.smarthome.data.minutesOfDay
 import com.mattschoe.smarthome.data.model.BrowseItem
+import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
@@ -29,6 +37,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.DateTimeUnit
@@ -38,6 +48,7 @@ import kotlinx.datetime.minus
 import kotlinx.datetime.number
 import kotlinx.datetime.plus
 import kotlinx.datetime.todayIn
+import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 
 /**
@@ -46,7 +57,10 @@ import kotlin.time.Clock
  * **independently** (the top chips vs. the AUDIO chips); [_panel] is the right-card tab. Device
  * intents forward to the adapter; selection intents mutate the ViewModel-owned flows.
  */
-class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
+class HomepageViewModel(
+    private val adapter: HomeAdapter,
+    private val filterStore: CalendarFilterStore = InMemoryCalendarFilterStore(),
+) : ViewModel() {
     private val _activeLightRoom = MutableStateFlow(Room.LivingRoom)
     private val _activeAudioRoom = MutableStateFlow(Room.audioRooms.firstOrNull() ?: Room.LivingRoom)
     private val _panel = MutableStateFlow(Panel.Media)
@@ -68,10 +82,33 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
     // The in-flight join/leave, whose lifetime is the re-tap guard in [toggleAudioJoin].
     private var joinJob: Job? = null
 
-    // Real current day, resolved once at construction (the wall tablet stays on one day per session).
-    private val today: LocalDate = Clock.System.todayIn(TimeZone.currentSystemDefault())
-    private val _displayedMonth = MutableStateFlow(LocalDate(today.year, today.month.number, 1))
-    private val _selectedDay = MutableStateFlow(today)
+    // The real current day, *ticking*: a wall-mounted tablet runs for weeks, so a day resolved once
+    // at construction would leave the grid highlighting yesterday from the first midnight onward.
+    // The tick is coarse (the day changes once a day) but cheap, and mirrors the left card's clock.
+    private val today: StateFlow<LocalDate> = flow {
+        while (true) {
+            emit(Clock.System.todayIn(TimeZone.currentSystemDefault()))
+            delay(TODAY_TICK_MS)
+        }
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, currentDay())
+
+    // Minutes from midnight, on the same coarse tick as [today] — the week grid's "now" line only
+    // needs to be right to the minute, and a wall tablet redraws it for hours on end.
+    private val nowMinutes: StateFlow<Int> = flow {
+        while (true) {
+            emit(currentMinuteOfDay())
+            delay(TODAY_TICK_MS)
+        }
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, currentMinuteOfDay())
+
+    private val _displayedMonth = MutableStateFlow(currentDay().let { LocalDate(it.year, it.month.number, 1) })
+    private val _selectedDay = MutableStateFlow(currentDay())
+    private val _calendarView = MutableStateFlow(CalendarView.Month)
+    private val _eventEditor = MutableStateFlow<EventEditorTarget?>(null)
+    private val _eventDetail = MutableStateFlow<CalendarEvent?>(null)
+    private val _savingEvent = MutableStateFlow(false)
+    private val _calendarFilters = MutableStateFlow(filterStore.read())
+    private val _calendarSettingsOpen = MutableStateFlow(false)
 
     /**
      * The debounced search pipeline. A blank query passes straight through so clearing the field
@@ -125,9 +162,21 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
             ) { panel, minimized, query, search, media ->
                 RightCardSelection(panel, minimized, query, search, media)
             },
-            combine(_displayedMonth, _selectedDay) { month, day -> month to day },
+            // Everything the calendar's own surfaces own folds into one flow, since this combine's
+            // typed overload is full at 5 — and so, once more, is the fold's (hence the filters and
+            // the gear riding along as a pair).
+            combine(
+                _displayedMonth, _selectedDay, today, nowMinutes,
+                combine(
+                    _calendarView, _eventEditor, _eventDetail, _savingEvent,
+                    combine(_calendarFilters, _calendarSettingsOpen) { filters, open -> filters to open },
+                ) { view, editor, detail, saving, (filters, settingsOpen) ->
+                    CalendarSurfaceSelection(view, editor, detail, saving, filters, settingsOpen)
+                },
+            ) { month, day, now, minute, surface ->
+                CalendarSelection(month, day, now, minute, surface)
+            },
         ) { home, lightRoom, audioRoom, rightCard, calendar ->
-            val (displayedMonth, selectedDay) = calendar
             HomeScreenState.Ready(
                 activeLightRoom = lightRoom,
                 activeAudioRoom = audioRoom,
@@ -151,9 +200,16 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
                 spotifyPlaylists = home.spotifyPlaylists,
                 spotifyRecentlyPlayed = home.spotifyRecentlyPlayed,
                 calendar = home.calendar,
-                today = today,
-                displayedMonth = displayedMonth,
-                selectedDay = selectedDay,
+                today = calendar.today,
+                displayedMonth = calendar.displayedMonth,
+                selectedDay = calendar.selectedDay,
+                calendarView = calendar.surface.calendarView,
+                nowMinutes = calendar.nowMinutes,
+                eventEditor = calendar.surface.eventEditor,
+                eventDetail = calendar.surface.eventDetail,
+                calendarFilters = calendar.surface.filters,
+                calendarSettingsOpen = calendar.surface.settingsOpen,
+                savingEvent = calendar.surface.savingEvent,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -163,7 +219,16 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
 
     fun selectLightRoom(room: Room) { _activeLightRoom.value = room }
     fun selectAudioRoom(room: Room) { _activeAudioRoom.value = room }
-    fun selectPanel(panel: Panel) { _panel.value = panel }
+
+    /**
+     * Switch the right card's tab. Opening the Calendar asks the adapter for a fresh window — events
+     * are fetched rather than pushed, and a subscribed calendar (a work roster) is polled only once a
+     * day unless something forces it. Which tab is showing stays here, never on the adapter.
+     */
+    fun selectPanel(panel: Panel) {
+        _panel.value = panel
+        if (panel == Panel.Calendar) adapter.refreshCalendar()
+    }
 
     /** Switch which provider's listening the browse shelves show. Search is unaffected by design. */
     fun selectMusicSource(source: MusicSource) { _musicSource.value = source }
@@ -239,10 +304,152 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
     /** The search field's text. Searching itself is debounced behind this in [searchState]. */
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
-    // Calendar selection (VM-owned, never on the adapter). Months stay pinned to the 1st.
-    fun showPreviousMonth() { _displayedMonth.update { it.minus(1, DateTimeUnit.MONTH) } }
-    fun showNextMonth() { _displayedMonth.update { it.plus(1, DateTimeUnit.MONTH) } }
+    // Calendar selection (VM-owned, never on the adapter). Months stay pinned to the 1st. Navigating
+    // is also the moment to nudge the adapter, for the same reason opening the panel is.
+    fun showPreviousMonth() {
+        _displayedMonth.update { it.minus(1, DateTimeUnit.MONTH) }
+        adapter.refreshCalendar()
+    }
+
+    fun showNextMonth() {
+        _displayedMonth.update { it.plus(1, DateTimeUnit.MONTH) }
+        adapter.refreshCalendar()
+    }
+
     fun selectDay(date: LocalDate) { _selectedDay.value = date }
+
+    /** Switch the Calendar panel between the month grid and the week time grid. */
+    fun setCalendarView(view: CalendarView) { _calendarView.value = view }
+
+    // Which calendars each view draws — the header gear's popup. The setting is per view, so the
+    // toggle is applied to whichever view is being looked at, and it is written through on every
+    // change: a wall tablet is restarted by a power cut, not by anyone closing a settings screen.
+    fun openCalendarSettings() { _calendarSettingsOpen.value = true }
+
+    fun closeCalendarSettings() { _calendarSettingsOpen.value = false }
+
+    fun toggleCalendarFilter(sourceId: String) {
+        filterStore.write(_calendarFilters.updateAndGet { it.toggle(_calendarView.value, sourceId) })
+    }
+
+    /**
+     * Open a week-view event's detail popup. The week's blocks are as small as a few minutes are
+     * tall, so tapping one has to answer "what *is* this" before it offers to change it — the month
+     * agenda's rows, which are already legible, keep opening the editor directly.
+     */
+    fun openEventDetail(event: CalendarEvent) { _eventDetail.value = event }
+
+    fun closeEventDetail() { _eventDetail.value = null }
+
+    /** The popup's pencil: hand the same event to the editor, which decides whether it may be changed. */
+    fun editEventDetail() {
+        _eventDetail.value?.let {
+            openEvent(it)
+            _eventDetail.value = null
+        }
+    }
+
+    /** The popup's trash. Same guards and failure handling as the editor's [deleteEvent]. */
+    fun deleteEventDetail() {
+        val event = _eventDetail.value ?: return
+        deleteEvent(event) { _eventDetail.value = null }
+    }
+
+    /**
+     * Week navigation, which is [_selectedDay] navigation: the week shown is the one the selected day
+     * falls in, so there is no separate week-start state to keep in step. The displayed month follows
+     * along, so toggling back to the month grid lands on the month just been looked at rather than
+     * the one left behind.
+     */
+    fun showPreviousWeek() = shiftWeek(-DaysPerWeek)
+
+    fun showNextWeek() = shiftWeek(DaysPerWeek)
+
+    private fun shiftWeek(days: Int) {
+        val day = _selectedDay.updateAndGet { it.plus(days, DateTimeUnit.DAY) }
+        _displayedMonth.value = LocalDate(day.year, day.month.number, 1)
+        adapter.refreshCalendar()
+    }
+
+    /**
+     * Open a blank event form. Always on **today**, not on the selected day: the "+" is reached from
+     * wherever the grid happens to be parked, and an event landing on a month somebody merely browsed
+     * past is a worse surprise than re-picking the date on the wheel.
+     */
+    fun openNewEvent() { _eventEditor.value = EventEditorTarget.New(today.value) }
+
+    /**
+     * Open an agenda row. An event on a read-only calendar — or one the backend gave no uid, which no
+     * write intent can address — opens as details that cannot be saved rather than not opening at all.
+     */
+    fun openEvent(event: CalendarEvent) {
+        val source = adapter.subscribe().value.calendar.sources.firstOrNull { it.id == event.sourceId }
+        val canWrite = source?.canWrite == true && event.uid != null
+        _eventEditor.value = EventEditorTarget.Existing(event, canWrite)
+    }
+
+    /** Leave the editor, dropping whatever was typed. The surface's back arrow. */
+    fun closeEventEditor() { _eventEditor.value = null }
+
+    /**
+     * Write [draft] — creating it on [sourceId] from the "+" path, replacing the open event on the
+     * edit path (where the calendar is the event's own; moving between calendars is a delete plus a
+     * create, which this surface does not offer). Same shape as [startPlay]: the button spins until
+     * the adapter replies, and a **failure leaves the surface open** so nothing typed is lost.
+     */
+    fun saveEvent(sourceId: String, draft: CalendarEventDraft) {
+        val target = _eventEditor.value ?: return
+        if (_savingEvent.value) return
+        val existing = (target as? EventEditorTarget.Existing)?.event
+        _savingEvent.value = true
+        viewModelScope.launch {
+            try {
+                val uid = existing?.uid
+                if (existing != null && uid != null) {
+                    // No recurrence UI, so an occurrence of a series is edited as just that occurrence.
+                    adapter.updateEvent(existing.sourceId, uid, draft, existing.recurrenceId)
+                } else {
+                    adapter.createEvent(sourceId, draft)
+                }
+                _eventEditor.value = null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showToast(SAVE_FAILED_TOAST)
+            } finally {
+                _savingEvent.value = false
+            }
+        }
+    }
+
+    /** Delete the event the editor is open on. Scoped like [saveEvent]: one occurrence of a series. */
+    fun deleteEvent() {
+        val existing = (_eventEditor.value as? EventEditorTarget.Existing)?.event ?: return
+        deleteEvent(existing) { _eventEditor.value = null }
+    }
+
+    /**
+     * The one delete, shared by the editor and the detail popup: the [_savingEvent] re-tap guard, the
+     * write, and closing only the surface the delete came from ([onDone]) once it lands. An event the
+     * backend gave no uid can't be addressed at all, so it is simply left alone.
+     */
+    private fun deleteEvent(event: CalendarEvent, onDone: () -> Unit) {
+        val uid = event.uid ?: return
+        if (_savingEvent.value) return
+        _savingEvent.value = true
+        viewModelScope.launch {
+            try {
+                adapter.deleteEvent(event.sourceId, uid, event.recurrenceId)
+                onDone()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showToast(DELETE_FAILED_TOAST)
+            } finally {
+                _savingEvent.value = false
+            }
+        }
+    }
 
     // Todo intents forward to the adapter (optimistic, synchronous). Add mints the id there.
     fun addTodo(due: LocalDate, label: String) = adapter.addTodo(due, label)
@@ -447,8 +654,44 @@ class HomepageViewModel(private val adapter: HomeAdapter,) : ViewModel() {
         const val GROUP_CHANGE_GRACE_MS = 5_000L
 
         const val PLAY_FAILED_TOAST = "Kunne ikke afspille"
+
+        const val SAVE_FAILED_TOAST = "Kunne ikke gemme"
+        const val DELETE_FAILED_TOAST = "Kunne ikke slette"
+
+        /**
+         * How often the real current day is re-read. Only one tick a day changes anything, so this
+         * is about *how soon after* midnight the grid catches up, not about precision.
+         */
+        const val TODAY_TICK_MS = 60_000L
     }
 }
+
+private fun currentDay(): LocalDate = Clock.System.todayIn(TimeZone.currentSystemDefault())
+
+private fun currentMinuteOfDay(): Int =
+    minutesOfDay(Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).time)
+
+/** The calendar's selections plus the ticking current day and minute, as one combine input. */
+private data class CalendarSelection(
+    val displayedMonth: LocalDate,
+    val selectedDay: LocalDate,
+    val today: LocalDate,
+    val nowMinutes: Int,
+    val surface: CalendarSurfaceSelection,
+)
+
+/**
+ * Which of the Calendar panel's surfaces are showing and what they are showing — the view, the
+ * editor, the week view's detail popup and the gear's filter popup (all VM-owned).
+ */
+private data class CalendarSurfaceSelection(
+    val calendarView: CalendarView,
+    val eventEditor: EventEditorTarget?,
+    val eventDetail: CalendarEvent?,
+    val savingEvent: Boolean,
+    val filters: CalendarFilters,
+    val settingsOpen: Boolean,
+)
 
 /**
  * The Media panel's transient state — the in-flight play states, the toast, and the artist drill-in
