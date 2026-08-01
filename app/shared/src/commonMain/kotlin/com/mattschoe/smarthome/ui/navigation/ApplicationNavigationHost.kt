@@ -27,7 +27,8 @@ fun ApplicationNavigationHost(
         composable<PageNavigation.Home> {
             val viewModel = viewModel<HomepageViewModel> {
                 HomepageViewModel(
-                    adapter = appContainer.homeAdapter
+                    adapter = appContainer.homeAdapter,
+                    filterStore = appContainer.calendarFilters
                 )
             }
             Homepage(

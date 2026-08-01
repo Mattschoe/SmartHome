@@ -1,10 +1,13 @@
 package com.mattschoe.smarthome.data
 
+import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.RepeatMode
+import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.plus
@@ -303,6 +306,157 @@ class DashboardLogicTest {
         assertNull(grid[28])
     }
 
+    // --- Week view ---
+
+    @Test
+    fun weekStart_isTheMondayOfThatWeek() {
+        val monday = LocalDate(2026, 7, 27)
+        assertEquals(monday, weekStart(monday))                     // a Monday is its own week start
+        assertEquals(monday, weekStart(LocalDate(2026, 7, 29)))     // Wednesday
+        assertEquals(monday, weekStart(LocalDate(2026, 8, 2)))      // Sunday closes the same week
+    }
+
+    @Test
+    fun weekStart_crossesMonthAndYearBoundaries() {
+        // 1 Jan 2027 is a Friday, so its week began in the previous December.
+        assertEquals(LocalDate(2026, 12, 28), weekStart(LocalDate(2027, 1, 1)))
+    }
+
+    @Test
+    fun layoutDayEvents_givesNonOverlappingEventsTheFullColumn() {
+        val placed = layoutDayEvents(listOf(timedEvent("A", 540, 600), timedEvent("B", 660, 720)))
+        assertEquals(listOf(0, 0), placed.map { it.lane })
+        assertTrue(placed.all { it.laneCount == 1 })
+    }
+
+    @Test
+    fun layoutDayEvents_splitsOverlappingEventsIntoLanes() {
+        val placed = layoutDayEvents(listOf(timedEvent("A", 540, 660), timedEvent("B", 600, 720)))
+        assertEquals(listOf(0, 1), placed.map { it.lane })
+        assertTrue(placed.all { it.laneCount == 2 })
+    }
+
+    @Test
+    fun layoutDayEvents_stampsAClusterWithItsOwnLaneCount() {
+        // A—B and B—C overlap, A—C do not: one cluster of three, but only two lanes, and C reuses
+        // the lane A vacated. Every member reports the cluster's count, so the column splits evenly.
+        val placed = layoutDayEvents(
+            listOf(timedEvent("A", 540, 660), timedEvent("B", 600, 720), timedEvent("C", 660, 780)),
+        )
+        assertEquals(listOf(0, 1, 0), placed.map { it.lane })
+        assertTrue(placed.all { it.laneCount == 2 })
+
+        // Three at once really do take three lanes.
+        val concurrent = layoutDayEvents(
+            listOf(timedEvent("A", 540, 720), timedEvent("B", 570, 720), timedEvent("C", 600, 720)),
+        )
+        assertEquals(listOf(0, 1, 2), concurrent.map { it.lane })
+        assertTrue(concurrent.all { it.laneCount == 3 })
+    }
+
+    @Test
+    fun layoutDayEvents_givesAZeroLengthEventTheMinimumSpan() {
+        val placed = layoutDayEvents(listOf(timedEvent("Punkt", 600, 600))).single()
+        assertEquals(600, placed.startMinute)
+        assertEquals(600 + MinEventSpanMinutes, placed.endMinute)
+    }
+
+    @Test
+    fun layoutDayEvents_ignoresAllDayEntries() {
+        val allDay = CalendarEvent(LocalDate(2026, 7, 29), "Ferie", AllDayLabel)
+        assertTrue(layoutDayEvents(listOf(allDay)).isEmpty())
+        assertEquals("Møde", layoutDayEvents(listOf(allDay, timedEvent("Møde", 540, 600))).single().event.title)
+    }
+
+    // --- Per-day event bounds ---
+
+    @Test
+    fun expandCalendarEvent_boundsASameDayEvent() {
+        val event = expandCalendarEvent(
+            sourceId = "calendar.matt",
+            title = "Møde",
+            start = LocalDateTime(2026, 7, 29, 9, 0),
+            end = LocalDateTime(2026, 7, 29, 10, 30),
+        ).single()
+        assertEquals(540, event.startMinute)
+        assertEquals(630, event.endMinute)
+    }
+
+    @Test
+    fun expandCalendarEvent_boundsEachDayOfAMultiDayEvent() {
+        // 22:00 on the 29th until 02:00 on the 31st: the first day runs to midnight, the middle day
+        // is a full day (no clock bounds at all), and the last day starts at midnight.
+        val days = expandCalendarEvent(
+            sourceId = "calendar.matt",
+            title = "Nattevagt",
+            start = LocalDateTime(2026, 7, 29, 22, 0),
+            end = LocalDateTime(2026, 7, 31, 2, 0),
+        )
+        assertEquals(3, days.size)
+        assertEquals(1320 to 1440, days[0].startMinute to days[0].endMinute)
+        assertEquals(null to null, days[1].startMinute to days[1].endMinute)
+        assertEquals(0 to 120, days[2].startMinute to days[2].endMinute)
+
+        // A two-day event is just the same run without a middle.
+        val twoDays = expandCalendarEvent(
+            sourceId = "calendar.matt",
+            title = "Nattevagt",
+            start = LocalDateTime(2026, 7, 29, 22, 0),
+            end = LocalDateTime(2026, 7, 30, 2, 0),
+        )
+        assertEquals(2, twoDays.size)
+        assertEquals(1320 to 1440, twoDays[0].startMinute to twoDays[0].endMinute)
+        assertEquals(0 to 120, twoDays[1].startMinute to twoDays[1].endMinute)
+    }
+
+    @Test
+    fun expandCalendarEvent_leavesAnAllDayEventUnbounded() {
+        val days = expandCalendarEvent(
+            sourceId = "calendar.papkassehuset",
+            title = "Sommerhus",
+            start = LocalDateTime(2026, 7, 29, 0, 0),
+            end = LocalDateTime(2026, 8, 1, 0, 0),
+            allDay = true,
+        )
+        assertEquals(3, days.size)
+        assertTrue(days.all { it.startMinute == null && it.endMinute == null })
+    }
+
+    @Test
+    fun expandCalendarEvent_stampsTheWholeEventsBoundsOnEveryDayOfIt() {
+        val start = LocalDateTime(2026, 7, 29, 22, 0)
+        val end = LocalDateTime(2026, 7, 31, 2, 0)
+        val days = expandCalendarEvent(
+            sourceId = "calendar.matt",
+            title = "Nattevagt",
+            start = start,
+            end = end,
+        )
+        // Every day carries the *event's* real bounds, not its own slice of them: the editor opens
+        // from whichever day was tapped and has to show the event's actual start and end.
+        assertEquals(3, days.size)
+        assertTrue(days.all { it.start == start && it.end == end })
+
+        // Including an all-day run, whose stored end stays the exclusive one it was given.
+        val allDay = expandCalendarEvent(
+            sourceId = "calendar.papkassehuset",
+            title = "Sommerhus",
+            start = LocalDateTime(2026, 7, 29, 0, 0),
+            end = LocalDateTime(2026, 8, 1, 0, 0),
+            allDay = true,
+        )
+        assertTrue(allDay.all { it.start == LocalDateTime(2026, 7, 29, 0, 0) })
+        assertTrue(allDay.all { it.end == LocalDateTime(2026, 8, 1, 0, 0) })
+    }
+
+    private fun timedEvent(title: String, start: Int, end: Int) = CalendarEvent(
+        date = LocalDate(2026, 7, 29),
+        title = title,
+        time = "",
+        startMinute = start,
+        endMinute = end,
+    )
+
     // --- Todos ---
 
     @Test
@@ -346,6 +500,27 @@ class DashboardLogicTest {
         val after = seed.editTodo(id, "   ")
         assertNull(after.calendar.todos.firstOrNull { it.id == id })
         assertEquals(seed.calendar.todos.size - 1, after.calendar.todos.size)
+    }
+
+    @Test
+    fun sortTodos_sinksDoneItemsAndKeepsAddOrderWithinEachGroup() {
+        val due = LocalDate(2026, 7, 15)
+        val todos = listOf(
+            TodoItem("a", due, "Vask op", done = true),
+            TodoItem("b", due, "Køb mælk", done = false),
+            TodoItem("c", due, "Hent pakke", done = true),
+            TodoItem("d", due, "Ring til mor", done = false),
+        )
+        // Unfinished first, and inside each group the order they were added in — a ticked row drops
+        // to the bottom, it doesn't shuffle the rest.
+        assertEquals(listOf("b", "d", "a", "c"), sortTodos(todos).map { it.id })
+    }
+
+    @Test
+    fun sortTodos_leavesAnUntickedListExactlyAsItIs() {
+        val due = LocalDate(2026, 7, 15)
+        val todos = List(4) { TodoItem("t$it", due, "Opgave $it", done = false) }
+        assertEquals(todos, sortTodos(todos))
     }
 
     @Test

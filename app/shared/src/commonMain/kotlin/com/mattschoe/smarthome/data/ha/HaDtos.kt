@@ -35,11 +35,13 @@ data class HaDeviceDto(
 
 /**
  * One row of `config/entity_registry/list`. [area_id] is an entity-level override; when absent the
- * entity inherits the area of its [device_id].
+ * entity inherits the area of its [device_id]. [options] holds the per-domain settings the registry
+ * carries rather than the entity itself — a calendar's color lives there, under `calendar.color`.
  */
 @Serializable
 data class HaEntityRegistryDto(
     val entity_id: String,
     val area_id: String? = null,
     val device_id: String? = null,
+    val options: JsonObject = JsonObject(emptyMap()),
 )

@@ -1,9 +1,13 @@
 package com.mattschoe.smarthome.ui.pages.homepage
 
+import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.audioJoined
+import com.mattschoe.smarthome.data.sortTodos
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarState
+import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.MusicSource
@@ -11,8 +15,12 @@ import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.TodoItem
+// Aliased: [Ready.weekStart] is the property this state exposes, the import is the week math it calls.
+import com.mattschoe.smarthome.data.weekStart as weekStartOf
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.number
+import kotlinx.datetime.plus
 
 /**
  * The state the dashboard UI collects: device data from the `HomeAdapter` combined with the
@@ -48,6 +56,13 @@ data class PendingPlay(
     val artworkUrl: String?,
 )
 
+/**
+ * What one month-grid cell marks under its number: the calendars with an event that day (by source
+ * id, in `CalendarState.sources` order, each dot taking its calendar's color) and whether the day
+ * carries a todo. A day with neither has no entry at all.
+ */
+data class DayMarks(val sourceIds: List<String>, val hasTodo: Boolean)
+
 /** An up-next skip in flight (VM-owned): the tapped row shows a spinner and re-taps are blocked. */
 data class PendingQueueItem(val room: Room, val queueItemId: String)
 
@@ -72,6 +87,31 @@ sealed interface ArtistUiState {
     ) : ArtistUiState
 
     data class Failed(override val artist: BrowseItem) : ArtistUiState
+}
+
+/**
+ * What the Calendar panel's editor surface is open on; `null` while the month/week views are showing.
+ *
+ * Only *which* event is being edited lives here — the field values are local to the editor
+ * composable and come back as one finished draft on save. Routing every keystroke through the
+ * ViewModel's `combine` would recompose the whole dashboard per character, and the editor is
+ * deliberately a surface beside live lights and audio, not a modal that can afford that.
+ */
+sealed interface EventEditorTarget {
+    /** The day the start wheels open on. */
+    val date: LocalDate
+
+    /** The "+" path — a blank form on [date] (today). */
+    data class New(override val date: LocalDate) : EventEditorTarget
+
+    /**
+     * An existing event opened from the agenda. [canWrite] is false for an event on a read-only
+     * calendar (the subscribed work roster): the fields render disabled and no save or delete is
+     * offered, so its details stay reachable without pretending they can be changed.
+     */
+    data class Existing(val event: CalendarEvent, val canWrite: Boolean) : EventEditorTarget {
+        override val date: LocalDate get() = event.start?.date ?: event.date
+    }
 }
 
 sealed interface HomeScreenState {
@@ -120,6 +160,20 @@ sealed interface HomeScreenState {
         val displayedMonth: LocalDate,
         /** The day whose agenda + todos are shown; scopes both (VM-owned selection). */
         val selectedDay: LocalDate,
+        /** Whether the Calendar panel draws the month grid or [selectedDay]'s week (VM-owned). */
+        val calendarView: CalendarView,
+        /** The event the editor surface is open on, or `null` when the calendar views show (VM-owned). */
+        val eventEditor: EventEditorTarget?,
+        /** The event the week view's detail popup is open on, or `null` when none is (VM-owned). */
+        val eventDetail: CalendarEvent?,
+        /** Which calendars each view draws — what the header's gear edits (VM-owned, persisted). */
+        val calendarFilters: CalendarFilters,
+        /** Whether the gear's popup is showing (VM-owned). */
+        val calendarSettingsOpen: Boolean,
+        /** Whether a save or delete from the editor is in flight — the button spins and re-taps drop. */
+        val savingEvent: Boolean,
+        /** Minutes from midnight, ticking — where the week grid draws its "now" line. */
+        val nowMinutes: Int,
     ) : HomeScreenState {
         /** The playlist shelf for the selected [musicSource]. */
         val browsePlaylists: List<BrowseItem>
@@ -160,20 +214,65 @@ sealed interface HomeScreenState {
         val joinTarget: Room?
             get() = otherAudioRoom?.takeIf { audioJoined || rooms[it]?.audio?.isPlaying == true }
 
+        /**
+         * The events the view being shown is allowed to draw — everything minus the calendars the
+         * header's gear hides *in that view*. Every calendar consumer reads this rather than
+         * `calendar.events`, so hiding a calendar hides it from all of what the view shows: in month
+         * view the grid's dots **and** the agenda list, in week view the blocks **and** the all-day
+         * chips.
+         */
+        private val visibleEvents: List<CalendarEvent>
+            get() = calendarFilters.hidden(calendarView).let { hidden ->
+                if (hidden.isEmpty()) calendar.events else calendar.events.filterNot { it.sourceId in hidden }
+            }
+
         /** Read-only events bound to [selectedDay] (the agenda list). */
-        val selectedDayEvents: List<CalendarEvent> get() = calendar.events.filter { it.date == selectedDay }
+        val selectedDayEvents: List<CalendarEvent> get() = visibleEvents.filter { it.date == selectedDay }
 
-        /** Todos bound to [selectedDay] (the checklist). */
-        val selectedDayTodos: List<TodoItem> get() = calendar.todos.filter { it.due == selectedDay }
+        /** Todos bound to [selectedDay] (the checklist), unfinished ones first. */
+        val selectedDayTodos: List<TodoItem>
+            get() = sortTodos(calendar.todos.filter { it.due == selectedDay })
 
-        /** Day-of-month numbers in [displayedMonth] that have any event or todo — the grid's item dots. */
-        val daysWithItems: Set<Int>
+        /** Monday of the week [selectedDay] falls in — the week view's first column. */
+        val weekStart: LocalDate get() = weekStartOf(selectedDay)
+
+        /** The week view's seven columns, Monday first. */
+        val weekDays: List<LocalDate>
+            get() = weekStart.let { start -> List(DaysPerWeek) { start.plus(it, DateTimeUnit.DAY) } }
+
+        /**
+         * The visible week's events grouped by day, in `sortCalendarEvents` order (the adapter sorts
+         * them upstream). A day with nothing on it is absent.
+         */
+        val weekEvents: Map<LocalDate, List<CalendarEvent>>
+            get() {
+                val days = weekDays.toSet()
+                return visibleEvents.filter { it.date in days }.groupBy { it.date }
+            }
+
+        /**
+         * What each day of [displayedMonth] marks in the grid, keyed by day-of-month; a day with
+         * nothing on it is simply absent. Calendars are listed in `calendar.sources` order so a
+         * day's dots keep the same left-to-right identity from one month to the next.
+         */
+        val dayMarks: Map<Int, DayMarks>
             get() {
                 fun inDisplayedMonth(date: LocalDate) =
                     date.year == displayedMonth.year && date.month.number == displayedMonth.month.number
-                return buildSet {
-                    calendar.events.forEach { if (inDisplayedMonth(it.date)) add(it.date.day) }
+                val sourceOrder = calendar.sources.withIndex().associate { (i, source) -> source.id to i }
+                val sourcesByDay = mutableMapOf<Int, MutableSet<String>>()
+                visibleEvents.forEach {
+                    if (inDisplayedMonth(it.date)) sourcesByDay.getOrPut(it.date.day) { mutableSetOf() } += it.sourceId
+                }
+                val todoDays = buildSet {
                     calendar.todos.forEach { if (inDisplayedMonth(it.due)) add(it.due.day) }
+                }
+                return (sourcesByDay.keys + todoDays).associateWith { day ->
+                    DayMarks(
+                        // An id no source claims (a cached event from a since-removed calendar) sorts last.
+                        sourceIds = sourcesByDay[day].orEmpty().sortedBy { sourceOrder[it] ?: Int.MAX_VALUE },
+                        hasTodo = day in todoDays,
+                    )
                 }
             }
     }

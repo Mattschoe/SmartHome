@@ -26,7 +26,7 @@ import com.mattschoe.smarthome.ui.theme.ChipIdle
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
 import com.mattschoe.smarthome.ui.theme.Ink
-import com.mattschoe.smarthome.ui.theme.OnForest
+import com.mattschoe.smarthome.ui.theme.onCalendarColor
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 
@@ -36,6 +36,10 @@ import org.jetbrains.compose.resources.painterResource
  *
  * [contentColor] overrides the icon/text color of an **idle** pill, for the few that are actions
  * rather than selections (the artist surface's shuffle pill) and want the accent on their glyph.
+ *
+ * [selectedColor] overrides the fill of a **selected** pill, for the one selection that is about a
+ * colour: the editor's calendar chips, which fill with the calendar's own. The text follows it
+ * through [onCalendarColor], since half the palette is far too light to carry cream.
  */
 @Composable
 fun PillChip(
@@ -45,13 +49,14 @@ fun PillChip(
     modifier: Modifier = Modifier,
     leadingIcon: DrawableResource? = null,
     contentColor: Color? = null,
+    selectedColor: Color = Forest,
 ) {
     val shape = RoundedCornerShape(percent = 50)
     val resolvedContentColor =
-        if (selected) OnForest
+        if (selected) onCalendarColor(selectedColor)
         else contentColor ?: Ink
     val base =
-        if (selected) Modifier.background(Forest, shape)
+        if (selected) Modifier.background(selectedColor, shape)
         else Modifier.background(ChipIdle, shape).border(1.dp, CardBorder, shape)
     Row(
         modifier = modifier

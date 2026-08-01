@@ -62,6 +62,61 @@ object Dimensions {
     // Fixed width for the trailing "100%" label so the track (weight 1f) doesn't reflow as digits change.
     val volumePctLabelWidth = 48.dp
 
+    // Right-card Calendar panel: the day-mark dots under a month-grid number. One per calendar with
+    // something that day, laid out with a slight overlap so a busy day still fits inside its cell.
+    val dayMarkDot = 5.dp
+    val dayMarkOverlap = 1.5.dp
+    val dayMarkRing = 0.5.dp
+    // The disc carrying a day number, in the month grid and in the week view's day header.
+    val calendarDayDisc = 34.dp
+
+    // Right-card Calendar panel (week view). The grid is 24 [weekHourHeight] rows — far taller than
+    // the ~500dp it is shown in, so it scrolls inside the panel — beside a gutter of hour labels.
+    // Widths stay proportional (seven weight(1f) columns), so the same composables re-flow on a phone.
+    // The hour row is deliberately tight: a day at a glance beats a legible 15 minutes, and a taller
+    // row spends the card's height on empty morning hours.
+    val weekHourHeight = 24.dp
+    val weekTimeGutter = 34.dp
+    val weekHourLabelHeight = 14.dp
+    // An event block: its floor height, the leading bar in the calendar's full color, and the height
+    // below which only the title fits (the start time is dropped rather than clipped).
+    val weekMinBlockHeight = 14.dp
+    val weekBlockRadius = 6.dp
+    val weekBlockBarWidth = 3.dp
+    val weekBlockGap = 2.dp
+    val weekBlockPadding = 4.dp
+    val weekBlockTimeMinHeight = 40.dp
+    val weekAllDayChipHeight = 20.dp
+    // The caret in the gutter that expands the all-day strip past its collapsed single row.
+    val weekChevronSize = 18.dp
+    val weekNowLineHeight = 2.dp
+    // The to-do list under the week grid: its label plus two rows, the rest scrolling inside the
+    // strip. Deliberately tight — every dp here is an hour the grid can't show, and the grid is what
+    // the week view is for. The strip takes this height whatever the day holds, so switching day or
+    // week doesn't resize the grid above it.
+    val weekTodoStripHeight = 116.dp
+
+    // Right-card Calendar popups (CalendarPopups.kt): the week view's event detail card and the
+    // header gear's calendar-filter card, both floated inside the right card rather than over the
+    // dashboard. Bounded rather than sized, so a short event's card is only as tall as it needs and a
+    // long one scrolls instead of outgrowing the card it floats in.
+    val eventDetailMaxWidth = 340.dp
+    val eventDetailMaxHeight = 420.dp
+    // The detail card's leading bar in the event's calendar colour — the week block's bar, scaled to
+    // a 20sp title rather than an 11sp one — and the glyphs in a popup's action row.
+    val eventDetailBarWidth = 4.dp
+    val popupIconSize = 20.dp
+    // How far under the card's top edge the gear's popup hangs, so it reads as dropped from the
+    // header it was opened from rather than floating free.
+    val calendarSettingsTopOffset = minTouch
+
+    // Right-card Calendar panel (event editor, EventEditor.kt). The scroll wheels pick date and time
+    // inline rather than through a picker dialog: [wheelVisibleRows] rows of [minTouch] each, so the
+    // row above and below the selected one show what turning the wheel would land on.
+    val wheelRowHeight = minTouch
+    const val wheelVisibleRows = 3
+    val wheelHeight = wheelRowHeight * wheelVisibleRows
+
     // Right-card Media panel (RightCard.kt). The now-playing surface (album art + scrubber +
     // transport + queue + playlists rail) and the idle browse surface (Quick Picks grid + Keep
     // Listening rail) share these tokens.

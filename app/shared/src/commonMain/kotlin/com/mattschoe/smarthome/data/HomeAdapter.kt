@@ -2,7 +2,9 @@ package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.BrowseItem
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.HomeState
+import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
@@ -96,4 +98,41 @@ interface HomeAdapter {
     fun addTodo(due: LocalDate, label: String)
     fun toggleTodo(id: String)
     fun editTodo(id: String, label: String)
+
+    /**
+     * Ask for a fresh calendar window. Unlike lights and media, calendar events are fetched rather
+     * than pushed, so the UI hints when a refresh is worth doing (the panel opened, months were
+     * navigated). Which panel is showing remains ViewModel-owned selection — this only takes the
+     * nudge. Fire-and-forget: nobody waits on it, the new window simply arrives on the state flow.
+     */
+    fun refreshCalendar()
+
+    /**
+     * Add [draft] to the calendar [sourceId]. `suspend` and failure-propagating like [play]: the
+     * caller is a save button showing a spinner, and a silently dropped event is worse than an error.
+     * Throws when the source is unknown or not writable
+     * ([com.mattschoe.smarthome.data.model.CalendarSource.canWrite]).
+     */
+    suspend fun createEvent(sourceId: String, draft: CalendarEventDraft)
+
+    /**
+     * Replace the event [uid] on [sourceId] with [draft]. [recurrenceId] addresses one occurrence of
+     * a recurring series (from [com.mattschoe.smarthome.data.model.CalendarEvent.recurrenceId]), and
+     * [range] decides whether the edit stops at that occurrence or carries forward.
+     */
+    suspend fun updateEvent(
+        sourceId: String,
+        uid: String,
+        draft: CalendarEventDraft,
+        recurrenceId: String? = null,
+        range: RecurrenceRange = RecurrenceRange.ThisEvent,
+    )
+
+    /** Delete the event [uid] on [sourceId]; [recurrenceId]/[range] scope it as in [updateEvent]. */
+    suspend fun deleteEvent(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String? = null,
+        range: RecurrenceRange = RecurrenceRange.ThisEvent,
+    )
 }

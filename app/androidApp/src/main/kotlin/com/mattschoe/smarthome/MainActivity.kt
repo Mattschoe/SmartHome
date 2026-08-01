@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.mattschoe.smarthome.data.SharedPreferencesStore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,6 +26,8 @@ class AppApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        appContainer = AppContainer()
+        // Android's key/value store needs a Context, which only exists here — hence supplying it
+        // rather than letting AppContainer resolve one (see platformKeyValueStore).
+        appContainer = AppContainer(keyValueStore = SharedPreferencesStore(this))
     }
 }
