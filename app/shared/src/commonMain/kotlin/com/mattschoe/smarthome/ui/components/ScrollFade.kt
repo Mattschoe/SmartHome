@@ -58,3 +58,42 @@ fun Modifier.verticalScrollFade(
         }
     }
 }
+
+/**
+ * The horizontal twin of [verticalScrollFade]: a [color] fade at whichever side of [state] still has
+ * content beyond it. Same apply-**outside**-the-scroll rule —
+ * `Modifier.horizontalScrollFade(s).horizontalScroll(s)`.
+ */
+@Composable
+fun Modifier.horizontalScrollFade(
+    state: ScrollableState,
+    color: Color = Card,
+    width: Dp = Dimensions.scrollFadeHeight,
+): Modifier {
+    val start by animateFloatAsState(if (state.canScrollBackward) 1f else 0f, label = "scroll-fade-start")
+    val end by animateFloatAsState(if (state.canScrollForward) 1f else 0f, label = "scroll-fade-end")
+    return this.drawWithContent {
+        drawContent()
+        val fadeW = width.toPx().coerceAtMost(size.width)
+        if (start > 0f) {
+            drawRect(
+                brush = Brush.horizontalGradient(listOf(color, Color.Transparent), startX = 0f, endX = fadeW),
+                topLeft = Offset.Zero,
+                size = Size(fadeW, size.height),
+                alpha = start,
+            )
+        }
+        if (end > 0f) {
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(Color.Transparent, color),
+                    startX = size.width - fadeW,
+                    endX = size.width,
+                ),
+                topLeft = Offset(size.width - fadeW, 0f),
+                size = Size(fadeW, size.height),
+                alpha = end,
+            )
+        }
+    }
+}
