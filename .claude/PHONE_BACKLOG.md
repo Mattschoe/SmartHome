@@ -57,18 +57,6 @@ as the tablet, only rearranged (`layout_guide.md` → Common). Specifically:
   the icons it needs** and flags any genuinely new glyph (e.g. a warmth-row check mark) for the user
   to supply *before* the phase runs. Never silently substitute `Icons.*`.
 
-### Verification gate (every phase)
-
-There are **no phone reference screenshots** to diff against the tablet ones — the visual source of
-truth is the mockup PNGs under `app/docs/mobile_phone_layout/` (`vertical/`, `horizontal/`). So each
-phase verifies by:
-
-1. **Phone build + on-device/emulator check** at a phone size (portrait ~360–412dp wide; landscape by
-   rotating), compared against that phase's named mockup PNG(s) via `/android-verify`.
-2. **Tablet regression** — the tablet (`Expanded`) still matches `app/docs/tablet_layout/*.png`
-   (mandatory whenever a phase touched a shared/tablet file).
-3. **iOS compile-only** — `cd app && ./gradlew :shared:compileKotlinIosSimulatorArm64`.
-4. **Tests** where logic exists (e.g. aspect-ratio → arrangement, start-page index) — `./gradlew allTests`.
 
 ---
 
@@ -82,17 +70,17 @@ before any control work. Extend the layout seam so `DashboardLayout.Compact` sub
 page counts, indicators, and placeholder pages. Reference: `layout_guide.md` → Common + the page
 tables for both orientations.
 
-- [ ] Decide + implement the Compact sub-branch: portrait vs landscape from the window aspect ratio
+- [x] Decide + implement the Compact sub-branch: portrait vs landscape from the window aspect ratio
       (extend `ui/layout/DashboardLayout.kt` or add a small pure, testable helper — keep the
       width→Compact/Expanded mapping intact).
-- [ ] **Portrait**: a horizontal pager of **4** placeholder pages, page-dot row **bottom center**,
+- [x] **Portrait**: a horizontal pager of **4** placeholder pages, page-dot row **bottom center**,
       **starts on page 2** (Light Control) on launch.
-- [ ] **Landscape**: a vertical pager of **3** placeholder pages, indicator on the **right edge**,
+- [x] **Landscape**: a vertical pager of **3** placeholder pages, indicator on the **right edge**,
       each page a two-card sage-surface frame (left + right card slots).
-- [ ] Placeholders name their page (Apps / Light / Music / Media·Calendar, etc.) so paging is legible.
-- [ ] Wire this into `CompactDashboard(...)` in `Homepage.kt`, replacing the "ikke designet" stub;
+- [x] Placeholders name their page (Apps / Light / Music / Media·Calendar, etc.) so paging is legible.
+- [x] Wire this into `CompactDashboard(...)` in `Homepage.kt`, replacing the "ikke designet" stub;
       pass the `Ready` state + `viewModel` through (pages fill in later phases).
-- [ ] **Verify:** paging + indicators + start-page correct in both orientations; tablet unchanged;
+- [x] **Verify:** paging + indicators + start-page correct in both orientations; tablet unchanged;
       iOS compiles; helper unit-tested.
 
 ---
@@ -107,17 +95,17 @@ phase: promote the **brightness dial** and **room-chip row** out of `CenterCard.
 controls, and render **warmth as a full-width vertical list of rows** (phone presentation) driven by
 the same `Warmth` state as the tablet's inline swatches.
 
-- [ ] **Icons:** dial bulb / warmth dots reuse tablet glyphs; **new** — a warmth-row **check mark**
+- [x] **Icons:** dial bulb / warmth dots reuse tablet glyphs; **new** — a warmth-row **check mark**
       for the selected row (request from user if not already shipped).
-- [ ] **Page 2 — Light Control:** nested **horizontal** room-chip swipe (last chip cut off + fade),
-      selecting a chip sets `activeLightRoom`; reused brightness dial (drag = brightness, tap bulb =
+- [x] **Page 2 — Light Control:** nested **horizontal** room-chip swipe (last chip cut off + fade),
+     selecting a chip sets `activeLightRoom`; reused brightness dial (drag = brightness, tap bulb =
       toggle, warmth-colored); large `64%` + `Brightness · <room>` caption; **warmth as vertical rows**
       (dot + name, selected row = raised card + check), selecting recolors the dial + turns light on.
-- [ ] **Page 1 — Apps:** section label `APPS`; **3-column** grid of tinted launcher tiles + captions;
+- [x] **Page 1 — Apps:** section label `APPS`; **3-column** grid of tinted launcher tiles + captions;
       grid scrolls vertically inside the page. Tiles are illustrative (reuse the tablet's apps set).
-- [ ] Nested room-chip swipe does not steal the page-pager gesture.
-- [ ] Extracted dial / warmth / room-chip controls are shared; **tablet still matches its screenshot.**
-- [ ] **Verify** against `vertical/homepage.png` + `vertical/app_page.png`; tablet unchanged; iOS compiles.
+- [x] Nested room-chip swipe does not steal the page-pager gesture.
+- [x] Extracted dial / warmth / room-chip controls are shared; **tablet still matches its screenshot.**
+- [x] **Verify** against `vertical/homepage.png` + `vertical/app_page.png`; tablet unchanged; iOS compiles.
 
 ---
 
@@ -215,5 +203,3 @@ cards per vertically-paged screen, and build the one genuinely new surface. Refe
   as an additive relation on top of per-room ownership (CLAUDE.md CORE RULE), shared with the tablet.
 - **Phone-specific persistence** — remembering the last-viewed page per orientation, if desired
   (tablet room-state persistence is tracked separately in `PROJECT_BACKLOG.md` Phase 8).
-</content>
-</invoke>

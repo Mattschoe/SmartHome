@@ -9,8 +9,18 @@ import kotlinx.serialization.Serializable
  * state (`activeRoom`/`panel`) lives on `HomeScreenState` in the ViewModel, not here.
  */
 
-/** Color-temperature presets for a room's light, coldest -> warmest ordering */
-enum class Warmth { Candle, Warm, Soft, Neutral, Cool }
+/**
+ * Color-temperature presets for a room's light, coldest -> warmest ordering. [displayName] is
+ * UI-facing, so it is Danish — the phone's warmth rows label each preset, where the tablet's swatch
+ * circles carry the name only as an accessibility description.
+ */
+enum class Warmth(val displayName: String) {
+    Candle("Stearinlys"),
+    Warm("Varm"),
+    Soft("Blød"),
+    Neutral("Neutral"),
+    Cool("Kølig"),
+}
 
 /**
  * The fixed set of rooms for this home. [displayName] is UI-facing, so it is Danish. [hasSpeaker]

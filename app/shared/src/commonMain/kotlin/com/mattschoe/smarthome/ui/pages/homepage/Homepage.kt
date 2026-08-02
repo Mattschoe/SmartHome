@@ -34,7 +34,6 @@ import com.mattschoe.smarthome.data.cycle
 import com.mattschoe.smarthome.ui.layout.DashboardLayout
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
-import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.OnForest
 import com.mattschoe.smarthome.ui.theme.SageSurface
 import kotlinx.coroutines.delay
@@ -58,16 +57,16 @@ private fun SageBackground(modifier: Modifier = Modifier) {
 }
 
 /**
- * The layout seam: measure the available width, map it to a [DashboardLayout], and branch. Only the
- * [DashboardLayout.Expanded] (tablet) branch is designed in v1; [DashboardLayout.Compact] (phone) is
- * an explicit stub so phone support drops in here later without touching the cards.
+ * The layout seam: measure the available window, map it to a [DashboardLayout], and branch. The tablet
+ * dashboard is [ExpandedDashboard]; the phone re-flow lives in [CompactDashboard], which sub-branches
+ * on orientation itself.
  */
 @Composable
 private fun DashboardRoot(state: HomeScreenState.Ready, viewModel: HomepageViewModel) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        when (DashboardLayout.from(maxWidth)) {
+        when (DashboardLayout.from(maxWidth, maxHeight)) {
             DashboardLayout.Expanded -> ExpandedDashboard(state, viewModel)
-            DashboardLayout.Compact -> CompactDashboard(state)
+            DashboardLayout.Compact -> CompactDashboard(state, viewModel)
         }
     }
 }
@@ -233,14 +232,3 @@ private fun ToastHost(toast: ToastMessage?, onDismiss: () -> Unit, modifier: Mod
 }
 
 private const val TOAST_MILLIS = 3_000L
-
-/** Phone layout is not designed in this phase — the seam exists so it can be built here later. */
-@Composable
-private fun CompactDashboard(ready: HomeScreenState.Ready) {
-    Box(
-        modifier = Modifier.fillMaxSize().background(SageSurface),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("Phone-layout er endnu ikke designet", color = InkSoft, fontSize = 16.sp)
-    }
-}

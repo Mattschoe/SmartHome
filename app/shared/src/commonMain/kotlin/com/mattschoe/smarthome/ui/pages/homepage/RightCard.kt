@@ -19,7 +19,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -135,6 +134,7 @@ import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.volumeFractionFromX
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.components.InsetSurface
+import com.mattschoe.smarthome.ui.components.PageIndicator
 import com.mattschoe.smarthome.ui.components.PillChip
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
@@ -2803,7 +2803,6 @@ private fun QuickPicksPager(
 ) {
     val pageCount = ceil(items.size / QUICK_PICKS_PER_PAGE.toFloat()).toInt().coerceAtLeast(1)
     val pagerState = rememberPagerState(pageCount = { pageCount })
-    val scope = rememberCoroutineScope()
     val gap = Dimensions.browseGridSpacing
 
     Column(modifier.fillMaxWidth()) {
@@ -2826,10 +2825,8 @@ private fun QuickPicksPager(
         }
         if (pageCount > 1) {
             Spacer(Modifier.height(12.dp))
-            PageDots(
-                current = pagerState.currentPage,
-                count = pageCount,
-                onSelect = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+            PageIndicator(
+                state = pagerState,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
         }
@@ -2896,26 +2893,3 @@ private fun BrowseGrid(
     }
 }
 
-/**
- * Small centered pager dots; the current page is a filled Forest dot, the rest muted. Each dot also
- * jumps to its page — the only non-drag way to page on the desktop target, where the pager can't be
- * dragged. The clickable stays inside the dot's own size so the indicator keeps its exact footprint.
- */
-@Composable
-private fun PageDots(current: Int, count: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        repeat(count) { i ->
-            Box(
-                Modifier
-                    .size(Dimensions.pageDotSize)
-                    .clip(CircleShape)
-                    .background(if (i == current) Forest else Muted.copy(alpha = 0.5f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { onSelect(i) }
-                    .semantics { contentDescription = "Side ${i + 1}" },
-            )
-        }
-    }
-}

@@ -53,6 +53,18 @@ object Dimensions {
     val warmthHaloGap = 3.dp
     val warmthHaloRingWidth = 3.dp
 
+    // The phone's warmth rows (the same presets as the swatches above, laid out as a full-width list).
+    // Selection thickens the border and adds the check badge; the row height never changes, so the list
+    // doesn't reflow as the selection moves. Measured off mobile_phone_layout/vertical/homepage.png.
+    val warmthRowHeight = 52.dp
+    val warmthRowRadius = 14.dp
+    val warmthRowGap = 10.dp
+    val warmthRowInset = 15.dp
+    val warmthRowDot = 26.dp
+    val warmthRowCheck = 36.dp
+    val warmthRowBorder = 1.dp
+    val warmthRowSelectedBorder = 1.5.dp
+
     // Center-card volume slider (Audio section). The row keeps a [minTouch] hit height; the track is
     // a thin rounded lane with a white knob riding its center. See CenterCard.kt.
     val volumeTrackHeight = 7.dp
@@ -143,6 +155,7 @@ object Dimensions {
     // Quick-picks 3×3 grid + browse rail spacing, and the pager dot indicator.
     val browseGridSpacing = 12.dp
     val pageDotSize = 7.dp
+    val pageDotGap = 6.dp
     // The search field's inner row, sized so the trailing clear button is a full [minTouch] target
     // while the pill keeps the height a plain 16sp line gave it.
     val searchFieldRowHeight = minTouch
@@ -174,4 +187,25 @@ object Dimensions {
     // How far the centred glyph sits inside its touch target — the offset that re-aligns the arrow
     // with the content edge without shrinking the target.
     val backButtonInset = (backButtonSize - backIconSize) / 2
+
+    // Compact (phone) paging scaffold — see CompactDashboard.kt. Measured off the mockups under
+    // app/docs/mobile_phone_layout/. Portrait is full-bleed cream with no card; only landscape frames
+    // its two cards on the sage surface, which is why there is no portrait equivalent of the gap.
+    val phoneSurfacePad = 14.dp
+    val phoneCardGap = 24.dp
+    val phonePagePad = 24.dp
+    // A portrait page pads itself rather than being padded by the pager, so a control can still run to
+    // the screen edge. [phonePageTopPad] sits under the status-bar inset; [phonePageBottomClearance]
+    // keeps scrolling content from ending underneath the floating dot row.
+    val phonePageTopPad = 16.dp
+    val phonePageBottomClearance = 44.dp
+    // The phone dial's box width, chosen so the scaled arc matches the mockup's radius. Clamped to the
+    // page's content width on narrow screens.
+    val phoneDialWidth = 300.dp
+    // The phone indicator's active mark is an elongated pill on the paging axis rather than a dot;
+    // [pageDotSize] stays its thickness. The row/column floats over the page, inset from the edge it
+    // hugs (bottom in portrait, right in landscape).
+    val pageIndicatorActive = 22.dp
+    val pageIndicatorGap = 7.dp
+    val pageIndicatorInset = 16.dp
 }

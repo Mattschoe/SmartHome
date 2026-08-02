@@ -2,7 +2,6 @@ package com.mattschoe.smarthome.ui.pages.homepage
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -10,7 +9,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,7 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -38,12 +35,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -62,19 +57,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
-import com.mattschoe.smarthome.data.angleFromPointer
-import com.mattschoe.smarthome.data.brightnessFromAngle
-import com.mattschoe.smarthome.data.volumeFractionFromX
-import com.mattschoe.smarthome.data.volumeFromFraction
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.Warmth
+import com.mattschoe.smarthome.data.volumeFractionFromX
+import com.mattschoe.smarthome.data.volumeFromFraction
 import com.mattschoe.smarthome.ui.components.CardContainer
-import com.mattschoe.smarthome.ui.components.PillChip
 import com.mattschoe.smarthome.ui.components.SectionLabel
+import com.mattschoe.smarthome.ui.controls.BrightnessDial
+import com.mattschoe.smarthome.ui.controls.DragCommitInterval
+import com.mattschoe.smarthome.ui.controls.WarmthSwatches
+import com.mattschoe.smarthome.ui.controls.WrappingRoomChips
 import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
@@ -83,8 +78,8 @@ import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.InsetFill
 import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.SageGreen
-import com.mattschoe.smarthome.ui.theme.WarmthOffMuted
-import com.mattschoe.smarthome.ui.theme.color
+import kotlin.math.roundToInt
+import kotlin.time.TimeSource
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
@@ -93,12 +88,6 @@ import smarthome.shared.generated.resources.speaker_outline
 import smarthome.shared.generated.resources.volume_down_outline
 import smarthome.shared.generated.resources.volume_off_outline
 import smarthome.shared.generated.resources.volume_up_outline
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.roundToInt
-import kotlin.math.sin
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.TimeSource
 
 /**
  * The flex-1 center card. Light and audio are selected **independently**: the top chip row picks the
@@ -133,7 +122,7 @@ fun CenterCard(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            RoomChipsRow(
+            WrappingRoomChips(
                 rooms = Room.entries,
                 activeRoom = activeLightRoom,
                 onSelectRoom = onSelectLightRoom,
@@ -141,7 +130,9 @@ fun CenterCard(
             )
             Spacer(Modifier.height(Dimensions.cardGap))
             BrightnessDial(
-                roomState = lightRoomState,
+                brightnessPct = lightRoomState.brightnessPct,
+                isLightOn = lightRoomState.isLightOn,
+                warmth = lightRoomState.lightWarmth,
                 onBrightnessChange = onBrightnessChange,
                 onToggleLight = onToggleLight,
             )
@@ -158,7 +149,7 @@ fun CenterCard(
             Spacer(Modifier.height(Dimensions.centerSectionGap))
             AudioSectionHeader(audioState = audioState, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
-            RoomChipsRow(
+            WrappingRoomChips(
                 rooms = Room.audioRooms,
                 activeRoom = activeAudioRoom,
                 onSelectRoom = onSelectAudioRoom,
@@ -241,256 +232,6 @@ private fun JoinRoomAction(text: String, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(text = text, color = Forest, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-/**
- * A wrapping row of room pill toggles. Used for both the light selector (all [Room.entries]) and the
- * AUDIO selector ([Room.audioRooms] with a speaker [leadingIcon]); selecting swaps that section's
- * state via [activeRoom].
- */
-@Composable
-private fun RoomChipsRow(
-    rooms: List<Room>,
-    activeRoom: Room,
-    onSelectRoom: (Room) -> Unit,
-    modifier: Modifier = Modifier,
-    leadingIcon: DrawableResource? = null,
-) {
-    FlowRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        rooms.forEach { room ->
-            PillChip(
-                text = room.displayName,
-                selected = room == activeRoom,
-                onClick = { onSelectRoom(room) },
-                leadingIcon = leadingIcon,
-            )
-        }
-    }
-}
-
-/**
- * Half-arc brightness dial. Drag math (`angleFromPointer`/`brightnessFromAngle`) is the pure,
- * unit-tested logic from [com.mattschoe.smarthome.data.DashboardLogic] — this composable only
- * draws the arc/knob/growth-shape and forwards pointer/key events to it.
- *
- * The center "growth" shape is a deliberate deviation from the handoff spec's lightbulb glyph: a
- * circle anchored by its bottom that scales up uniformly (keeping its aspect ratio) as brightness
- * rises — like a sun growing over the horizon — rather than a glow expanding evenly outward. Its
- * fully-grown footprint is reserved by [Dimensions.centerDialHeight] so nothing below it shifts.
- */
-@Composable
-private fun BrightnessDial(
-    roomState: RoomState,
-    onBrightnessChange: (Int) -> Unit,
-    onToggleLight: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val density = LocalDensity.current
-    val cx = with(density) { (Dimensions.centerDialWidth / 2).toPx() }
-    val cy = with(density) { Dimensions.centerDialCenterY.toPx() }
-
-    // The gesture detectors are keyed on Unit (they must survive recomposition without restarting
-    // mid-drag), so capture the latest callbacks via rememberUpdatedState — otherwise the coroutines
-    // would keep calling the first composition's lambdas and mutate the wrong room after a switch.
-    val currentOnBrightnessChange by rememberUpdatedState(onBrightnessChange)
-    val currentOnToggleLight by rememberUpdatedState(onToggleLight)
-
-    // While a drag is in flight the dial owns its value locally (non-null), so HA's interim echoes
-    // can't jitter it; on release it falls back to the flow (which the adapter's optimistic hold keeps
-    // at the target). See the plan's "local drag ownership".
-    var dragValue by remember { mutableStateOf<Int?>(null) }
-    val displayedPct = dragValue ?: roomState.brightnessPct
-
-    val arcColor = if (roomState.isLightOn) roomState.lightWarmth.color() else WarmthOffMuted
-    val valueSweep = displayedPct / 100f * 180f
-
-    Box(
-        modifier = modifier
-            .size(width = Dimensions.centerDialWidth, height = Dimensions.centerDialHeight)
-            .pointerInput(Unit) {
-                // Throttle mid-drag commits so HA isn't hit per-pixel; the last value always lands via
-                // onDragEnd. `lastCommit` lives for the pointer coroutine's lifetime (survives gestures).
-                var lastCommit = TimeSource.Monotonic.markNow() - DragCommitInterval
-                fun release() {
-                    dragValue?.let { currentOnBrightnessChange(it) }
-                    dragValue = null
-                }
-                detectDragGestures(
-                    onDragEnd = { release() },
-                    onDragCancel = { release() },
-                ) { change, _ ->
-                    change.consume()
-                    val value = brightnessFromAngle(angleFromPointer(cx, cy, change.position.x, change.position.y))
-                    dragValue = value
-                    val now = TimeSource.Monotonic.markNow()
-                    if (now - lastCommit >= DragCommitInterval) {
-                        currentOnBrightnessChange(value)
-                        lastCommit = now
-                    }
-                }
-            }
-            .pointerInput(Unit) {
-                detectTapGestures { pos ->
-                    // Only the center bulb toggles the light — not the whole dial. Fixed hit region
-                    // (independent of the bulb's current size) centered on the grown-bulb area.
-                    val tapRadius = Dimensions.centerBulbTapRadius.toPx()
-                    val bulbCenter = Offset(cx, Dimensions.centerGrowthBaselineY.toPx() - tapRadius)
-                    if ((pos - bulbCenter).getDistance() <= tapRadius) currentOnToggleLight()
-                }
-            }
-            .focusable()
-            // Slider a11y in Compose is conveyed by progressBarRangeInfo + setProgress (there is no
-            // Role.Slider); the arrow-key handler below adds keyboard adjustment.
-            .semantics(mergeDescendants = true) {
-                contentDescription = "Lysstyrke"
-                progressBarRangeInfo =
-                    ProgressBarRangeInfo(current = displayedPct.toFloat(), range = 0f..100f)
-                setProgress { target ->
-                    onBrightnessChange(target.roundToInt().coerceIn(0, 100))
-                    true
-                }
-            }
-            .onKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
-                when (event.key) {
-                    Key.DirectionUp, Key.DirectionRight -> {
-                        onBrightnessChange((roomState.brightnessPct + 5).coerceAtMost(100))
-                        true
-                    }
-                    Key.DirectionDown, Key.DirectionLeft -> {
-                        onBrightnessChange((roomState.brightnessPct - 5).coerceAtLeast(0))
-                        true
-                    }
-                    else -> false
-                }
-            },
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val radiusPx = Dimensions.centerDialRadius.toPx()
-            val strokeWidth = Dimensions.centerDialArcStroke.toPx()
-            val topLeft = Offset(cx - radiusPx, cy - radiusPx)
-            val arcSize = Size(radiusPx * 2, radiusPx * 2)
-
-            // Growth bulb: a circle anchored by its bottom at centerGrowthBaselineY that scales
-            // uniformly from min→max diameter with brightness (grows upward). Size is keyed to
-            // brightness regardless of isLightOn — toggling off only mutes the color, per the
-            // off-state spec pattern.
-            val t = displayedPct / 100f
-            val diameter = lerp(Dimensions.centerGrowthMinDiameter, Dimensions.centerGrowthMaxDiameter, t)
-            val bulbRadius = diameter.toPx() / 2f
-            val baseline = Dimensions.centerGrowthBaselineY.toPx()
-            val bulbCenterY = baseline - bulbRadius
-            // Fake soft shadow: a slightly larger, low-alpha dark circle offset below the bulb. Canvas
-            // draws can't use Modifier.shadow, and this stays multiplatform (no native shadow layer).
-            // Kept very faint so the bulb reads as sitting on the card, not floating above it.
-            drawCircle(
-                color = Color.Black.copy(alpha = 0.05f),
-                radius = bulbRadius + 1.dp.toPx(),
-                center = Offset(cx, bulbCenterY + 1.5.dp.toPx()),
-            )
-            drawCircle(
-                color = arcColor.copy(alpha = 0.45f),
-                radius = bulbRadius,
-                center = Offset(cx, bulbCenterY),
-            )
-
-            drawArc(
-                color = InsetFill,
-                startAngle = 180f,
-                sweepAngle = 180f,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-            )
-            drawArc(
-                color = arcColor,
-                startAngle = 180f,
-                sweepAngle = valueSweep,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-            )
-
-            val knobAngleRad = (180f + valueSweep).toDouble() * PI / 180.0
-            val knobCenter = Offset(
-                x = cx + radiusPx * cos(knobAngleRad).toFloat(),
-                y = cy + radiusPx * sin(knobAngleRad).toFloat(),
-            )
-            val knobRadius = Dimensions.centerDialKnobDiameter.toPx() / 2f
-            val knobStroke = Dimensions.centerDialKnobStroke.toPx()
-            drawCircle(
-                color = Color.Black.copy(alpha = 0.07f),
-                radius = knobRadius + 0.5.dp.toPx(),
-                center = knobCenter + Offset(0f, 1.dp.toPx()),
-            )
-            drawCircle(color = Color.White, radius = knobRadius, center = knobCenter)
-            drawCircle(
-                color = arcColor,
-                radius = knobRadius - knobStroke / 2f,
-                center = knobCenter,
-                style = Stroke(width = knobStroke),
-            )
-        }
-    }
-}
-
-/** Five warmth-preset circles; selecting one recolors the dial (via [roomState]) and turns the light on. */
-@Composable
-private fun WarmthSwatches(
-    selected: Warmth,
-    onSelect: (Warmth) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // Center-align vertically: a selected swatch's ring makes its box taller, and without this the row
-    // top-aligns children so that extra height hangs *below* — reading as the circle sliding "down"
-    // rather than scaling up in place. Centered, the growth spreads symmetrically around the row axis.
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Warmth.entries.forEach { warmth ->
-            WarmthSwatch(warmth = warmth, selected = warmth == selected, onSelect = { onSelect(warmth) })
-        }
-    }
-}
-
-@Composable
-private fun WarmthSwatch(warmth: Warmth, selected: Boolean, onSelect: () -> Unit) {
-    val swatchColor = warmth.color()
-    Box(
-        modifier = Modifier
-            .sizeIn(minWidth = Dimensions.minTouch, minHeight = Dimensions.minTouch)
-            .selectable(selected = selected, onClick = onSelect, role = Role.RadioButton)
-            .semantics { contentDescription = warmth.name },
-        contentAlignment = Alignment.Center,
-    ) {
-        // Selected swatches gain a concentric outer ring (ring + gap) drawn *around* a constant-size
-        // fill, so the selection grows the footprint without shrinking the colored circle.
-        val ringModifier =
-            if (selected) {
-                Modifier
-                    .border(Dimensions.warmthHaloRingWidth, swatchColor, CircleShape)
-                    .padding(Dimensions.warmthHaloRingWidth + Dimensions.warmthHaloGap)
-            } else {
-                Modifier
-            }
-        Box(ringModifier, contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .size(Dimensions.warmthSwatchDiameter)
-                    .shadow(Dimensions.swatchElevation, CircleShape)
-                    .clip(CircleShape)
-                    .background(swatchColor),
-            )
-        }
     }
 }
 
@@ -650,9 +391,6 @@ private fun VolumeSlider(
         )
     }
 }
-
-/** Minimum spacing between HA commits while dragging the dial/slider (the on-screen value stays live). */
-private val DragCommitInterval = 100.milliseconds
 
 /** The slider's leading glyph reflects the level: muted at 0, low through 50, high above. */
 private fun volumeIcon(volumePct: Int): DrawableResource = when {

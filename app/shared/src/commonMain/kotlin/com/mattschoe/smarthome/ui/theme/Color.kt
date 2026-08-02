@@ -9,6 +9,13 @@ val Card = Color(0xFFFAF8EA)
 val CardBorder = Color(0xFFA7BB7C)
 val InsetFill = Color(0xFFECE6CF)
 
+/**
+ * A near-invisible rule for outlining an *unselected* row that has no fill of its own — quiet enough
+ * on the cream [Card] that the row reads as a shape rather than a box. [CardBorder] is far too green
+ * for this; it belongs to things floating on the sage surface.
+ */
+val HairlineBorder = Color(0xFFE3DEC5)
+
 
 val Ink = Color(0xFF23301C)
 val InkSoft = Color(0xFF5C6650)
