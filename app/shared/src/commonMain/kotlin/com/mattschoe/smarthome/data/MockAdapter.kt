@@ -16,6 +16,7 @@ import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.model.Warmth
+import com.mattschoe.smarthome.data.model.WeatherCondition
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -216,7 +217,8 @@ internal fun seedHome(): HomeState {
         indoorTempC = 21.5,
         humidityPct = 44,
         energyKw = 1.2,
-        outdoorTempC = 24.0,
+        feelsLikeC = 24.0,
+        condition = WeatherCondition.PartlyCloudy,
     ),
     playlists = mockShelf(
         "playlist",

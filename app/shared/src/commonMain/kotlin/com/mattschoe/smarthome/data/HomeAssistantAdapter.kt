@@ -12,9 +12,14 @@ import com.mattschoe.smarthome.data.ha.SWITCH_LIGHTS_BY_ROOM
 import com.mattschoe.smarthome.data.ha.discoverCalendarSources
 import com.mattschoe.smarthome.data.ha.discoverRoomEntities
 import com.mattschoe.smarthome.data.ha.discoverTodoEntity
+import com.mattschoe.smarthome.data.ha.discoverWeatherEntity
+import com.mattschoe.smarthome.data.ha.feelsLikeC
 import com.mattschoe.smarthome.data.ha.mapCalendarEvents
 import com.mattschoe.smarthome.data.ha.mapTodoItems
 import com.mattschoe.smarthome.data.ha.resolveSyncLeaders
+import com.mattschoe.smarthome.data.ha.temperatureToC
+import com.mattschoe.smarthome.data.ha.weatherConditionFrom
+import com.mattschoe.smarthome.data.ha.windSpeedToMs
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
@@ -105,9 +110,9 @@ import kotlinx.serialization.json.putJsonObject
  *
  * Calendars and todos come from the same instance but over their own channels: events are fetched
  * over REST for a rolling window (HA has no WebSocket command that lists a date range), while the
- * todo list arrives as a push subscription. Climate has no entities in this home yet, so it is
- * emitted **blank** (the left card's tiles render "—"), and the Media panel's queue is likewise
- * empty: HA's `media_player` exposes no standard play-queue.
+ * todo list arrives as a push subscription. Climate is backed by the home's single `weather.*` entity
+ * — it fills the outdoor tile alone, the indoor/energy tiles have no sensors yet and stay "—" — and
+ * the Media panel's queue is empty: HA's `media_player` exposes no standard play-queue.
  */
 class HomeAssistantAdapter(
     private val config: HaConfig,
@@ -127,6 +132,7 @@ class HomeAssistantAdapter(
     // True until a live fetch lands — what the panel labels as showing cached, possibly outdated data.
     private val calendarStale = MutableStateFlow(true)
     @Volatile private var todoEntityId: String? = null
+    @Volatile private var weatherEntityId: String? = null
     // The list the live subscription follows; null before one is taken out and after every drop,
     // since a socket takes its subscriptions with it.
     @Volatile private var subscribedTodoEntity: String? = null
@@ -564,18 +570,25 @@ class HomeAssistantAdapter(
     }
 
     /**
-     * Read the home's shape: which entities back each room, the calendars (with the colors set on them
-     * in Home Assistant) and which todo list can carry due dates. Runs at connect and again on every
-     * registry change, so an edit made in HA lands without a reconnect.
+     * Read the home's shape: which entities back each room, which weather entity backs the climate
+     * glance, the calendars (with the colors set on them in Home Assistant) and which todo list can
+     * carry due dates. Runs at connect and again on every registry change, so an edit made in HA lands
+     * without a reconnect.
      */
     private suspend fun discover() {
         val areas = json.decodeFromJsonElement<List<HaAreaDto>>(request("config/area_registry/list"))
         val devices = json.decodeFromJsonElement<List<HaDeviceDto>>(request("config/device_registry/list"))
         val entities = json.decodeFromJsonElement<List<HaEntityRegistryDto>>(request("config/entity_registry/list"))
         roomEntities = discoverRoomEntities(areas, devices, entities, SWITCH_LIGHTS_BY_ROOM, MEDIA_PLAYER_BY_ROOM)
-        mappedEntityIds = roomEntities.values.flatMap { it.lightIds + it.switchIds + listOfNotNull(it.mediaPlayerId) }.toSet()
 
         val states = json.decodeFromJsonElement<List<HaStateDto>>(request("get_states"))
+        // The weather entity is found in the snapshot but has to join the mapped set before the states
+        // are filtered by it: `handleStateChanged` drops anything unmapped, so an id left out here
+        // would take its initial value and then never update again.
+        weatherEntityId = discoverWeatherEntity(states)
+        mappedEntityIds = roomEntities.values
+            .flatMap { it.lightIds + it.switchIds + listOfNotNull(it.mediaPlayerId) }
+            .toSet() + listOfNotNull(weatherEntityId)
         entityStates.value = states.filter { it.entity_id in mappedEntityIds }.associateBy { it.entity_id }
         // Calendars and the todo list are discovered from the same snapshot — no second round-trip.
         // Their colors are a registry option rather than an entity attribute, hence both inputs.
@@ -880,7 +893,7 @@ class HomeAssistantAdapter(
                 reduced?.let { survivors[room] = it }
                 display
             },
-            climate = ClimateState(null, null, null, null),
+            climate = climateState(),
             playlists = emptyList(),
             quickPicks = emptyList(),
             mixedForYou = emptyList(),
@@ -961,12 +974,38 @@ class HomeAssistantAdapter(
                 audio = if (room.hasSpeaker) AudioState(0, false, null, 0, emptyList()) else null,
             )
         },
-        climate = ClimateState(null, null, null, null),
+        climate = ClimateState(null, null, null, null, null),
         playlists = emptyList(),
         quickPicks = emptyList(),
         mixedForYou = emptyList(),
         calendar = calendarState(),
     )
+
+    /**
+     * The climate glance from the home's `weather.*` entity: the outdoor tile's apparent temperature
+     * and its condition icon. The other three tiles have no sensors in this home and stay `null`.
+     * Wind speed and temperature are converted from the units the entity itself reports, since those
+     * are per-integration. Weather entities update roughly hourly, so the `state_changed` push that
+     * already drives everything else is enough — nothing here polls.
+     */
+    private fun climateState(): ClimateState {
+        val weather = weatherEntityId?.let { entityStates.value[it] }
+        val tempUnit = weather.attrString("temperature_unit")
+        val tempC = temperatureToC(weather.attrDouble("temperature"), tempUnit)
+        return ClimateState(
+            indoorTempC = null,
+            humidityPct = null,
+            energyKw = null,
+            feelsLikeC = feelsLikeC(
+                tempC = tempC,
+                humidityPct = weather.attrInt("humidity")?.coerceIn(0, 100),
+                dewPointC = temperatureToC(weather.attrDouble("dew_point"), tempUnit),
+                windMs = windSpeedToMs(weather.attrDouble("wind_speed"), weather.attrString("wind_speed_unit")),
+                uvIndex = weather.attrDouble("uv_index"),
+            ),
+            condition = weatherConditionFrom(weather?.state),
+        )
+    }
 
     /**
      * The calendar payload `rebuild()` (and the pre-connection blank state) publishes, assembled from
