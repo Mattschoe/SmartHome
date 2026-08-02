@@ -3,6 +3,7 @@ package com.mattschoe.smarthome.ui.pages.homepage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,6 +39,7 @@ import com.mattschoe.smarthome.data.formatEnergy
 import com.mattschoe.smarthome.data.formatHumidity
 import com.mattschoe.smarthome.data.formatTemp
 import com.mattschoe.smarthome.data.model.ClimateState
+import com.mattschoe.smarthome.data.model.WeatherCondition
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.theme.Card
@@ -46,19 +48,46 @@ import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.Rose
-import com.mattschoe.smarthome.ui.theme.SageGreen
 import com.mattschoe.smarthome.ui.theme.Teal
 import com.mattschoe.smarthome.ui.theme.WarmAmber
+import com.mattschoe.smarthome.ui.theme.WeatherAlert
+import com.mattschoe.smarthome.ui.theme.WeatherCloud
+import com.mattschoe.smarthome.ui.theme.WeatherFog
+import com.mattschoe.smarthome.ui.theme.WeatherHail
+import com.mattschoe.smarthome.ui.theme.WeatherMoon
+import com.mattschoe.smarthome.ui.theme.WeatherRain
+import com.mattschoe.smarthome.ui.theme.WeatherSnow
+import com.mattschoe.smarthome.ui.theme.WeatherSun
 import kotlinx.coroutines.delay
 import kotlinx.datetime.TimeZone
+import kotlin.math.roundToInt
 import kotlin.time.Clock
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
+import smarthome.shared.generated.resources.air
+import smarthome.shared.generated.resources.clear_night
+import smarthome.shared.generated.resources.cloud
 import smarthome.shared.generated.resources.energy_filled
+import smarthome.shared.generated.resources.foggy_cloud
+import smarthome.shared.generated.resources.foggy_lines
 import smarthome.shared.generated.resources.humidity_filled
+import smarthome.shared.generated.resources.partly_cloudy_day_cloud
+import smarthome.shared.generated.resources.partly_cloudy_day_sun
+import smarthome.shared.generated.resources.rainy_cloud
+import smarthome.shared.generated.resources.rainy_drops
+import smarthome.shared.generated.resources.rainy_heavy
+import smarthome.shared.generated.resources.rainy_snow_rain
+import smarthome.shared.generated.resources.rainy_snow_snow
 import smarthome.shared.generated.resources.sun_filled
 import smarthome.shared.generated.resources.thermometer_filled
+import smarthome.shared.generated.resources.thunderstorm_bolt
+import smarthome.shared.generated.resources.thunderstorm_cloud
+import smarthome.shared.generated.resources.warning
+import smarthome.shared.generated.resources.weather_hail_cloud
+import smarthome.shared.generated.resources.weather_hail_stones
+import smarthome.shared.generated.resources.weather_snowy_cloud
+import smarthome.shared.generated.resources.weather_snowy_flakes
 
 /**
  * The fixed left column: date/time header, a 2×2 read-only climate glance, and the (currently empty)
@@ -128,15 +157,13 @@ private fun ClimateGrid(climate: ClimateState) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ClimateTile(
-                icon = Res.drawable.thermometer_filled,
-                iconTint = Rose,
+                icon = { TileIcon(Res.drawable.thermometer_filled, Rose) },
                 value = formatTemp(climate.indoorTempC),
                 contentDescription = describe("Indetemperatur", formatTemp(climate.indoorTempC)),
                 modifier = Modifier.weight(1f),
             )
             ClimateTile(
-                icon = Res.drawable.humidity_filled,
-                iconTint = Teal,
+                icon = { TileIcon(Res.drawable.humidity_filled, Teal) },
                 value = formatHumidity(climate.humidityPct),
                 contentDescription = climate.humidityPct?.let { "Luftfugtighed $it procent" }
                     ?: "Luftfugtighed ukendt",
@@ -145,28 +172,31 @@ private fun ClimateGrid(climate: ClimateState) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ClimateTile(
-                icon = Res.drawable.energy_filled,
-                iconTint = WarmAmber,
+                icon = { TileIcon(Res.drawable.energy_filled, WarmAmber) },
                 value = formatEnergy(climate.energyKw),
                 contentDescription = describe("Energiforbrug", formatEnergy(climate.energyKw)),
                 modifier = Modifier.weight(1f),
             )
             ClimateTile(
-                icon = Res.drawable.sun_filled,
-                iconTint = SageGreen,
-                value = formatTemp(climate.outdoorTempC),
-                contentDescription = describe("Udetemperatur", formatTemp(climate.outdoorTempC)),
+                icon = { WeatherGlyph(climate.condition, Modifier.size(TileIconSize)) },
+                value = formatTemp(climate.feelsLikeC),
+                contentDescription = climate.feelsLikeC?.let { "Føles som ${it.roundToInt()} grader" }
+                    ?: "Føles som ukendt",
                 modifier = Modifier.weight(1f),
             )
         }
     }
 }
 
-/** One climate stat: a cream inner-block tile with a soft drop shadow, a colored icon and a large value. */
+private val TileIconSize = 26.dp
+
+/**
+ * One climate stat: a cream inner-block tile with a soft drop shadow, a large value, and an [icon]
+ * slot — a single tinted glyph for the sensor tiles, a stack of them for the weather one.
+ */
 @Composable
 private fun ClimateTile(
-    icon: DrawableResource,
-    iconTint: Color,
+    icon: @Composable () -> Unit,
     value: String,
     contentDescription: String,
     modifier: Modifier = Modifier,
@@ -182,13 +212,80 @@ private fun ClimateTile(
             .clearAndSetSemantics { this.contentDescription = contentDescription },
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = null,
-            tint = iconTint,
-            modifier = Modifier.size(26.dp),
-        )
+        icon()
         Text(value, color = Ink, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** A climate tile's plain single-color glyph. */
+@Composable
+private fun TileIcon(icon: DrawableResource, tint: Color) {
+    Icon(
+        painter = painterResource(icon),
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(TileIconSize),
+    )
+}
+
+/** One tinted layer of a multi-color weather glyph, painted over the ones before it. */
+private data class GlyphLayer(val drawable: DrawableResource, val tint: Color)
+
+/**
+ * The layers making up [condition]'s glyph, back to front — Material Symbols merge a whole icon into
+ * one path, so the multi-color conditions ship as one drawable per color and are stacked here. An
+ * unknown or absent condition falls back to a plain sun.
+ */
+private fun glyphLayers(condition: WeatherCondition?): List<GlyphLayer> = when (condition) {
+    WeatherCondition.ClearNight -> listOf(GlyphLayer(Res.drawable.clear_night, WeatherMoon))
+    WeatherCondition.Cloudy -> listOf(GlyphLayer(Res.drawable.cloud, WeatherCloud))
+    WeatherCondition.Exceptional -> listOf(GlyphLayer(Res.drawable.warning, WeatherAlert))
+    WeatherCondition.Fog -> listOf(
+        GlyphLayer(Res.drawable.foggy_cloud, WeatherCloud),
+        GlyphLayer(Res.drawable.foggy_lines, WeatherFog),
+    )
+    WeatherCondition.Hail -> listOf(
+        GlyphLayer(Res.drawable.weather_hail_cloud, WeatherCloud),
+        GlyphLayer(Res.drawable.weather_hail_stones, WeatherHail),
+    )
+    WeatherCondition.Lightning, WeatherCondition.LightningRainy -> listOf(
+        GlyphLayer(Res.drawable.thunderstorm_cloud, WeatherCloud),
+        GlyphLayer(Res.drawable.thunderstorm_bolt, WarmAmber),
+    )
+    WeatherCondition.PartlyCloudy -> listOf(
+        GlyphLayer(Res.drawable.partly_cloudy_day_sun, WeatherSun),
+        GlyphLayer(Res.drawable.partly_cloudy_day_cloud, WeatherCloud),
+    )
+    WeatherCondition.Pouring -> listOf(GlyphLayer(Res.drawable.rainy_heavy, WeatherRain))
+    WeatherCondition.Rainy -> listOf(
+        GlyphLayer(Res.drawable.rainy_cloud, WeatherCloud),
+        GlyphLayer(Res.drawable.rainy_drops, WeatherRain),
+    )
+    WeatherCondition.Snowy -> listOf(
+        GlyphLayer(Res.drawable.weather_snowy_cloud, WeatherCloud),
+        GlyphLayer(Res.drawable.weather_snowy_flakes, WeatherSnow),
+    )
+    WeatherCondition.SnowyRainy -> listOf(
+        GlyphLayer(Res.drawable.rainy_snow_rain, WeatherRain),
+        GlyphLayer(Res.drawable.rainy_snow_snow, WeatherSnow),
+    )
+    WeatherCondition.Windy, WeatherCondition.WindyVariant ->
+        listOf(GlyphLayer(Res.drawable.air, WeatherCloud))
+    WeatherCondition.Sunny, null -> listOf(GlyphLayer(Res.drawable.sun_filled, WeatherSun))
+}
+
+/** [condition]'s glyph, drawn as its stack of tinted layers. */
+@Composable
+private fun WeatherGlyph(condition: WeatherCondition?, modifier: Modifier = Modifier) {
+    Box(modifier) {
+        glyphLayers(condition).forEach { (drawable, tint) ->
+            Icon(
+                painter = painterResource(drawable),
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 

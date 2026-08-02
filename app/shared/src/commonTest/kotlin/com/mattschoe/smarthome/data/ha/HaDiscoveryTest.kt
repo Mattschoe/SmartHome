@@ -276,6 +276,22 @@ class HaDiscoveryTest {
     }
 
     @Test
+    fun weatherDiscovery_picksTheFirstWeatherEntityById() {
+        val states = listOf(
+            stateOf("light.floor_lamp", "Gulvlampe", null),
+            stateOf("weather.forecast_home", "Forecast Home", null),
+            stateOf("weather.a_second_one", "Another", null),
+        )
+
+        assertEquals("weather.a_second_one", discoverWeatherEntity(states))
+    }
+
+    @Test
+    fun weatherDiscovery_yieldsNullWhenTheHomeHasNoWeatherEntity() {
+        assertNull(discoverWeatherEntity(listOf(stateOf("light.floor_lamp", "Gulvlampe", null))))
+    }
+
+    @Test
     fun discovery_collectsAllLightsInAnAreaSorted() {
         val areas = listOf(HaAreaDto("bathroom", "Bathroom"))
         val entities = listOf(

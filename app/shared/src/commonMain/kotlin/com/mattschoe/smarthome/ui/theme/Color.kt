@@ -22,6 +22,22 @@ val WarmAmber = Color(0xFFE0A24E)
 val Forest = Color(0xFF0A3323)
 val OnForest = Color(0xFFF6EEC7)
 
+/**
+ * The weather glyph's layer colors. Each condition icon is stacked from one drawable per color layer
+ * (a cloud under its rain, a sun behind its cloud), so these tint the pieces rather than a whole
+ * glyph. [WeatherSnow] is an icy pale blue rather than white: true white would vanish on the cream
+ * [Card] it is drawn on, and being the lightest thing on the tile is what makes it read as snow.
+ * Lightning bolts reuse [WarmAmber].
+ */
+val WeatherSun = Color(0xFFE8B33C)
+val WeatherMoon = Color(0xFFD9C77E)
+val WeatherCloud = Color(0xFF8FA0AD)
+val WeatherRain = Color(0xFF3F7FA8)
+val WeatherSnow = Color(0xFFBCD4E0)
+val WeatherHail = Color(0xFFA9C2CF)
+val WeatherFog = Color(0xFFA3A99F)
+val WeatherAlert = Color(0xFFC0503A)
+
 val ChipIdle = Color(0xFFFFFFFF)
 
 /**

@@ -135,16 +135,27 @@ data class RoomState(
     val audio: AudioState?,
 ) { init { require(brightnessPct in 0..100) } }
 
+/** The condition set a Home Assistant `weather.*` entity reports as its state. */
+enum class WeatherCondition {
+    ClearNight, Cloudy, Exceptional, Fog, Hail, Lightning, LightningRainy,
+    PartlyCloudy, Pouring, Rainy, Snowy, SnowyRainy, Sunny, Windy, WindyVariant,
+}
+
 /**
  * Read-only climate glance shown in the left card's 2×2 tile grid. Never mutated by controls. A field
- * is `null` when no sensor backs it (the real HA adapter has no climate entities yet → all null → the
- * tiles render a "—" placeholder); the mock adapter populates every field.
+ * is `null` when no sensor backs it (the real HA adapter has only a weather entity, so indoor temp,
+ * humidity and energy stay null → those tiles render a "—" placeholder); the mock adapter populates
+ * every field.
+ *
+ * [feelsLikeC] is an apparent temperature computed from the weather entity's readings rather than its
+ * plain air temperature — the raw temp is a mapper input, not something the tile shows.
  */
 data class ClimateState(
     val indoorTempC: Double?,
     val humidityPct: Int?,
     val energyKw: Double?,
-    val outdoorTempC: Double?,
+    val feelsLikeC: Double?,
+    val condition: WeatherCondition?,
 ) { init { require(humidityPct == null || humidityPct in 0..100) } }
 
 /**

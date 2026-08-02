@@ -97,6 +97,15 @@ fun discoverTodoEntity(states: List<HaStateDto>): String? = states
     .firstOrNull { (it.attrInt("supported_features") ?: 0) and TodoSetDueDate != 0 }
     ?.entity_id
 
+/**
+ * The home's weather entity, backing the outdoor climate tile: the first `weather.*` by entity id.
+ * Derived rather than configured, so re-adding the integration under a new id needs no code change.
+ */
+fun discoverWeatherEntity(states: List<HaStateDto>): String? = states
+    .map { it.entity_id }
+    .filter { it.startsWith("weather.") }
+    .minOrNull()
+
 private fun HaStateDto.attr(key: String): JsonPrimitive? = attributes[key] as? JsonPrimitive
 private fun HaStateDto.attrInt(key: String): Int? = attr(key)?.intOrNull
 private fun HaStateDto.attrString(key: String): String? = attr(key)?.takeIf { it.isString }?.contentOrNull
