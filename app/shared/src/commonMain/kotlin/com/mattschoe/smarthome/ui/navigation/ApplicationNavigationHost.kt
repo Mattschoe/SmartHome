@@ -28,7 +28,8 @@ fun ApplicationNavigationHost(
             val viewModel = viewModel<HomepageViewModel> {
                 HomepageViewModel(
                     adapter = appContainer.homeAdapter,
-                    filterStore = appContainer.calendarFilters
+                    filterStore = appContainer.calendarFilters,
+                    nowPlaying = appContainer.nowPlaying
                 )
             }
             Homepage(

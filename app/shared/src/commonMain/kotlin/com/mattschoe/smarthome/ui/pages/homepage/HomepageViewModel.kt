@@ -7,6 +7,9 @@ import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
+import com.mattschoe.smarthome.data.MediaCommands
+import com.mattschoe.smarthome.data.NowPlayingBridge
+import com.mattschoe.smarthome.data.nowPlayingSnapshot
 import com.mattschoe.smarthome.data.audioJoined
 import com.mattschoe.smarthome.data.minutesOfDay
 import com.mattschoe.smarthome.data.model.BrowseItem
@@ -60,6 +63,12 @@ import kotlin.time.Clock
 class HomepageViewModel(
     private val adapter: HomeAdapter,
     private val filterStore: CalendarFilterStore = InMemoryCalendarFilterStore(),
+    /**
+     * Where the active audio room's playback is published for the platform's own media surfaces (the
+     * Android notification / lock screen). A default instance keeps the ViewModel constructible on a
+     * platform — or in a test — with nothing listening.
+     */
+    private val nowPlaying: NowPlayingBridge = NowPlayingBridge(),
 ) : ViewModel() {
     private val _activeLightRoom = MutableStateFlow(Room.LivingRoom)
     private val _activeAudioRoom = MutableStateFlow(Room.audioRooms.firstOrNull() ?: Room.LivingRoom)
@@ -216,6 +225,32 @@ class HomepageViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = HomeScreenState.Loading
         )
+
+    init {
+        // Published off the adapter directly rather than off [screenState]: that flow is
+        // `WhileSubscribed`, and collecting it here would pin the whole dashboard hot for as long as
+        // the ViewModel lives. This is the notification's read-model — the active room's track and
+        // nothing else — so it needs only the two flows it combines.
+        viewModelScope.launch {
+            combine(_activeAudioRoom, adapter.subscribe()) { room, home ->
+                nowPlayingSnapshot(room, home.rooms[room]?.audio)
+            }.distinctUntilChanged().collect(nowPlaying::publish)
+        }
+        nowPlaying.commands = object : MediaCommands {
+            override fun togglePlay() = togglePlay(_activeAudioRoom.value)
+            override fun next() = next(_activeAudioRoom.value)
+            override fun previous() = previous(_activeAudioRoom.value)
+            override fun seek(positionSec: Int) = seek(_activeAudioRoom.value, positionSec)
+            override fun setVolume(pct: Int) = setVolume(_activeAudioRoom.value, pct)
+        }
+    }
+
+    override fun onCleared() {
+        // The session outlives the ViewModel (it is bound to the service, not to the screen), so hand
+        // back the transport rather than leaving it pointing at a dead scope.
+        nowPlaying.commands = null
+        super.onCleared()
+    }
 
     fun selectLightRoom(room: Room) { _activeLightRoom.value = room }
     fun selectAudioRoom(room: Room) { _activeAudioRoom.value = room }

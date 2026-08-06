@@ -154,10 +154,9 @@ object Dimensions {
     val scrubberKnobDiameter = 14.dp
     // Quick-picks 3×3 grid + browse rail spacing, and the pager dot indicator.
     val browseGridSpacing = 12.dp
-    // Tiles per row in a browse/search grid. The card fits three; the narrower phone page takes two,
-    // so a tile stays big enough to read its over-art title. See MediaLayout.
+    // Tiles per row in a browse/search grid — the same three on the card and on the phone page, where
+    // the wider viewport lands a tile at nearly the card's tile size anyway.
     const val browseGridColumns = 3
-    const val phoneBrowseGridColumns = 2
     val pageDotSize = 7.dp
     val pageDotGap = 6.dp
     // The search field's inner row, sized so the trailing clear button is a full [minTouch] target
@@ -178,6 +177,9 @@ object Dimensions {
     val miniPlayerThumbSize = 44.dp
     val miniPlayerPlaySize = 40.dp
     val minimizeCaretSize = 20.dp
+    // On a phone page the bar floats *outside* the page's [phonePagePad] side margin, at this one — the
+    // extra width is the track title's. On the tablet the bar sits inside the card's padding instead.
+    val miniPlayerPageMargin = 12.dp
 
     // The browse-source badge beside the panel tabs (SourceToggle in RightCard.kt): the drawn disc,
     // inside a full [minTouch] target.
@@ -206,12 +208,13 @@ object Dimensions {
     // The phone dial's box width, chosen so the scaled arc matches the mockup's radius. Clamped to the
     // page's content width on narrow screens.
     val phoneDialWidth = 300.dp
-    // The portrait Music page. The art is a large centered square (clamped to the page width on a
-    // narrow phone) with the title block under it; [phoneAudioBarGap] separates the media surface from
-    // the room/volume bar the page pins beneath it.
-    val phoneAlbumArtSize = 300.dp
+    // The portrait Music page. The art is a centered square (clamped to the page width on a narrow
+    // phone) with the title block under it — deliberately smaller than the page could fit, so the up-next
+    // queue below it shows a few rows rather than one. [audioPopupMaxWidth] bounds the card the speaker
+    // button drops: where the music plays is a setting reached from the page, not a control on it.
+    val phoneAlbumArtSize = 240.dp
     val phoneMediaTitleGap = 18.dp
-    val phoneAudioBarGap = 16.dp
+    val audioPopupMaxWidth = 320.dp
     // The phone indicator's active mark is an elongated pill on the paging axis rather than a dot;
     // [pageDotSize] stays its thickness. The row/column floats over the page, inset from the edge it
     // hugs (bottom in portrait, right in landscape).

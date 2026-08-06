@@ -66,8 +66,7 @@ All paths relative to `app/shared/src/commonMain/kotlin/com/mattschoe/smarthome/
 - `App.kt` — Root composable `App(appContainer)`; applies `SmartHomeTheme` and hosts navigation.
 - `AppContainer.kt` — Manual DI container (currently empty). Holds shared dependencies (adapters, repositories) as they are added.
 - `Platform.kt` / `Platform.android.kt` / `Platform.ios.kt` — `expect`/`actual` platform info.
-- `../../androidApp/.../MainActivity.kt` — Android `ComponentActivity` + `AppApplication`; edge-to-edge, creates `AppContainer`, asks for `POST_NOTIFICATIONS`, and starts the media service while foregrounded.
-- `../../androidApp/.../media/RoomPlayer.kt` / `SmartHomeMediaService.kt` — Android-only media session (media3): a `SimpleBasePlayer` over `NowPlayingBridge` with remote device volume, hosted by a `MediaSessionService`. The app renders no audio — this is a remote control for the active audio room. iOS cannot have one (see `.claude/PHONE_BACKLOG.md` → Deferred).
+- `../../androidApp/.../MainActivity.kt` — Android `ComponentActivity` + `AppApplication`; edge-to-edge, creates `AppContainer`.
 - `iosMain/.../MainViewController.kt` — iOS Compose entry point.
 
 **Navigation (`ui/navigation/`):**
@@ -80,9 +79,6 @@ All paths relative to `app/shared/src/commonMain/kotlin/com/mattschoe/smarthome/
 
 **Components (`ui/components/`):**
 - `PageShell.kt` — Thin `Scaffold` wrapper (top bar + content padding).
-
-**Controls (`ui/controls/`):** stateless controls both the tablet cards and the phone pages compose — the dial, warmth swatches/rows, and room chips.
-- `media/` — The **media kit**, promoted out of the right/center cards so the phone's Music page reuses it instead of forking: `MediaPanel.kt` (the surface swap), `NowPlayingSurface.kt`, `BrowseSurface.kt`, `ArtistSurface.kt`, `QueueSection.kt`, `Transport.kt`, `Scrubber.kt`, `MiniPlayer.kt`, `AudioControls.kt` (volume slider + join action), `ArtTile.kt`. `MediaLayout.kt` is the single `Tablet`/`Phone` knob: it re-flows the now-playing header, sets the browse grid's column count, and flattens the paged shelf on phone (a nested horizontal pager would fight the page pager).
 
 **Theme (`ui/theme/`):**
 - `Color.kt` — Design token colors (empty — needs the palette below).
@@ -176,7 +172,6 @@ Switching the light room swaps the dial/warmth; switching the audio room swaps t
 
 Build UI-first against a **mock in-memory store**; define the seam now so real integration is a drop-in later.
 - Ship a `HomeAdapter` interface (`setBrightness`, `setWarmth`, `setVolume`, `toggleLight`, `subscribe(): StateFlow<HomeState>`, plus the music intents `play`/`playQueueItem`/`moveQueueItem`/`search`) — **device intents only**, with a `MockAdapter` seeded from fixtures. Most intents are fire-and-forget; `search`, `play` and `playQueueItem` are `suspend` and propagate failure, since their caller is a user watching a spinner — Music Assistant spends seconds resolving a YouTube-Music stream before `play`/`playQueueItem` reply, and the ViewModel holds a pending/loading state (toasting on failure) until they do. Controls mutate the store optimistically. Audio is per-room; the Media panel reads the active audio room's `RoomState` (no global session). UI selection (`activeLightRoom`/`activeAudioRoom`/`panel`) is not on the adapter — it lives in the ViewModel.
-- **`NowPlayingBridge`** (`data/NowPlayingBridge.kt`) sits beside the adapter as a **read-model**, not a second source of truth: the ViewModel publishes the active audio room's track/position/volume onto it and installs the transport commands, so a platform media session (Android's notification / lock screen) can mirror and control playback. It never owns the selection — `activeAudioRoom` stays ViewModel-owned, per the CORE RULE.
 - Climate stats (temp/humidity/energy/outdoor) are read-only display for now.
 - Leave a `MatterAdapter` / Home Assistant stub for later. Put adapters in `AppContainer`.
 

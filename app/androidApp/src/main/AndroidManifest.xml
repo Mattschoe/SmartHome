@@ -4,6 +4,11 @@
     <!-- Talk to the Home Assistant instance over the LAN WebSocket API. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The media session that puts the active audio room on the lock screen / in the shade. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".AppApplication"
         android:allowBackup="true"
@@ -22,6 +27,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".media.SmartHomeMediaService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

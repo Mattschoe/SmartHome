@@ -12,6 +12,7 @@ import com.mattschoe.smarthome.data.KeyValueStore
 import com.mattschoe.smarthome.data.MaConfig
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.MusicAssistantAdapter
+import com.mattschoe.smarthome.data.NowPlayingBridge
 import com.mattschoe.smarthome.data.platformKeyValueStore
 
 /**
@@ -38,6 +39,11 @@ class AppContainer(
      */
     val calendarFilters: CalendarFilterStore =
         keyValueStore?.let(::KeyValueCalendarFilterStore) ?: InMemoryCalendarFilterStore(),
+    /**
+     * Where the ViewModel publishes the active audio room's playback for the platform's own media
+     * surfaces. Android's media session reads it; the platforms without one never look.
+     */
+    val nowPlaying: NowPlayingBridge = NowPlayingBridge(),
 )
 
 /**

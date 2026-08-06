@@ -1,14 +1,11 @@
 package com.mattschoe.smarthome.ui.pages.homepage
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,11 +25,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -44,15 +39,15 @@ import com.mattschoe.smarthome.data.formatEventWhen
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.ui.components.PopupCard
+import com.mattschoe.smarthome.ui.components.PopupScrim
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
-import com.mattschoe.smarthome.ui.theme.Card
 import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.Muted
-import com.mattschoe.smarthome.ui.theme.PopupScrim
 import com.mattschoe.smarthome.ui.theme.Rose
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
@@ -91,7 +86,7 @@ fun BoxScope.EventDetailPopup(
     val canWrite = source?.canWrite == true && event.uid != null
     val color = calendarDotColor(event.sourceId, sources)
 
-    Scrim(onClose)
+    PopupScrim(onClose)
     PopupCard(
         modifier = Modifier
             .align(Alignment.Center)
@@ -209,7 +204,7 @@ fun BoxScope.CalendarSettingsPopup(
     onClose: () -> Unit,
 ) {
     val hidden = filters.hidden(view)
-    Scrim(onClose)
+    PopupScrim(onClose)
     PopupCard(
         modifier = Modifier
             .align(Alignment.TopEnd)
@@ -261,39 +256,6 @@ fun BoxScope.CalendarSettingsPopup(
             }
         }
     }
-}
-
-/**
- * The wash over the card behind an open popup, and the tap-outside that closes it. No ripple: it is
- * a dismissal, not a control, and a ripple across the whole card would read as one.
- */
-@Composable
-private fun BoxScope.Scrim(onClose: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        Modifier
-            .matchParentSize()
-            .background(PopupScrim)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClose),
-    )
-}
-
-/**
- * The cream plate both popups sit on: the card treatment one step up, floating *above* a card that
- * already carries a shadow, so its elevation is the mini player's rather than [Dimensions.cardElevation].
- */
-@Composable
-private fun PopupCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(Dimensions.innerBlockRadius)
-    Column(
-        modifier = modifier
-            .shadow(Dimensions.miniPlayerElevation, shape)
-            .clip(shape)
-            .background(Card)
-            .border(1.dp, CardBorder, shape)
-            .padding(16.dp),
-        content = content,
-    )
 }
 
 /** One icon action in a popup's top row: a full touch target around a plain glyph. */

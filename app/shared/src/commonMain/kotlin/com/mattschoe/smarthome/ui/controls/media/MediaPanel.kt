@@ -34,7 +34,8 @@ private enum class MediaSurface { NowPlaying, Artist, Browse }
  * anything from it closes it again (the ViewModel does that), so the panel returns to the music.
  *
  * [layout] is the tablet-card vs. phone-page re-flow; the state and the surface precedence are the
- * same either way.
+ * same either way. [headerTrailing] rides beside the browse surface's search field — the phone hangs
+ * its speaker button there, having no card header to put one in.
  */
 @Composable
 fun MediaPanel(
@@ -68,6 +69,7 @@ fun MediaPanel(
     onMoveQueueItem: (String, Int) -> Unit,
     modifier: Modifier = Modifier,
     layout: MediaLayout = MediaLayout.Tablet,
+    headerTrailing: (@Composable () -> Unit)? = null,
 ) {
     // A pending play paints the tapped item as the (loading) now-playing track right away — the real
     // track takes several seconds to arrive, and this surface is the feedback for the tap.
@@ -128,7 +130,6 @@ fun MediaPanel(
                 onShuffle = onShuffleArtist,
                 onPlay = onPlay,
                 bottomInset = bottomInset,
-                layout = layout,
                 modifier = Modifier.fillMaxSize(),
             )
             else -> BrowseSurface(
@@ -144,7 +145,7 @@ fun MediaPanel(
                 onPlay = onPlay,
                 onOpenArtist = onOpenArtist,
                 bottomInset = bottomInset,
-                layout = layout,
+                headerTrailing = headerTrailing,
                 modifier = Modifier.fillMaxSize(),
             )
         }

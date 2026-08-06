@@ -201,12 +201,12 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
 }
 
 /**
- * Flashes the current [ToastMessage] as a floating Forest pill at the bottom of the dashboard, then
+ * Flashes the current [ToastMessage] as a floating Forest pill at the bottom of the screen, then
  * auto-dismisses it. The message is latched so the pill's exit animation doesn't render blank; a new
  * id re-arms the timer even when the text is identical.
  */
 @Composable
-private fun ToastHost(toast: ToastMessage?, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+internal fun ToastHost(toast: ToastMessage?, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val latched = remember { mutableStateOf(toast) }
     if (toast != null) latched.value = toast
     toast?.let { LaunchedEffect(it.id) { delay(TOAST_MILLIS); onDismiss() } }

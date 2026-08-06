@@ -16,6 +16,14 @@ dependencies {
 
     implementation(libs.androidx.activity.compose)
 
+    // The notification / lock-screen media session. The app plays no audio itself — the session is a
+    // remote control over the active audio room, see media/RoomPlayer.kt.
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.session)
+    // The session reads the shared NowPlayingBridge's StateFlow; :shared keeps coroutines internal.
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.android)
+
     implementation(libs.compose.uiToolingPreview)
     debugImplementation(libs.compose.uiTooling)
 }

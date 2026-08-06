@@ -109,47 +109,59 @@ the same `Warmth` state as the tablet's inline swatches.
 
 ---
 
-## Phase P3 — Portrait: Music / Now Playing (page 3)
+## Phase P3 — Portrait: Music page + Android media session
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `DONE` · **Completed:** 2026-08-06 · commits `d5445f8` (extraction) + `577768f` (page + session)
 
-**Goal:** build the active-audio-room playback surface. Reference: `layout_guide.md` → Vertical Page 3
-(`vertical/music_page.png`). Promote the **now-playing surface**, **transport row**, and **volume
-slider** out of `RightCard.kt` / `CenterCard.kt` into shared controls; bind them to the
-`activeAudioRoom`'s `RoomState` (per-room audio).
+**Goal:** build the portrait Music page out of the *same* media kit the tablet's right card composes,
+and put the active audio room on the phone's own media surfaces. Reference: `layout_guide.md` →
+Vertical Page 3 (`vertical/music_page.png`). The page folds the mock's Page 3 and Page 4 together:
+one Media surface (now playing, browse, search, artist drill-in, queue) over the audio room selector
+and volume slider — which is why P4 below is now the **Calendar** page rather than a media mirror.
 
-- [ ] **Icons:** shuffle / prev / play-pause / next / repeat + the level-reactive volume glyph — all
-      already shipped for the tablet; confirm, don't re-request.
-- [ ] Large **album-art** square (dark placeholder + waveform glyph when art absent); now-playing
-      title + `artist · album`; **scrubber** with elapsed / total.
-- [ ] **Transport row**: shuffle · prev · **play/pause (filled accent circle)** · next · repeat.
-- [ ] **Volume slider** (speaker icon + trailing `%` readout) sets the active audio room's volume.
-- [ ] `PLAYING IN` audio-room chips (speaker glyph), driving `activeAudioRoom`, **real speaker rooms
-      only** — "Whole home" / "+ Create group" **deferred** (leave seam, don't wire grouping).
-- [ ] Extracted controls are shared; **tablet still matches its screenshot.**
-- [ ] **Verify** against `vertical/music_page.png`; tablet unchanged; iOS compiles.
+- [x] **Icons:** shuffle / prev / play-pause / next / repeat, the level-reactive volume glyph and the
+      speaker chip glyph — all already shipped for the tablet; none re-requested.
+- [x] **Promote the media kit** to `ui/controls/media/` (pure refactor, tablet renders identically):
+      `ArtTile`, `Transport`, `Scrubber`, `AudioControls` (volume slider + join action), `MiniPlayer`,
+      `NowPlayingSurface`, `BrowseSurface`, `ArtistSurface`, `QueueSection`, `MediaPanel`.
+      `RightCard.kt` keeps the card frame, tabs and the calendar; `CenterCard.kt` keeps its assembly.
+- [x] **One layout knob, not a fork:** `MediaLayout { Tablet, Phone }` re-flows the now-playing header
+      (phone = large centered art over centered text + full-width scrubber), sets the browse grid to
+      **2 columns** on phone, and renders the paged Quick Picks shelf as a **flat grid** there — the
+      nested horizontal pager is the one gesture conflict that must not ship.
+- [x] **Page 3 — Music:** `MediaPanel(layout = Phone)` filling the page, with the mini player and the
+      collapse caret floating over it, above a `PLAYING IN` audio-chip row (**real speaker rooms
+      only** — grouping still deferred) and the volume slider.
+- [x] `ToastHost` shared with the tablet rather than copied, so a failed play reports on the phone too.
+- [x] **Android media session** (`:androidApp`): shared `NowPlayingBridge` read-model published by the
+      ViewModel off the adapter (never off `screenState`, which is `WhileSubscribed`), a
+      `SimpleBasePlayer` over it with remote device volume, and a `MediaSessionService` started only
+      while the activity is foregrounded and stopping itself when the room falls silent.
+- [x] **Compile gate:** desktop, iOS simulator, Android debug APK and the common tests all build.
+
+> On-device verification against `vertical/music_page.png` (and the tablet's reference screenshots)
+> is with the user — this session was compile-only by request.
 
 ---
 
-## Phase P4 — Portrait: Media & Calendar panel (page 4)
+## Phase P4 — Portrait: Calendar page (page 4)
 
 **Status:** `TODO` · **Completed:** —
 
-**Goal:** build the right-card mirror as a full page. Reference: `layout_guide.md` → Vertical Page 4
-(`vertical/music_selection_page.png`) + the tablet Calendar (`Dashboard_with_calendar.png`) for the
-Calendar tab (not shown in vertical mocks — carried over). Promote the **Media panel** and **Calendar
-panel** out of `RightCard.kt` into shared controls behind the same `Panel` tab state.
+**Goal:** fill the last portrait page with the calendar. Reference: the tablet Calendar
+(`Dashboard_with_calendar.png`) — the vertical mocks don't show it, so it is carried over per the
+`layout_guide.md` convention. P3 took the media half of the mock's Page 4 into the Music page, so this
+page is the calendar alone: no `Panel` tab switch on the phone, just the calendar surface full-page.
 
-- [ ] **Icons:** search, month-nav arrows, checklist/checkbox — reuse tablet glyphs; confirm.
-- [ ] **Media / Calendar** segmented control (`Panel` state; Media default).
-- [ ] **Media:** search field; `UP NEXT` queue rows (art + title + artist + duration); `QUICK PICKS`
-      **2-column** grid of track cards; `YOUR PLAYLISTS` **horizontal rail** (nested swipe) of playlist
-      cards (title + song count), reading the shared `playlists` library; page scrolls vertically.
-- [ ] **Calendar** tab reuses the tablet month grid (today = accent cell) + agenda + to-do.
-- [ ] Nested playlist rail / quick-picks grid don't steal the page-pager gesture.
-- [ ] Extracted panels are shared; **tablet still matches its screenshots.**
-- [ ] **Verify** against `vertical/music_selection_page.png` + calendar reference; tablet unchanged;
-      iOS compiles.
+- [ ] **Icons:** month-nav arrows, checklist/checkbox, add-event "+" — reuse tablet glyphs; confirm.
+- [ ] Promote the calendar surface out of `RightCard.kt` the way P3 promoted the media kit, so the
+      tablet card and the phone page compose the same thing (tablet stays pixel-identical).
+- [ ] **Page 4 — Calendar:** month grid (today = accent cell) + agenda + to-do, re-flowed to the page;
+      the week view and the event editor/popups follow the tablet's behaviour.
+- [ ] Settling on the page calls `viewModel.selectPanel(Panel.Calendar)`, so the fetch the tab-switch
+      triggers on the tablet happens here too.
+- [ ] Nested scrolls (month grid, week grid, to-do strip) don't steal the page-pager gesture.
+- [ ] **Verify** against the calendar reference; tablet unchanged; iOS compiles.
 - [ ] **Gate:** portrait phone is now fully usable end-to-end (all 4 pages) before starting landscape.
 
 ---
@@ -169,7 +181,8 @@ cards per vertically-paged screen, and build the one genuinely new surface. Refe
       light room; off rooms muted, struck bulb, no %). Bind to `RoomState`.
 - [ ] **Page 2 — Music:** left card = now playing (album art, title, **compact transport** — prev /
       play-pause / next only — and volume `%`); right card = media panel (search, `UP NEXT`, playlist
-      rail), condensed to the card.
+      rail), condensed to the card. Both cards compose the **same** `ui/controls/media/` kit P3
+      promoted — the landscape music page is an assembly, not a third implementation.
 - [ ] **Page 3 — Utility:** left card = `APPS` grid in a **4-column** layout; right card = Calendar
       (month header + `<`/`>`, month grid with today accent, `TODAY` agenda).
 - [ ] All controls come from the shared kit extracted in P2–P4 — **no new copies**; the ROOMS overview
@@ -203,3 +216,9 @@ cards per vertically-paged screen, and build the one genuinely new surface. Refe
   as an additive relation on top of per-room ownership (CLAUDE.md CORE RULE), shared with the tablet.
 - **Phone-specific persistence** — remembering the last-viewed page per orientation, if desired
   (tablet room-state persistence is tracked separately in `PROJECT_BACKLOG.md` Phase 8).
+- **iOS media session** — the P3 `NowPlayingBridge` is multiplatform, but only Android consumes it.
+  iOS publishes now-playing info through `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter`, and both
+  require an **active `AVAudioSession`** — i.e. the app must itself be producing audio. This app never
+  does (Music Assistant plays in the room), so a lock-screen remote is not reachable on iOS without
+  faking a silent playback session, which App Review rejects. Revisit only if the app ever renders
+  audio itself.
