@@ -111,7 +111,7 @@ the same `Warmth` state as the tablet's inline swatches.
 
 ## Phase P3 — Portrait: Music page + Android media session
 
-**Status:** `DONE` · **Completed:** 2026-08-06 · commits `d5445f8` (extraction) + `577768f` (page + session)
+**Status:** `DONE` · **Completed:** 2026-08-06 · commits `d5445f8` (extraction) + `de6a5f7` (page + session)
 
 **Goal:** build the portrait Music page out of the *same* media kit the tablet's right card composes,
 and put the active audio room on the phone's own media surfaces. Reference: `layout_guide.md` →
