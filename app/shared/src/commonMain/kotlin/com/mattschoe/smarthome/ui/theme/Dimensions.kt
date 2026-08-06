@@ -129,9 +129,9 @@ object Dimensions {
     const val wheelVisibleRows = 3
     val wheelHeight = wheelRowHeight * wheelVisibleRows
 
-    // Right-card Media panel (RightCard.kt). The now-playing surface (album art + scrubber +
-    // transport + queue + playlists rail) and the idle browse surface (Quick Picks grid + Keep
-    // Listening rail) share these tokens.
+    // The media kit (ui/controls/media/). The now-playing surface (album art + scrubber + transport +
+    // queue + playlists rail) and the idle browse surface (Quick Picks grid + Keep Listening rail)
+    // share these tokens, on the tablet card and the phone page alike.
     val mediaSectionGap = 20.dp
     val albumArtSize = 132.dp
     val transportButtonSize = 64.dp
@@ -154,6 +154,10 @@ object Dimensions {
     val scrubberKnobDiameter = 14.dp
     // Quick-picks 3×3 grid + browse rail spacing, and the pager dot indicator.
     val browseGridSpacing = 12.dp
+    // Tiles per row in a browse/search grid. The card fits three; the narrower phone page takes two,
+    // so a tile stays big enough to read its over-art title. See MediaLayout.
+    const val browseGridColumns = 3
+    const val phoneBrowseGridColumns = 2
     val pageDotSize = 7.dp
     val pageDotGap = 6.dp
     // The search field's inner row, sized so the trailing clear button is a full [minTouch] target
@@ -179,7 +183,7 @@ object Dimensions {
     // inside a full [minTouch] target.
     val sourceBadgeSize = 32.dp
 
-    // Artist drill-in surface (ArtistSurface in RightCard.kt): the header portrait and the back arrow
+    // Artist drill-in surface (ArtistSurface.kt): the header portrait and the back arrow
     // that leaves the surface, which is a plain full touch target rather than a drawn control.
     val artistArtSize = 140.dp
     val backButtonSize = minTouch
@@ -202,6 +206,12 @@ object Dimensions {
     // The phone dial's box width, chosen so the scaled arc matches the mockup's radius. Clamped to the
     // page's content width on narrow screens.
     val phoneDialWidth = 300.dp
+    // The portrait Music page. The art is a large centered square (clamped to the page width on a
+    // narrow phone) with the title block under it; [phoneAudioBarGap] separates the media surface from
+    // the room/volume bar the page pins beneath it.
+    val phoneAlbumArtSize = 300.dp
+    val phoneMediaTitleGap = 18.dp
+    val phoneAudioBarGap = 16.dp
     // The phone indicator's active mark is an elongated pill on the paging axis rather than a dot;
     // [pageDotSize] stays its thickness. The row/column floats over the page, inset from the edge it
     // hugs (bottom in portrait, right in landscape).

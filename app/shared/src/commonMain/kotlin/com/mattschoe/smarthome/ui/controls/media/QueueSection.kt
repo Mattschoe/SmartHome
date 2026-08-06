@@ -1,4 +1,4 @@
-package com.mattschoe.smarthome.ui.pages.homepage
+package com.mattschoe.smarthome.ui.controls.media
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -141,7 +141,7 @@ private fun MediaTrack.queueKey(): String = queueItemId ?: title
  * the ones it is passing. While [loading] (its skip is in flight) the thumb carries a spinner.
  */
 @Composable
-internal fun QueueRow(
+private fun QueueRow(
     index: Int,
     track: MediaTrack,
     modifier: Modifier = Modifier,
