@@ -36,9 +36,8 @@ import com.mattschoe.smarthome.ui.theme.SageSurface
  * from the window's aspect ratio ([CompactArrangement]), so rotating — or resizing the desktop window —
  * swaps between them.
  *
- * This phase builds the navigation skeleton only: the pagers, their indicators, and named placeholder
- * pages. Phases P2–P5 fill the pages in with controls promoted out of the tablet cards, which is why
- * [ready] and [viewModel] are already threaded down to the page composables.
+ * The pages are filled in one phase at a time with controls promoted out of the tablet cards — the
+ * portrait calendar page and both landscape pages are still named placeholders.
  */
 @Composable
 fun CompactDashboard(ready: HomeScreenState.Ready, viewModel: HomepageViewModel) {
@@ -51,7 +50,7 @@ fun CompactDashboard(ready: HomeScreenState.Ready, viewModel: HomepageViewModel)
 }
 
 /** The portrait pages, left to right. The pager opens on [PORTRAIT_START_PAGE] — Light Control. */
-private val PortraitPageTitles = listOf("Apps", "Lysstyring", "Musik", "Medier · Kalender")
+private val PortraitPageTitles = listOf("Apps", "Lysstyring", "Musik", "Kalender")
 private const val PORTRAIT_START_PAGE = 1
 
 /** The landscape pages, top to bottom, as (left card, right card) titles. */
@@ -97,6 +96,16 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(bottom = Dimensions.pageIndicatorInset),
         )
+        // The same host the tablet floats over its cards — a failed play on the music page has to say
+        // so here too. Cleared of the dot row it shares the bottom edge with.
+        ToastHost(
+            toast = ready.toast,
+            onDismiss = viewModel::dismissToast,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(bottom = Dimensions.phonePageBottomClearance),
+        )
     }
 }
 
@@ -135,7 +144,7 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
     }
 }
 
-/** One portrait screen. P3–P4 replace the two remaining placeholders. */
+/** One portrait screen. P4 replaces the remaining placeholder with the calendar page. */
 @Composable
 private fun PortraitPage(
     page: Int,
@@ -146,6 +155,7 @@ private fun PortraitPage(
     when (page) {
         0 -> PortraitAppsPage(modifier)
         1 -> PortraitLightPage(ready, viewModel, modifier)
+        2 -> PortraitMusicPage(ready, viewModel, modifier)
         else -> PagePlaceholder(PortraitPageTitles[page], modifier)
     }
 }

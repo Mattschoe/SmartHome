@@ -66,9 +66,7 @@ fun ArtistSurface(
     onPlay: (BrowseItem) -> Unit,
     modifier: Modifier = Modifier,
     bottomInset: Dp = 0.dp,
-    layout: MediaLayout = MediaLayout.Tablet,
 ) {
-    val columns = layout.browseGridColumns
     val scroll = rememberScrollState()
     Column(modifier.fillMaxSize().verticalScrollFade(scroll).verticalScroll(scroll)) {
         Box(
@@ -136,21 +134,11 @@ fun ArtistSurface(
                 if (artist.topTracks.isNotEmpty()) {
                     SectionLabel("Top hits")
                     Spacer(Modifier.height(12.dp))
-                    // Flattened on the phone for the same reason the browse shelves are — the page
-                    // pager already owns the horizontal drag a nested pager would need.
-                    if (layout.allowsPagedShelves) {
-                        QuickPicksPager(
-                            items = artist.topTracks,
-                            columns = columns,
-                            onSelect = { index, _ -> onPlayTopHit(index) },
-                        )
-                    } else {
-                        FlatBrowseGrid(
-                            items = artist.topTracks,
-                            columns = columns,
-                            onSelect = { index, _ -> onPlayTopHit(index) },
-                        )
-                    }
+                    QuickPicksPager(
+                        items = artist.topTracks,
+                        columns = Dimensions.browseGridColumns,
+                        onSelect = { index, _ -> onPlayTopHit(index) },
+                    )
                 }
                 if (artist.albums.isNotEmpty()) {
                     Spacer(Modifier.height(Dimensions.mediaSectionGap))

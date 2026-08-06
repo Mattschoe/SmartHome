@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.ui.controls.media
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,7 +36,6 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
 import smarthome.shared.generated.resources.drop_down_filled
-import smarthome.shared.generated.resources.drop_up_filled
 import smarthome.shared.generated.resources.music_note_filled
 import smarthome.shared.generated.resources.pause_filled
 import smarthome.shared.generated.resources.play_filled
@@ -55,9 +55,8 @@ fun rememberLatchedTrack(track: MediaTrack?): MediaTrack? {
 
 /**
  * Caret that collapses the now-playing surface into the [MiniPlayerBar]. Its host pins it to the
- * surface's bottom-right — the same end padding as the bar's expand caret — so it lands where the
- * expand caret will be, and stays reachable however far the queue scrolls. It carries a card-filled
- * disc because it floats over that scrolling content.
+ * surface's bottom-right, where the bar it collapses into will appear, so it stays reachable however
+ * far the queue scrolls. It carries an accent disc because it floats over that scrolling content.
  */
 @Composable
 fun MinimizeHandle(onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -81,9 +80,13 @@ fun MinimizeHandle(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 /**
- * The collapsed player: a Forest bar floating over the browse surface with art, track, transport
- * and an expand caret. Inverted against the cream surface it overlays so it reads as hovering, and it
- * carries only the controls worth reaching without expanding — no scrubber, shuffle or repeat.
+ * The collapsed player: a Forest bar floating over the browse surface with art, track and transport.
+ * Inverted against the cream surface it overlays so it reads as hovering, and it carries only the
+ * controls worth reaching without expanding — no scrubber, shuffle or repeat.
+ *
+ * There is no expand caret: the whole bar is the expand target, so a caret would have been a second
+ * affordance for it, spending a touch target's width on what the title wants. The title marquees for
+ * the same reason — the bar is narrow enough on a phone that a long one would otherwise be two words.
  */
 @Composable
 fun MiniPlayerBar(
@@ -124,7 +127,7 @@ fun MiniPlayerBar(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.basicMarquee(),
             )
             Text(
                 text = track.artist,
@@ -137,7 +140,6 @@ fun MiniPlayerBar(
         MiniTransportIcon(Res.drawable.skip_previous_filled, "Forrige", onPrevious)
         MiniPlayPauseButton(isPlaying = isPlaying, onClick = onTogglePlay)
         MiniTransportIcon(Res.drawable.skip_next_filled, "Næste", onNext)
-        MiniTransportIcon(Res.drawable.drop_up_filled, "Åbn afspilleren", onExpand)
     }
 }
 

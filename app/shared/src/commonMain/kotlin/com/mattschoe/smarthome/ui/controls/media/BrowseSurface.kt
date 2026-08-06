@@ -78,6 +78,10 @@ import kotlin.math.ceil
  * scoped by [source]: the toggle splits browsing, while a search still spans both providers.
  * No transport: it shows either when nothing is playing or with the player collapsed, and in the
  * latter case [bottomInset] reserves the height the floating [MiniPlayerBar] covers.
+ *
+ * [headerTrailing] takes width off the search field for a control beside it — the phone page puts its
+ * speaker button there, since it has no card header to hang one from. The tablet passes nothing and
+ * keeps the full-width bar.
  */
 @Composable
 fun BrowseSurface(
@@ -94,12 +98,19 @@ fun BrowseSurface(
     onOpenArtist: (BrowseItem) -> Unit,
     modifier: Modifier = Modifier,
     bottomInset: Dp = 0.dp,
-    layout: MediaLayout = MediaLayout.Tablet,
+    headerTrailing: (@Composable () -> Unit)? = null,
 ) {
-    val columns = layout.browseGridColumns
+    val columns = Dimensions.browseGridColumns
     val scroll = rememberScrollState()
     Column(modifier.fillMaxSize().verticalScrollFade(scroll).verticalScroll(scroll)) {
-        SearchBar(query = query, onQueryChange = onQueryChange)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SearchBar(query = query, onQueryChange = onQueryChange, modifier = Modifier.weight(1f))
+            headerTrailing?.invoke()
+        }
         Spacer(Modifier.height(Dimensions.mediaSectionGap))
         when (search) {
             SearchState.Idle -> {
@@ -116,14 +127,8 @@ fun BrowseSurface(
                     SectionLabel(shelf.label)
                     Spacer(Modifier.height(12.dp))
                     when (shelf) {
-                        // A paged grid needs a horizontal drag the phone's page pager already owns, so
-                        // there it flattens into one plain grid instead (see [MediaLayout]).
                         is BrowseShelf.PagedGrid ->
-                            if (layout.allowsPagedShelves) {
-                                QuickPicksPager(items = shelf.items, columns = columns, onSelect = onSelect)
-                            } else {
-                                FlatBrowseGrid(items = shelf.items, columns = columns, onSelect = onSelect)
-                            }
+                            QuickPicksPager(items = shelf.items, columns = columns, onSelect = onSelect)
                         is BrowseShelf.Grid ->
                             FlatBrowseGrid(items = shelf.items, columns = columns, onSelect = onSelect)
                         is BrowseShelf.Rail -> PlaylistRail(items = shelf.items, onPlay = onPlay)
@@ -155,7 +160,8 @@ fun BrowseSurface(
 }
 
 /**
- * Full-width sunken search field over the music library. The text is owned by the ViewModel (which
+ * The sunken search field over the music library, filling whatever width the header row leaves it.
+ * The text is owned by the ViewModel (which
  * debounces the search behind it), so this only mirrors it into a local [TextFieldValue] for the
  * cursor — the sync effect fires solely on the programmatic clear (playing a result), never while
  * typing. The row is [Dimensions.searchFieldRowHeight] tall so the trailing clear button is a full
