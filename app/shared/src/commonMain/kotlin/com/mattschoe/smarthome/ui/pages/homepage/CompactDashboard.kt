@@ -17,10 +17,14 @@ import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.components.PageIndicator
 import com.mattschoe.smarthome.ui.components.PageIndicatorOrientation
@@ -37,7 +41,7 @@ import com.mattschoe.smarthome.ui.theme.SageSurface
  * swaps between them.
  *
  * The pages are filled in one phase at a time with controls promoted out of the tablet cards — the
- * portrait calendar page and both landscape pages are still named placeholders.
+ * portrait pages are all built; the landscape ones are still named placeholders.
  */
 @Composable
 fun CompactDashboard(ready: HomeScreenState.Ready, viewModel: HomepageViewModel) {
@@ -52,6 +56,7 @@ fun CompactDashboard(ready: HomeScreenState.Ready, viewModel: HomepageViewModel)
 /** The portrait pages, left to right. The pager opens on [PORTRAIT_START_PAGE] — Light Control. */
 private val PortraitPageTitles = listOf("Apps", "Lysstyring", "Musik", "Kalender")
 private const val PORTRAIT_START_PAGE = 1
+private const val PORTRAIT_CALENDAR_PAGE = 3
 
 /** The landscape pages, top to bottom, as (left card, right card) titles. */
 private val LandscapeCardTitles = listOf(
@@ -70,8 +75,30 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
         initialPage = PORTRAIT_START_PAGE,
         pageCount = { PortraitPageTitles.size },
     )
+    // The phone splits the tablet's right card across two pages, so *paging* is what selects the
+    // panel here — there is no tab row to do it. Reading `targetPage` rather than `settledPage` swaps
+    // the state while the page is still sliding in, so the calendar arrives already in week view
+    // instead of showing a frame of the month grid; the pages themselves are cheap to compose either
+    // way. Setting the view is not cosmetic: `visibleEvents` filters by the *state's* view, so a
+    // forced week view rendered while state says month would draw the month's filter set.
+    LaunchedEffect(pagerState, viewModel) {
+        snapshotFlow { pagerState.targetPage }.collect { page ->
+            if (page == PORTRAIT_CALENDAR_PAGE) {
+                viewModel.selectPanel(Panel.Calendar)
+                viewModel.setCalendarView(CalendarView.Week)
+            } else {
+                viewModel.selectPanel(Panel.Media)
+            }
+        }
+    }
     Box(Modifier.fillMaxSize().background(Card)) {
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+        HorizontalPager(
+            state = pagerState,
+            // The editor's fields are `remember(target)`-local, so swiping away would silently discard
+            // what has been typed. Its own back arrow is the way out.
+            userScrollEnabled = ready.eventEditor == null,
+            modifier = Modifier.fillMaxSize(),
+        ) { page ->
             PortraitPage(
                 page = page,
                 ready = ready,
@@ -144,7 +171,7 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
     }
 }
 
-/** One portrait screen. P4 replaces the remaining placeholder with the calendar page. */
+/** One portrait screen. */
 @Composable
 private fun PortraitPage(
     page: Int,
@@ -156,7 +183,7 @@ private fun PortraitPage(
         0 -> PortraitAppsPage(modifier)
         1 -> PortraitLightPage(ready, viewModel, modifier)
         2 -> PortraitMusicPage(ready, viewModel, modifier)
-        else -> PagePlaceholder(PortraitPageTitles[page], modifier)
+        else -> PortraitCalendarPage(ready, viewModel, modifier)
     }
 }
 

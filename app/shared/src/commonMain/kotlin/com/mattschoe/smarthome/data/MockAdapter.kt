@@ -10,6 +10,7 @@ import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
@@ -54,6 +55,15 @@ class MockAdapter(
         _state.update { home ->
             val item = home.allShelfItems().firstOrNull { it.uri == uri }
             if (item == null) home else home.playBrowseItem(room, item)
+        }
+    }
+
+    // Queueing resolves the uri to a seeded tile the same way [play] does, then hands off to the pure
+    // transition — so the two long-press actions are exercisable end to end without a server.
+    override suspend fun enqueue(room: Room, uri: String, mode: QueueMode) {
+        _state.update { home ->
+            val item = home.allShelfItems().firstOrNull { it.uri == uri }
+            if (item == null) home else home.enqueueBrowseItem(room, item, mode)
         }
     }
 

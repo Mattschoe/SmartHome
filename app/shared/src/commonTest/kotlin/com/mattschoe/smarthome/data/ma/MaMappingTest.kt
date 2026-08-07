@@ -2,6 +2,7 @@ package com.mattschoe.smarthome.data.ma
 
 import com.mattschoe.smarthome.data.model.BrowseKind
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.Room
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -605,5 +606,109 @@ class MaMappingTest {
         val many = (1..40).map { track("T$it", type = "album") }
         assertEquals(27, mapArtistTracks(many).size)
         assertEquals(24, mapArtistAlbums(many).size)
+    }
+
+    // --- planEnqueue ---
+    //
+    // Ids read as: `u*` a user-added row, `a*` a Don't-Stop-the-Music continuation, `n*` the run MA
+    // just inserted. `before`/`after` are the up-next window either side of the insert.
+
+    @Test
+    fun enqueue_intoAnEmptyUserBlock_movesNothingAndStartsTheBlock() {
+        val before = listOf("a1", "a2", "a3")
+        val after = listOf("n1", "a1", "a2", "a3")
+
+        val last = planEnqueue(before, after, tailId = null, mode = QueueMode.Last)
+        assertEquals(emptyList(), last.moves)
+        assertEquals("n1", last.tailId)
+
+        // With no block to insert above, the two modes agree — including on the new marker.
+        val next = planEnqueue(before, after, tailId = null, mode = QueueMode.Next)
+        assertEquals(emptyList(), next.moves)
+        assertEquals("n1", next.tailId)
+    }
+
+    @Test
+    fun enqueue_findsTheInsertedRunWhereverTheBufferPutIt() {
+        // MA inserts after `index_in_buffer`, so the run is not reliably at the head of the window.
+        val before = listOf("u1", "a1", "a2")
+        val after = listOf("u1", "n1", "a1", "a2")
+
+        val plan = planEnqueue(before, after, tailId = "u1", mode = QueueMode.Last)
+        // It landed *below* the whole block already — nothing to reorder.
+        assertEquals(emptyList(), plan.moves)
+        assertEquals("n1", plan.tailId)
+    }
+
+    @Test
+    fun playNext_movesNothingAndLeavesANonEmptyBlocksBottomAlone() {
+        val before = listOf("u1", "u2", "a1")
+        val after = listOf("n1", "u1", "u2", "a1")
+
+        val plan = planEnqueue(before, after, tailId = "u2", mode = QueueMode.Next)
+        assertEquals(emptyList(), plan.moves)
+        assertEquals("u2", plan.tailId)
+    }
+
+    @Test
+    fun addToQueue_sinksTheShorterInsertedRunPastTheBlock() {
+        // One track landing above a two-item block: cheaper to move the one track down.
+        val before = listOf("u1", "u2", "a1")
+        val after = listOf("n1", "u1", "u2", "a1")
+
+        val plan = planEnqueue(before, after, tailId = "u2", mode = QueueMode.Last)
+        assertEquals(listOf(QueueMove("n1", 2)), plan.moves)
+        assertEquals("n1", plan.tailId)
+    }
+
+    @Test
+    fun addToQueue_liftsTheBlockWhenTheInsertedRunIsTheLongerSide() {
+        // A three-track album above a two-item block: two moves instead of three, in forward order.
+        val before = listOf("u1", "u2", "a1")
+        val after = listOf("n1", "n2", "n3", "u1", "u2", "a1")
+
+        val plan = planEnqueue(before, after, tailId = "u2", mode = QueueMode.Last)
+        assertEquals(listOf(QueueMove("u1", -3), QueueMove("u2", -3)), plan.moves)
+        assertEquals("n3", plan.tailId)
+    }
+
+    @Test
+    fun addToQueue_sinksAnEqualLengthRunRatherThanLiftingTheBlock() {
+        // Ties go to moving the inserted run — reverse order, so each lands below the last.
+        val before = listOf("u1", "u2", "a1")
+        val after = listOf("n1", "n2", "u1", "u2", "a1")
+
+        val plan = planEnqueue(before, after, tailId = "u2", mode = QueueMode.Last)
+        assertEquals(listOf(QueueMove("n2", 2), QueueMove("n1", 2)), plan.moves)
+    }
+
+    @Test
+    fun aStaleMarker_readsAsAnEmptyBlock() {
+        // "u9" was played (or removed in MA's own UI) — nothing is left to queue behind.
+        val before = listOf("a1", "a2")
+        val after = listOf("n1", "a1", "a2")
+
+        val plan = planEnqueue(before, after, tailId = "u9", mode = QueueMode.Last)
+        assertEquals(emptyList(), plan.moves)
+        assertEquals("n1", plan.tailId)
+    }
+
+    @Test
+    fun aContinuationAppendedAtTheTail_isNotMistakenForTheInsert() {
+        val before = listOf("u1", "a1")
+        val after = listOf("n1", "u1", "a1", "a2")
+
+        val plan = planEnqueue(before, after, tailId = "u1", mode = QueueMode.Last)
+        // Only "n1" is treated as inserted; "a2" is Don't Stop the Music filling the tail.
+        assertEquals(listOf(QueueMove("n1", 1)), plan.moves)
+        assertEquals("n1", plan.tailId)
+    }
+
+    @Test
+    fun nothingInserted_leavesTheQueueAndTheMarkerUntouched() {
+        val queue = listOf("u1", "a1")
+        val plan = planEnqueue(queue, queue, tailId = "u1", mode = QueueMode.Last)
+        assertEquals(emptyList(), plan.moves)
+        assertEquals("u1", plan.tailId)
     }
 }

@@ -4,6 +4,7 @@ import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.BrowseKind
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.MusicSource
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.Room
 
 /**
@@ -343,6 +344,66 @@ fun upNextOffset(currentIndex: Int?): Int = (currentIndex ?: -1) + 1
  */
 fun List<MediaTrack>.withoutQueueItem(queueItemId: String?): List<MediaTrack> =
     if (queueItemId == null) this else filterNot { it.queueItemId == queueItemId }
+
+// --- Enqueue planning ---
+
+/** One relative reorder, as Music Assistant's `player_queues/move_item` takes it. */
+data class QueueMove(val queueItemId: String, val posShift: Int)
+
+/** What an enqueue has to do after the insert landed: the moves, and the block's new bottom marker. */
+data class EnqueuePlan(val moves: List<QueueMove>, val tailId: String?)
+
+/**
+ * Work out how an item that Music Assistant has just inserted with `play_media(option = "next")` must
+ * be reordered to obey the `[playing] [user block] [auto block]` model, given the up-next queue-item
+ * ids [before] and [after] the insert and the block's previous bottom marker [tailId].
+ *
+ * MA exposes no per-item provenance, so the user block is tracked as that one marker: it is the run of
+ * [before] up to and including [tailId], and a marker no longer in the queue simply reads as an empty
+ * block — which self-heals across track advances, replaces, and edits made in MA's own web UI.
+ *
+ * The inserted run is the **first** contiguous run of ids in [after] absent from [before]; a later one
+ * is Don't-Stop-the-Music appending at the tail and is ignored. MA inserts after `index_in_buffer`
+ * rather than after `current_index`, so the run is not reliably at the head — which is exactly why it
+ * is found by diffing rather than assumed.
+ *
+ * [QueueMode.Next] is where MA already put it: no moves, and the block's bottom is unchanged (an empty
+ * block, though, gains one — with nothing to insert above, the two modes agree). [QueueMode.Last] has
+ * to sink the run below the block items it landed above, and `move_item`'s shift is relative and
+ * per-item, so it moves **whichever side is cheaper**: the M inserted items down past the J block
+ * items (reverse order, `+J` each), or those J items up past the run (forward order, `−M` each).
+ * A `posShift` of `0` is never emitted — MA reads it as "move to the top".
+ */
+fun planEnqueue(
+    before: List<String>,
+    after: List<String>,
+    tailId: String?,
+    mode: QueueMode,
+): EnqueuePlan {
+    val known = before.toSet()
+    val insertedAt = after.indexOfFirst { it !in known }
+    // Nothing new in the window: the insert landed past it, or never happened. Leave the queue and
+    // the marker exactly as they were.
+    if (insertedAt < 0) return EnqueuePlan(emptyList(), tailId)
+    val inserted = after.drop(insertedAt).takeWhile { it !in known }
+
+    // How much of the user block the insert landed *above*, and so has to sink past. A stale (or
+    // absent) marker means there is no block at all.
+    val blockEnd = tailId?.let { before.indexOf(it) }?.takeIf { it >= 0 }?.plus(1) ?: 0
+    val below = (blockEnd - insertedAt).coerceAtLeast(0)
+
+    if (mode == QueueMode.Next) {
+        // The block only grew at the top, so its bottom is unchanged — unless there was no block, in
+        // which case the run just inserted *is* the block.
+        return EnqueuePlan(emptyList(), if (blockEnd > 0) tailId else inserted.last())
+    }
+    val moves = when {
+        below == 0 -> emptyList()
+        inserted.size <= below -> inserted.reversed().map { QueueMove(it, below) }
+        else -> before.subList(insertedAt, blockEnd).map { QueueMove(it, -inserted.size) }
+    }
+    return EnqueuePlan(moves, inserted.last())
+}
 
 /** A queue row -> domain [MediaTrack], preferring the richer nested `media_item` when present. */
 fun MaQueueItem.toMediaTrack(): MediaTrack {

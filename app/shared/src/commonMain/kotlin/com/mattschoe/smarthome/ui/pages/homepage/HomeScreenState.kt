@@ -15,8 +15,10 @@ import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.TodoItem
-// Aliased: [Ready.weekStart] is the property this state exposes, the import is the week math it calls.
+// Aliased: [Ready.weekStart]/[Ready.calendarWindow] are the properties this state exposes, the
+// imports are the pure math they call.
 import com.mattschoe.smarthome.data.weekStart as weekStartOf
+import com.mattschoe.smarthome.data.calendarWindow as calendarWindowOf
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.number
@@ -66,7 +68,11 @@ data class DayMarks(val sourceIds: List<String>, val hasTodo: Boolean)
 /** An up-next skip in flight (VM-owned): the tapped row shows a spinner and re-taps are blocked. */
 data class PendingQueueItem(val room: Room, val queueItemId: String)
 
-/** A transient failure notice. [id] distinguishes repeats so an identical text still re-shows. */
+/**
+ * A transient notice: a failure, or the confirmation of an action that leaves nothing visible behind
+ * (queueing a tile changes only a list that isn't on screen). [id] distinguishes repeats so an
+ * identical text still re-shows.
+ */
 data class ToastMessage(val id: Long, val text: String)
 
 /**
@@ -170,6 +176,12 @@ sealed interface HomeScreenState {
         val calendarFilters: CalendarFilters,
         /** Whether the gear's popup is showing (VM-owned). */
         val calendarSettingsOpen: Boolean,
+        /**
+         * How tall one hour row of the week grid is, in dp — what pinching the grid sets (VM-owned,
+         * persisted). At the top of its range the day is 576dp and scrolls; at the bottom the whole
+         * day fits and the height it gave up goes to the checklist under it.
+         */
+        val weekHourHeight: Float,
         /** Whether a save or delete from the editor is in flight — the button spins and re-taps drop. */
         val savingEvent: Boolean,
         /** Minutes from midnight, ticking — where the week grid draws its "now" line. */
@@ -226,8 +238,18 @@ sealed interface HomeScreenState {
                 if (hidden.isEmpty()) calendar.events else calendar.events.filterNot { it.sourceId in hidden }
             }
 
+        /**
+         * Every event the showing view may draw, grouped by day, in `sortCalendarEvents` order (the
+         * adapter sorts them upstream). A day with nothing on it is absent.
+         *
+         * Deliberately **not** scoped to a month or a week: the month and week views are pagers, and
+         * a pager composes its neighbours, so each page slices the days it draws out of this one
+         * grouping rather than each needing its own derivation.
+         */
+        val eventsByDay: Map<LocalDate, List<CalendarEvent>> get() = visibleEvents.groupBy { it.date }
+
         /** Read-only events bound to [selectedDay] (the agenda list). */
-        val selectedDayEvents: List<CalendarEvent> get() = visibleEvents.filter { it.date == selectedDay }
+        val selectedDayEvents: List<CalendarEvent> get() = eventsByDay[selectedDay].orEmpty()
 
         /** Todos bound to [selectedDay] (the checklist), unfinished ones first. */
         val selectedDayTodos: List<TodoItem>
@@ -241,37 +263,28 @@ sealed interface HomeScreenState {
             get() = weekStart.let { start -> List(DaysPerWeek) { start.plus(it, DateTimeUnit.DAY) } }
 
         /**
-         * The visible week's events grouped by day, in `sortCalendarEvents` order (the adapter sorts
-         * them upstream). A day with nothing on it is absent.
+         * The span the adapter holds events for, around [today] — the range both view pagers are
+         * bounded to, so every page they can reach has data behind it.
          */
-        val weekEvents: Map<LocalDate, List<CalendarEvent>>
-            get() {
-                val days = weekDays.toSet()
-                return visibleEvents.filter { it.date in days }.groupBy { it.date }
-            }
+        val calendarWindow: ClosedRange<LocalDate> get() = calendarWindowOf(today)
 
         /**
-         * What each day of [displayedMonth] marks in the grid, keyed by day-of-month; a day with
-         * nothing on it is simply absent. Calendars are listed in `calendar.sources` order so a
+         * What each day marks in the month grid, keyed by date; a day with nothing on it is simply
+         * absent. Keyed by the full date rather than by day-of-month because the month view pages —
+         * each page looks its own days up here. Calendars are listed in `calendar.sources` order so a
          * day's dots keep the same left-to-right identity from one month to the next.
          */
-        val dayMarks: Map<Int, DayMarks>
+        val dayMarks: Map<LocalDate, DayMarks>
             get() {
-                fun inDisplayedMonth(date: LocalDate) =
-                    date.year == displayedMonth.year && date.month.number == displayedMonth.month.number
                 val sourceOrder = calendar.sources.withIndex().associate { (i, source) -> source.id to i }
-                val sourcesByDay = mutableMapOf<Int, MutableSet<String>>()
-                visibleEvents.forEach {
-                    if (inDisplayedMonth(it.date)) sourcesByDay.getOrPut(it.date.day) { mutableSetOf() } += it.sourceId
-                }
-                val todoDays = buildSet {
-                    calendar.todos.forEach { if (inDisplayedMonth(it.due)) add(it.due.day) }
-                }
-                return (sourcesByDay.keys + todoDays).associateWith { day ->
+                val sourcesByDay = mutableMapOf<LocalDate, MutableSet<String>>()
+                visibleEvents.forEach { sourcesByDay.getOrPut(it.date) { mutableSetOf() } += it.sourceId }
+                val todoDays = calendar.todos.mapTo(mutableSetOf()) { it.due }
+                return (sourcesByDay.keys + todoDays).associateWith { date ->
                     DayMarks(
                         // An id no source claims (a cached event from a since-removed calendar) sorts last.
-                        sourceIds = sourcesByDay[day].orEmpty().sortedBy { sourceOrder[it] ?: Int.MAX_VALUE },
-                        hasTodo = day in todoDays,
+                        sourceIds = sourcesByDay[date].orEmpty().sortedBy { sourceOrder[it] ?: Int.MAX_VALUE },
+                        hasTodo = date in todoDays,
                     )
                 }
             }

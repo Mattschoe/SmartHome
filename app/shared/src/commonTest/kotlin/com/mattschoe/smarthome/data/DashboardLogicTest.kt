@@ -1,11 +1,13 @@
 package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.daysUntil
@@ -195,6 +197,45 @@ class DashboardLogicTest {
     }
 
     @Test
+    fun enqueueBrowseItem_ordersTheUserBlockAndLeavesPlaybackAlone() {
+        val seed = seedHome()
+        val (a, b, c) = seed.quickPicks
+        val playing = seed.rooms.getValue(Room.LivingRoom).audio!!
+        val continuations = playing.queue
+
+        // "Tilføj til kø" A, then B, then "Afspil som næste" C.
+        val after = seed
+            .enqueueBrowseItem(Room.LivingRoom, a, QueueMode.Last)
+            .enqueueBrowseItem(Room.LivingRoom, b, QueueMode.Last)
+            .enqueueBrowseItem(Room.LivingRoom, c, QueueMode.Next)
+            .rooms.getValue(Room.LivingRoom).audio!!
+
+        // C at the top of the block, A and B in the order they were queued, then what was already on.
+        assertEquals(
+            listOf(c.name, a.name, b.name) + continuations.map { it.title },
+            after.queue.map { it.title },
+        )
+        // Queueing is not playing: the track, its position and the playing flag are all untouched.
+        assertEquals(playing.nowPlaying, after.nowPlaying)
+        assertEquals(playing.positionSec, after.positionSec)
+        assertTrue(after.isPlaying)
+    }
+
+    @Test
+    fun enqueueBrowseItem_replacesTheBlockOnTheNextPlay() {
+        val seed = seedHome()
+        val tile = seed.quickPicks.first()
+        val queued = seed.enqueueBrowseItem(Room.LivingRoom, tile, QueueMode.Last)
+        // A play replaces the queue, so the block it minted is gone — the next enqueue starts one anew
+        // at the head rather than behind rows that are no longer there.
+        val after = queued
+            .playBrowseItem(Room.LivingRoom, seed.quickPicks[1])
+            .enqueueBrowseItem(Room.LivingRoom, seed.quickPicks[2], QueueMode.Last)
+            .rooms.getValue(Room.LivingRoom).audio!!
+        assertEquals(seed.quickPicks[2].name, after.queue.first().title)
+    }
+
+    @Test
     fun moveQueueItem_shiftsRelativelyAndClampsToTheQueue() {
         val before = seedHome().rooms.getValue(Room.LivingRoom).audio!!.queue
         val moved = seedHome().moveQueueItem(Room.LivingRoom, before[0].title, 2)
@@ -304,6 +345,63 @@ class DashboardLogicTest {
         assertEquals(1, grid[0])
         assertEquals(28, grid[27])
         assertNull(grid[28])
+    }
+
+    // --- Calendar paging ---
+
+    @Test
+    fun calendarWindow_spansTheFetchedMonthsAroundToday() {
+        val today = LocalDate(2026, 8, 7)
+        val window = calendarWindow(today)
+        assertEquals(LocalDate(2026, 7, 7), window.start)
+        assertEquals(LocalDate(2027, 8, 7), window.endInclusive)
+        assertTrue(today in window)
+    }
+
+    @Test
+    fun monthPaging_isAOneToOneMapBetweenMonthsAndPages() {
+        val window = calendarWindow(LocalDate(2026, 8, 7))
+        // July 2026 through August 2027 inclusive.
+        assertEquals(14, monthPageCount(window))
+        assertEquals(0, monthIndexOf(window, LocalDate(2026, 7, 31)))
+        assertEquals(1, monthIndexOf(window, LocalDate(2026, 8, 7)))
+        assertEquals(6, monthIndexOf(window, LocalDate(2027, 1, 1)))    // across the year boundary
+        assertEquals(LocalDate(2027, 1, 1), monthAtPage(window, 6))
+        // Every page round-trips to its own month, pinned to the 1st.
+        for (page in 0 until monthPageCount(window)) {
+            assertEquals(page, monthIndexOf(window, monthAtPage(window, page)))
+            assertEquals(1, monthAtPage(window, page).day)
+        }
+    }
+
+    @Test
+    fun weekPaging_isAOneToOneMapBetweenWeeksAndPages() {
+        val window = calendarWindow(LocalDate(2026, 8, 7))
+        assertEquals(weekStart(window.start), weekAtPage(window, 0))
+        assertEquals(0, weekIndexOf(window, window.start))
+        // A week on is a page on, and every page lands on its own Monday.
+        assertEquals(1, weekIndexOf(window, window.start.plus(7, DateTimeUnit.DAY)))
+        for (page in 0 until weekPageCount(window)) {
+            val monday = weekAtPage(window, page)
+            assertEquals(DayOfWeek.MONDAY, monday.dayOfWeek)
+            assertEquals(page, weekIndexOf(window, monday))
+        }
+        // The last page is the week the window's end falls in — nothing beyond it, nothing short of it.
+        assertEquals(weekStart(window.endInclusive), weekAtPage(window, weekPageCount(window) - 1))
+    }
+
+    @Test
+    fun paging_clampsDatesFromOutsideTheWindow() {
+        // A cached event from outside the fetched span must not produce a page the pager has no room
+        // for — in either direction.
+        val window = calendarWindow(LocalDate(2026, 8, 7))
+        assertEquals(0, monthIndexOf(window, LocalDate(2020, 1, 1)))
+        assertEquals(monthPageCount(window) - 1, monthIndexOf(window, LocalDate(2030, 1, 1)))
+        assertEquals(0, weekIndexOf(window, LocalDate(2020, 1, 1)))
+        assertEquals(weekPageCount(window) - 1, weekIndexOf(window, LocalDate(2030, 1, 1)))
+        // And a page index from outside the range clamps the same way rather than throwing.
+        assertEquals(monthAtPage(window, 0), monthAtPage(window, -1))
+        assertEquals(weekAtPage(window, 0), weekAtPage(window, -1))
     }
 
     // --- Week view ---

@@ -6,6 +6,7 @@ import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
@@ -65,6 +66,7 @@ class CompositeHomeAdapter(
     // everything addressing the queue — HA's media_player has no queue to speak of.
     override suspend fun play(room: Room, uri: String, radio: Boolean) = ma.play(room, uri, radio)
     override suspend fun playAll(room: Room, uris: List<String>) = ma.playAll(room, uris)
+    override suspend fun enqueue(room: Room, uri: String, mode: QueueMode) = ma.enqueue(room, uri, mode)
     override suspend fun artistDetail(uri: String): ArtistDetail = ma.artistDetail(uri)
     override suspend fun playQueueItem(room: Room, queueItemId: String) = ma.playQueueItem(room, queueItemId)
     override fun moveQueueItem(room: Room, queueItemId: String, posShift: Int) =

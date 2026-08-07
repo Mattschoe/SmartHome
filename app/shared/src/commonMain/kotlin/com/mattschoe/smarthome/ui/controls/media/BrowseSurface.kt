@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.ui.controls.media
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,8 +39,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -48,11 +56,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.BrowseKind
 import com.mattschoe.smarthome.data.model.MusicSource
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.ui.components.InsetSurface
 import com.mattschoe.smarthome.ui.components.PageIndicator
 import com.mattschoe.smarthome.ui.components.SectionLabel
@@ -95,6 +105,7 @@ fun BrowseSurface(
     spotifyRecentlyPlayed: List<BrowseItem>,
     onQueryChange: (String) -> Unit,
     onPlay: (BrowseItem) -> Unit,
+    onEnqueue: (BrowseItem, QueueMode) -> Unit,
     onOpenArtist: (BrowseItem) -> Unit,
     modifier: Modifier = Modifier,
     bottomInset: Dp = 0.dp,
@@ -102,62 +113,125 @@ fun BrowseSurface(
 ) {
     val columns = Dimensions.browseGridColumns
     val scroll = rememberScrollState()
-    Column(modifier.fillMaxSize().verticalScrollFade(scroll).verticalScroll(scroll)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SearchBar(query = query, onQueryChange = onQueryChange, modifier = Modifier.weight(1f))
-            headerTrailing?.invoke()
-        }
-        Spacer(Modifier.height(Dimensions.mediaSectionGap))
-        when (search) {
-            SearchState.Idle -> {
-                // Like the search grid: an artist tile drills in, everything else plays.
-                val onSelect: (Int, BrowseItem) -> Unit = { _, item ->
-                    if (item.kind == BrowseKind.Artist) onOpenArtist(item) else onPlay(item)
-                }
-                val shelves = browseShelvesFor(
-                    source, playlists, quickPicks, mixedForYou, spotifyPlaylists, spotifyRecentlyPlayed,
-                ).filter { it.items.isNotEmpty() }
-                shelves.forEachIndexed { index, shelf ->
-                    // The search bar already left a gap, so only the shelves after the first add one.
-                    if (index > 0) Spacer(Modifier.height(Dimensions.mediaSectionGap))
-                    SectionLabel(shelf.label)
-                    Spacer(Modifier.height(12.dp))
-                    when (shelf) {
-                        is BrowseShelf.PagedGrid ->
-                            QuickPicksPager(items = shelf.items, columns = columns, onSelect = onSelect)
-                        is BrowseShelf.Grid ->
-                            FlatBrowseGrid(items = shelf.items, columns = columns, onSelect = onSelect)
-                        is BrowseShelf.Rail -> PlaylistRail(items = shelf.items, onPlay = onPlay)
+    // Which tile's queue menu is open, and where it was pressed. Local to the surface — a transient
+    // gesture state with no consumer outside it, like the phone page's audio popup, and so not the
+    // ViewModel's (per the CORE RULE).
+    var menuTarget by remember { mutableStateOf<BrowseMenuTarget?>(null) }
+    // The surface's own placement, which the menu is positioned and clamped inside.
+    var boxOrigin by remember { mutableStateOf(Offset.Zero) }
+    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+    val actions = remember(onEnqueue) {
+        BrowseQueueActions(
+            onOpenMenu = { item, bounds -> menuTarget = BrowseMenuTarget(item, bounds) },
+            onEnqueue = onEnqueue,
+        )
+    }
+
+    Box(
+        modifier.fillMaxSize().onGloballyPositioned {
+            boxOrigin = it.positionInRoot()
+            boxSize = it.size
+        },
+    ) {
+        Column(Modifier.fillMaxSize().verticalScrollFade(scroll).verticalScroll(scroll)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SearchBar(query = query, onQueryChange = onQueryChange, modifier = Modifier.weight(1f))
+                headerTrailing?.invoke()
+            }
+            Spacer(Modifier.height(Dimensions.mediaSectionGap))
+            when (search) {
+                SearchState.Idle -> {
+                    // Like the search grid: an artist tile drills in, everything else plays.
+                    val onSelect: (Int, BrowseItem) -> Unit = { _, item ->
+                        if (item.kind == BrowseKind.Artist) onOpenArtist(item) else onPlay(item)
+                    }
+                    val shelves = browseShelvesFor(
+                        source, playlists, quickPicks, mixedForYou, spotifyPlaylists, spotifyRecentlyPlayed,
+                    ).filter { it.items.isNotEmpty() }
+                    shelves.forEachIndexed { index, shelf ->
+                        // The search bar already left a gap, so only the shelves after the first add one.
+                        if (index > 0) Spacer(Modifier.height(Dimensions.mediaSectionGap))
+                        SectionLabel(shelf.label)
+                        Spacer(Modifier.height(12.dp))
+                        when (shelf) {
+                            is BrowseShelf.PagedGrid -> QuickPicksPager(
+                                items = shelf.items,
+                                columns = columns,
+                                onSelect = onSelect,
+                                queueActions = actions,
+                            )
+                            is BrowseShelf.Grid -> FlatBrowseGrid(
+                                items = shelf.items,
+                                columns = columns,
+                                onSelect = onSelect,
+                                queueActions = actions,
+                            )
+                            is BrowseShelf.Rail ->
+                                PlaylistRail(items = shelf.items, onPlay = onPlay, queueActions = actions)
+                        }
                     }
                 }
-            }
-            SearchState.Searching -> SearchStatus {
-                CircularProgressIndicator(color = Forest)
-            }
-            SearchState.Failed -> SearchStatus {
-                Text("Søgningen fejlede", color = Muted, fontSize = 15.sp)
-            }
-            is SearchState.Results ->
-                if (search.items.isEmpty()) {
-                    SearchStatus { Text("Ingen resultater", color = Muted, fontSize = 15.sp) }
-                } else {
-                    // Results mix kinds: an artist hit drills in, everything else plays.
-                    FlatBrowseGrid(
-                        items = search.items,
-                        columns = columns,
-                        onSelect = { _, item ->
-                            if (item.kind == BrowseKind.Artist) onOpenArtist(item) else onPlay(item)
-                        },
-                    )
+                SearchState.Searching -> SearchStatus {
+                    CircularProgressIndicator(color = Forest)
                 }
+                SearchState.Failed -> SearchStatus {
+                    Text("Søgningen fejlede", color = Muted, fontSize = 15.sp)
+                }
+                is SearchState.Results ->
+                    if (search.items.isEmpty()) {
+                        SearchStatus { Text("Ingen resultater", color = Muted, fontSize = 15.sp) }
+                    } else {
+                        // Results mix kinds: an artist hit drills in, everything else plays.
+                        FlatBrowseGrid(
+                            items = search.items,
+                            columns = columns,
+                            onSelect = { _, item ->
+                                if (item.kind == BrowseKind.Artist) onOpenArtist(item) else onPlay(item)
+                            },
+                            queueActions = actions,
+                        )
+                    }
+            }
+            Spacer(Modifier.height(bottomInset))
         }
-        Spacer(Modifier.height(bottomInset))
+        menuTarget?.let { target ->
+            BrowseItemMenu(
+                tileBounds = target.bounds,
+                boxOrigin = boxOrigin,
+                boxSize = boxSize,
+                onEnqueue = { mode -> onEnqueue(target.item, mode) },
+                onDismiss = { menuTarget = null },
+            )
+        }
     }
 }
+
+/** The open queue menu: which tile it belongs to, and the tile's root-space bounds it hangs beside. */
+private data class BrowseMenuTarget(val item: BrowseItem, val bounds: Rect)
+
+/**
+ * Whether a tile has anything to queue: something playable, and not an artist — an artist tile is a
+ * navigation target (it opens the drill-in), so there is no one item behind it to line up.
+ */
+private val BrowseItem.queueable: Boolean
+    get() = uri != null && kind != BrowseKind.Artist
+
+/** What the long-press is announced as, since nothing on the tile shows that it carries a menu. */
+private const val QueueMenuLabel = "Kø-handlinger"
+
+/**
+ * The menu's two actions, reachable without the gesture. A long-press is invisible to a screen
+ * reader, so the same intents are published as custom actions on the tile itself (the project's
+ * pattern for gesture-only affordances — see the calendar's week and month views).
+ */
+private fun queueActionsFor(item: BrowseItem, actions: BrowseQueueActions) = listOf(
+    CustomAccessibilityAction("Afspil som næste") { actions.onEnqueue(item, QueueMode.Next); true },
+    CustomAccessibilityAction("Tilføj til kø") { actions.onEnqueue(item, QueueMode.Last); true },
+)
 
 /**
  * The sunken search field over the music library, filling whatever width the header row leaves it.
@@ -229,9 +303,19 @@ private fun SearchBar(
     }
 }
 
-/** Horizontal snapping rail of playlist/browse cards. Shared by Playlists and Mixed for you. */
+/**
+ * Horizontal snapping rail of playlist/browse cards. Shared by Playlists and Mixed for you.
+ *
+ * [queueActions] adds the long-press queue menu to every card that can be queued; the artist
+ * drill-in's albums rail passes none and keeps tap-to-play as the card's only gesture.
+ */
 @Composable
-internal fun PlaylistRail(items: List<BrowseItem>, onPlay: (BrowseItem) -> Unit, modifier: Modifier = Modifier) {
+internal fun PlaylistRail(
+    items: List<BrowseItem>,
+    onPlay: (BrowseItem) -> Unit,
+    modifier: Modifier = Modifier,
+    queueActions: BrowseQueueActions? = null,
+) {
     val listState = rememberLazyListState()
     LazyRow(
         modifier = modifier.fillMaxWidth(),
@@ -239,19 +323,42 @@ internal fun PlaylistRail(items: List<BrowseItem>, onPlay: (BrowseItem) -> Unit,
         flingBehavior = rememberSnapFlingBehavior(listState),
         horizontalArrangement = Arrangement.spacedBy(Dimensions.browseGridSpacing),
     ) {
-        itemsIndexed(items) { index, item -> PlaylistCard(index = index, playlist = item, onPlay = onPlay) }
+        itemsIndexed(items) { index, item ->
+            PlaylistCard(index = index, playlist = item, onPlay = onPlay, queueActions = queueActions)
+        }
     }
 }
 
 @Composable
-private fun PlaylistCard(index: Int, playlist: BrowseItem, onPlay: (BrowseItem) -> Unit, modifier: Modifier = Modifier) {
+private fun PlaylistCard(
+    index: Int,
+    playlist: BrowseItem,
+    onPlay: (BrowseItem) -> Unit,
+    modifier: Modifier = Modifier,
+    queueActions: BrowseQueueActions? = null,
+) {
     // Tapping plays the item as radio; a card without a uri (rare) stays inert.
-    val playable = if (playlist.uri != null) Modifier.clickable { onPlay(playlist) } else Modifier
+    val queueable = queueActions?.takeIf { playlist.queueable }
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    val playable = when {
+        playlist.uri == null -> Modifier
+        queueable != null -> Modifier
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .combinedClickable(
+                onLongClickLabel = QueueMenuLabel,
+                onLongClick = { queueable.onOpenMenu(playlist, bounds) },
+                onClick = { onPlay(playlist) },
+            )
+        else -> Modifier.clickable { onPlay(playlist) }
+    }
     Column(
         modifier
             .width(Dimensions.playlistCardWidth)
             .then(playable)
-            .semantics { if (playlist.uri != null) contentDescription = "Afspil ${playlist.name}" },
+            .semantics {
+                if (playlist.uri != null) contentDescription = "Afspil ${playlist.name}"
+                if (queueable != null) customActions = queueActionsFor(playlist, queueable)
+            },
     ) {
         ArtTile(
             background = browseCardColor(index),
@@ -333,6 +440,7 @@ internal fun QuickPicksPager(
     columns: Int,
     onSelect: (index: Int, item: BrowseItem) -> Unit,
     modifier: Modifier = Modifier,
+    queueActions: BrowseQueueActions? = null,
 ) {
     val perPage = columns * QUICK_PICKS_ROWS
     val pageCount = ceil(items.size / perPage.toFloat()).toInt().coerceAtLeast(1)
@@ -355,6 +463,7 @@ internal fun QuickPicksPager(
                     startIndex = page * perPage,
                     gap = gap,
                     onSelect = onSelect,
+                    queueActions = queueActions,
                 )
             }
         }
@@ -375,6 +484,7 @@ internal fun FlatBrowseGrid(
     columns: Int,
     onSelect: (index: Int, item: BrowseItem) -> Unit,
     modifier: Modifier = Modifier,
+    queueActions: BrowseQueueActions? = null,
 ) {
     BrowseGrid(
         items = items,
@@ -383,6 +493,7 @@ internal fun FlatBrowseGrid(
         startIndex = 0,
         gap = Dimensions.browseGridSpacing,
         onSelect = onSelect,
+        queueActions = queueActions,
         modifier = modifier,
     )
 }
@@ -396,6 +507,9 @@ internal fun FlatBrowseGrid(
  * [onSelect] receives the tile's **global** index (already offset by [startIndex]) alongside the item,
  * because what a tap means differs per call site: playing the item, opening an artist, or playing the
  * whole list from that position.
+ *
+ * [queueActions] adds the long-press queue menu to every tile that can be queued — the artist
+ * drill-in passes none, so its top hits keep the single tap that plays the list from there.
  */
 @Composable
 private fun BrowseGrid(
@@ -406,6 +520,7 @@ private fun BrowseGrid(
     gap: Dp,
     onSelect: (index: Int, item: BrowseItem) -> Unit,
     modifier: Modifier = Modifier,
+    queueActions: BrowseQueueActions? = null,
 ) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
         for (row in 0 until rows) {
@@ -415,9 +530,21 @@ private fun BrowseGrid(
                     val item = items.getOrNull(i)
                     if (item != null) {
                         val isArtist = item.kind == BrowseKind.Artist
-                        val clickable =
-                            if (item.uri != null) Modifier.clickable { onSelect(startIndex + i, item) }
-                            else Modifier
+                        val queueable = queueActions?.takeIf { item.queueable }
+                        // Where the menu hangs. Captured per tile at layout, so the long-press has the
+                        // bounds on hand rather than having to measure inside the gesture.
+                        var bounds by remember { mutableStateOf(Rect.Zero) }
+                        val gestures = when {
+                            item.uri == null -> Modifier
+                            queueable != null -> Modifier
+                                .onGloballyPositioned { bounds = it.boundsInRoot() }
+                                .combinedClickable(
+                                    onLongClickLabel = QueueMenuLabel,
+                                    onLongClick = { queueable.onOpenMenu(item, bounds) },
+                                    onClick = { onSelect(startIndex + i, item) },
+                                )
+                            else -> Modifier.clickable { onSelect(startIndex + i, item) }
+                        }
                         ArtTile(
                             background = browseCardColor(startIndex + i),
                             glyph = Res.drawable.music_note_filled,
@@ -426,12 +553,13 @@ private fun BrowseGrid(
                             modifier = Modifier
                                 .weight(1f)
                                 .aspectRatio(1f)
-                                .then(clickable)
+                                .then(gestures)
                                 .semantics {
                                     if (item.uri != null) {
                                         contentDescription =
                                             if (isArtist) "Vis ${item.name}" else "Afspil ${item.name}"
                                     }
+                                    if (queueable != null) customActions = queueActionsFor(item, queueable)
                                 },
                             artworkUrl = item.artworkUrl,
                             // The tiles carry no caption below them, so the title rides the art itself —

@@ -60,6 +60,14 @@ enum class MusicSource(val badge: String, val providerDomain: String) {
 /** Repeat mode for a room's audio session, mirroring Home Assistant's `media_player` repeat states. */
 enum class RepeatMode { Off, All }
 
+/**
+ * Where an enqueued item lands in the up-next list, which reads as `[playing] [user block] [auto
+ * block]`: [Next] puts it at the **top** of the user block, [Last] at its **bottom** — still above the
+ * auto-appended "Don't Stop the Music" continuations. With an empty user block the two do the same
+ * thing.
+ */
+enum class QueueMode { Next, Last }
+
 
 /**
  * @param album HA media_album_name

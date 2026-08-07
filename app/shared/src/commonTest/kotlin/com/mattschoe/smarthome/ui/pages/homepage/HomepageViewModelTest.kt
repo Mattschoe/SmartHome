@@ -13,6 +13,7 @@ import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +41,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -538,6 +540,64 @@ class HomepageViewModelTest {
     }
 
     @Test
+    fun enqueue_queuesTheTileAndLeavesEverySurfaceExactlyAsItWas() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        // The state a long-press is reached from: a typed search, a drilled-in artist, a collapsed
+        // player. Queueing is not "show me this", so none of them may move.
+        vm.setMediaMinimized(true)
+        vm.setSearchQuery("Nordlys")
+        vm.openArtist(ARTIST_TILE)
+        advanceUntilIdle()
+
+        vm.enqueue(BrowseItem("Nordlys", uri = "mock://track/nordlys"), QueueMode.Last)
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertEquals("Nordlys", ready.searchQuery)
+        assertTrue(ready.mediaMinimized)
+        assertNotNull(ready.artist)
+        assertNull(ready.pendingPlay)
+        // Nothing started — and the tile is in the queue, above what was already lined up.
+        assertEquals("Midnight City", ready.audioState.nowPlaying?.title)
+        assertEquals("Nordlys", ready.audioState.queue.first().title)
+        assertEquals("Tilføjet til køen", ready.toast?.text)
+    }
+
+    @Test
+    fun enqueue_playsInsteadWhenTheRoomHasNothingToQueueBehind() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        vm.selectAudioRoom(Room.Bedroom) // seeded idle — no track, so nothing to queue behind
+        vm.enqueue(BrowseItem("Nordlys", uri = "mock://track/nordlys"), QueueMode.Next)
+        advanceUntilIdle()
+
+        // A long-press that produced neither audio nor any visible change would read as dropped.
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertEquals("Nordlys", ready.audioState.nowPlaying?.title)
+        assertTrue(ready.audioState.isPlaying)
+    }
+
+    @Test
+    fun enqueue_failure_raisesTheToastAndStartsNothing() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(FailingEnqueueAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        vm.enqueue(BrowseItem("Nordlys", uri = "mock://track/nordlys"), QueueMode.Next)
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertEquals("Kunne ikke tilføje til kø", ready.toast?.text)
+        assertNull(ready.pendingPlay)
+        assertEquals("Midnight City", ready.audioState.nowPlaying?.title)
+    }
+
+    @Test
     fun openArtist_showsTheHeaderWhileLoadingThenTheCatalogue() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(SlowArtistAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
@@ -668,6 +728,13 @@ class HomepageViewModelTest {
             throw IllegalStateException("no Music Assistant connection")
     }
 
+    private class FailingEnqueueAdapter(
+        delegate: HomeAdapter = MockAdapter(),
+    ) : HomeAdapter by delegate {
+        override suspend fun enqueue(room: Room, uri: String, mode: QueueMode) =
+            throw IllegalStateException("no Music Assistant connection")
+    }
+
     /** A play that "succeeds" without changing any device state — exercises the grace timeouts. */
     private class InertPlayAdapter(
         delegate: HomeAdapter = MockAdapter(),
@@ -772,7 +839,7 @@ class HomepageViewModelTest {
         val ready = vm.screenState.value as HomeScreenState.Ready
         assertEquals(3, ready.selectedDayEvents.size)
         assertEquals(2, ready.selectedDayTodos.size)
-        assertTrue(ready.dayMarks.containsKey(ready.today.day))
+        assertTrue(ready.dayMarks.containsKey(ready.today))
 
         // A day the seed put nothing on scopes to empty.
         vm.selectDay(ready.today.plus(10, DateTimeUnit.DAY))
@@ -825,21 +892,19 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun weekEvents_groupOnlyTheVisibleWeek() = runTest(mainDispatcher) {
+    fun eventsByDay_groupsEveryVisibleEventUnderItsOwnDay() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
         val ready = vm.screenState.value as HomeScreenState.Ready
+        assertTrue(ready.eventsByDay.isNotEmpty())
+        assertTrue(ready.eventsByDay.all { (day, events) -> events.all { it.date == day } })
+        // Nothing is dropped on the way into the grouping — it spans the window, not one week.
+        assertEquals(ready.calendar.events.size, ready.eventsByDay.values.sumOf { it.size })
+        // The week view slices its seven columns out of it.
         val days = ready.weekDays.toSet()
-        assertTrue(ready.weekEvents.isNotEmpty())
-        assertTrue(ready.weekEvents.keys.all { it in days })
-        assertTrue(ready.weekEvents.all { (day, events) -> events.all { it.date == day } })
-        // Nothing from the week is dropped on the way into the grouping.
-        assertEquals(
-            ready.calendar.events.count { it.date in days },
-            ready.weekEvents.values.sumOf { it.size },
-        )
+        assertTrue(ready.eventsByDay.keys.any { it in days })
     }
 
     @Test
@@ -1081,7 +1146,7 @@ class HomepageViewModelTest {
         val roster = "calendar.c_arbejde"
         val before = vm.screenState.value as HomeScreenState.Ready
         assertTrue(before.selectedDayEvents.any { it.sourceId == roster })
-        assertTrue(before.dayMarks.getValue(before.today.day).sourceIds.contains(roster))
+        assertTrue(before.dayMarks.getValue(before.today).sourceIds.contains(roster))
 
         vm.toggleCalendarFilter(roster)
         advanceUntilIdle()
@@ -1095,7 +1160,7 @@ class HomepageViewModelTest {
         vm.setCalendarView(CalendarView.Week)
         advanceUntilIdle()
         val week = vm.screenState.value as HomeScreenState.Ready
-        assertTrue(week.weekEvents.values.flatten().any { it.sourceId == roster })
+        assertTrue(week.eventsByDay.values.flatten().any { it.sourceId == roster })
     }
 
     @Test

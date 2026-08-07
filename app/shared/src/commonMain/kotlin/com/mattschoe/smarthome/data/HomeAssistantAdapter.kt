@@ -30,6 +30,7 @@ import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
@@ -238,6 +239,10 @@ class HomeAssistantAdapter(
     // both queue intents belong to Music Assistant and the composite routes them there.
     override suspend fun playQueueItem(room: Room, queueItemId: String) {
         throw IllegalStateException("playQueueItem($room, $queueItemId): no Music Assistant connection")
+    }
+
+    override suspend fun enqueue(room: Room, uri: String, mode: QueueMode) {
+        throw IllegalStateException("enqueue($room, $uri): no Music Assistant connection")
     }
 
     // The queue is Music Assistant's — HA's media_player has none to reorder or replace.
@@ -1050,10 +1055,6 @@ class HomeAssistantAdapter(
         const val REQUEST_TIMEOUT_MS = 20_000L
         val HOLD = 3_000.milliseconds
 
-        // A generous rolling window: a household calendar is tiny, and fetching a year ahead means
-        // month navigation never has to reach the adapter (see the CORE RULE — the VM filters).
-        const val CALENDAR_WINDOW_BACK_MONTHS = 1
-        const val CALENDAR_WINDOW_FORWARD_MONTHS = 12
         // Only a safety net: the panel asks for a refetch when it opens and after every write.
         const val CALENDAR_POLL_MS = 15 * 60 * 1_000L
         const val CALENDAR_DEBOUNCE_MS = 750L

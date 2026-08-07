@@ -4,6 +4,7 @@ import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.HomeState
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
@@ -37,6 +38,18 @@ interface HomeAdapter {
      * without a Music Assistant connection (HA-only) throw.
      */
     suspend fun play(room: Room, uri: String, radio: Boolean = true)
+
+    /**
+     * Queue a Music Assistant item ([uri]) behind what [room] is already playing, without interrupting
+     * it. [mode] places it at the top ([QueueMode.Next]) or the bottom ([QueueMode.Last]) of the block
+     * of user-added entries — above the auto-appended continuations either way. A container uri
+     * (playlist/album) is expanded by Music Assistant into its tracks, in order.
+     *
+     * `suspend` and failure-propagating like [play], and for the same reason: resolving a container
+     * takes seconds, and the caller confirms the outcome with a notice. Adapters without a Music
+     * Assistant connection throw.
+     */
+    suspend fun enqueue(room: Room, uri: String, mode: QueueMode)
 
     /**
      * Skip playback to a specific entry of [room]'s queue (Music Assistant `player_queues/play_index`),

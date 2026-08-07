@@ -29,6 +29,7 @@ fun ApplicationNavigationHost(
                 HomepageViewModel(
                     adapter = appContainer.homeAdapter,
                     filterStore = appContainer.calendarFilters,
+                    zoomStore = appContainer.weekZoom,
                     nowPlaying = appContainer.nowPlaying
                 )
             }

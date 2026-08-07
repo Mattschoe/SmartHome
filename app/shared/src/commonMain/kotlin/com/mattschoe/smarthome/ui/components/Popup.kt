@@ -42,7 +42,7 @@ fun PopupCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.()
             .clip(shape)
             .background(Card)
             .border(1.dp, CardBorder, shape)
-            .padding(16.dp),
+            .padding(Dimensions.popupCardPadding),
         content = content,
     )
 }

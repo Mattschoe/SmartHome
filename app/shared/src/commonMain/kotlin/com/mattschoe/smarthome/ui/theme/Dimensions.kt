@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.ui.theme
 
 import androidx.compose.ui.unit.dp
+import com.mattschoe.smarthome.data.WeekHourHeightRange
 
 /** Shared geometry tokens so no composable hardcodes a corner radius or hit-target size. */
 object Dimensions {
@@ -81,18 +82,33 @@ object Dimensions {
     val dayMarkRing = 0.5.dp
     // The disc carrying a day number, in the month grid and in the week view's day header.
     val calendarDayDisc = 34.dp
+    // A month page: six rows of [minTouch] cells, gapped. Stated rather than wrapped, because the
+    // grid pages inside a vertical scroll — a pager there has no height to measure against, and every
+    // month is this tall anyway, so the agenda under it doesn't shift as the months slide past.
+    val monthGridRowGap = 2.dp
+    val monthGridHeight = minTouch * 6 + monthGridRowGap * 5
 
-    // Right-card Calendar panel (week view). The grid is 24 [weekHourHeight] rows — far taller than
-    // the ~500dp it is shown in, so it scrolls inside the panel — beside a gutter of hour labels.
+    // Right-card Calendar panel (week view). The grid is 24 hour rows beside a gutter of hour labels.
     // Widths stay proportional (seven weight(1f) columns), so the same composables re-flow on a phone.
-    // The hour row is deliberately tight: a day at a glance beats a legible 15 minutes, and a taller
-    // row spends the card's height on empty morning hours.
-    val weekHourHeight = 24.dp
+    // The hour row is a **range the reader sets** by pinching the grid, not a constant: at
+    // [weekHourHeightMax] the day is 576dp and scrolls inside the ~500dp it is shown in; at
+    // [weekHourHeightMin] the whole 24h fits in 144dp, the grid stops scrolling, and the height it no
+    // longer needs goes to the checklist below it. The level is persisted (`WeekZoomStore`).
+    val weekHourHeightMin = WeekHourHeightRange.start.dp
+    val weekHourHeightMax = WeekHourHeightRange.endInclusive.dp
+    // Below this much room per hour, labels and rules thin out to every 2nd, 3rd… hour rather than
+    // collapsing into mush. See `hourStride` in WeekView.kt, which this token alone tunes.
+    val weekHourLabelMinSpacing = 18.dp
+    // However far the grid is pinched, it keeps at least this much of the card — the floor that
+    // stops a short viewport from handing the whole panel to the checklist.
+    val weekMinGridHeight = 120.dp
     val weekTimeGutter = 34.dp
     val weekHourLabelHeight = 14.dp
-    // An event block: its floor height, the leading bar in the calendar's full color, and the height
-    // below which only the title fits (the start time is dropped rather than clipped).
+    // An event block: its floor height *at full expansion* (it scales down with the zoom, so a block
+    // stays true to its minutes), the leading bar in the calendar's full color, and the heights below
+    // which the start time, then the title itself, are dropped rather than clipped.
     val weekMinBlockHeight = 14.dp
+    val weekBlockTitleMinHeight = 18.dp
     val weekBlockRadius = 6.dp
     val weekBlockBarWidth = 3.dp
     val weekBlockGap = 2.dp
@@ -103,9 +119,9 @@ object Dimensions {
     val weekChevronSize = 18.dp
     val weekNowLineHeight = 2.dp
     // The to-do list under the week grid: its label plus two rows, the rest scrolling inside the
-    // strip. Deliberately tight — every dp here is an hour the grid can't show, and the grid is what
-    // the week view is for. The strip takes this height whatever the day holds, so switching day or
-    // week doesn't resize the grid above it.
+    // strip. This is the strip's **minimum** — what it keeps while the grid is expanded enough to
+    // want the rest of the card. Pinching the hours together hands the freed height down to it, and
+    // it never shrinks below this, so switching day or week still doesn't resize the grid above it.
     val weekTodoStripHeight = 116.dp
 
     // Right-card Calendar popups (CalendarPopups.kt): the week view's event detail card and the
@@ -118,6 +134,9 @@ object Dimensions {
     // a 20sp title rather than an 11sp one — and the glyphs in a popup's action row.
     val eventDetailBarWidth = 4.dp
     val popupIconSize = 20.dp
+    // What every [PopupCard] insets its content by — stated here because a popup sized from its
+    // content ([browseMenuHeight]) has to add it back.
+    val popupCardPadding = 16.dp
     // How far under the card's top edge the gear's popup hangs, so it reads as dropped from the
     // header it was opened from rather than floating free.
     val calendarSettingsTopOffset = minTouch
@@ -157,6 +176,13 @@ object Dimensions {
     // Tiles per row in a browse/search grid — the same three on the card and on the phone page, where
     // the wider viewport lands a tile at nearly the card's tile size anyway.
     const val browseGridColumns = 3
+    // The queue menu a browse tile's long-press drops (BrowseItemMenu.kt): two rows on a [PopupCard].
+    // Its height is *derived* from what it holds — two touch rows, the divider between them and the
+    // card's own padding — rather than measured, so placing it against the surface's edges doesn't
+    // pop a frame late.
+    val browseMenuWidth = 200.dp
+    val browseMenuDividerHeight = 1.dp
+    val browseMenuHeight = minTouch * 2 + browseMenuDividerHeight + popupCardPadding * 2
     val pageDotSize = 7.dp
     val pageDotGap = 6.dp
     // The search field's inner row, sized so the trailing clear button is a full [minTouch] target

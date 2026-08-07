@@ -5,6 +5,7 @@ import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
@@ -17,6 +18,7 @@ import kotlinx.datetime.LocalTime
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.minus
+import kotlinx.datetime.number
 import kotlinx.datetime.plus
 import kotlin.math.PI
 import kotlin.math.abs
@@ -229,6 +231,37 @@ private const val MOCK_CONTINUATION_SIZE = 5
 
 private const val MOCK_TRACK_DURATION_SEC = 180
 
+/**
+ * How a user-queued row is recognised in the mock store. The real adapter tracks the block's bottom as
+ * a queue-item id it remembers ([com.mattschoe.smarthome.data.ma.planEnqueue]); here the rows mint
+ * their own marked id, so the block is simply the leading run of them — and [playBrowseItem]'s queue
+ * replacement empties it for free, since the rows it mints carry a different prefix.
+ */
+private const val MOCK_USER_QUEUE_PREFIX = "mock-user-"
+
+/**
+ * Queue a browse tile on [room] — the mock's stand-in for an `option = "next"` `play_media` plus the
+ * reorder behind it. [QueueMode.Next] puts the row at the top of the user block, [QueueMode.Last] at
+ * its bottom; both stay above the continuation rows. Now-playing is untouched, which is the whole
+ * point of the intent.
+ */
+fun HomeState.enqueueBrowseItem(room: Room, item: BrowseItem, mode: QueueMode): HomeState =
+    updateAudio(room) { a ->
+        val blockSize = a.queue.takeWhile { it.queueItemId?.startsWith(MOCK_USER_QUEUE_PREFIX) == true }.size
+        val at = if (mode == QueueMode.Next) 0 else blockSize
+        val row = MediaTrack(
+            title = item.name,
+            artist = item.subtitle.orEmpty(),
+            album = null,
+            artworkUrl = item.artworkUrl,
+            durationSec = MOCK_TRACK_DURATION_SEC,
+            uri = item.uri,
+            // Distinct per row, so queueing the same tile twice gives two addressable entries.
+            queueItemId = "$MOCK_USER_QUEUE_PREFIX${a.queue.size}-${item.name}",
+        )
+        a.copy(queue = a.queue.take(at) + row + a.queue.drop(at))
+    }
+
 /** Move a queue entry [posShift] positions (negative = earlier), clamped to the queue. */
 fun HomeState.moveQueueItem(room: Room, queueItemId: String, posShift: Int): HomeState = updateAudio(room) { a ->
     val from = a.queue.indexOfFirst { it.queueKey() == queueItemId }
@@ -284,6 +317,57 @@ fun weekStart(date: LocalDate): LocalDate = date.minus(date.dayOfWeek.isoDayNumb
  * How many days the week view shows — Monday through Sunday.
  */
 const val DaysPerWeek = 7
+
+/**
+ * How far back and forward from today the adapter fetches calendar events — and keeps them. A
+ * generous rolling window: a household calendar is tiny, and fetching a year ahead means month
+ * navigation never has to reach the adapter.
+ *
+ * The **one** definition of the calendar's span, because the fetch window and the range the month and
+ * week pagers scroll over have to be the same thing: inside it a neighbouring page always has data
+ * behind it, and at its edges the pager stops consuming the drag so whatever is nesting it (the
+ * phone's page pager) gets it instead — which is right, there being nothing beyond it to show.
+ */
+const val CALENDAR_WINDOW_BACK_MONTHS = 1
+const val CALENDAR_WINDOW_FORWARD_MONTHS = 12
+
+/** The span [CALENDAR_WINDOW_BACK_MONTHS]/[CALENDAR_WINDOW_FORWARD_MONTHS] describe, around [today]. */
+fun calendarWindow(today: LocalDate): ClosedRange<LocalDate> =
+    today.plus(-CALENDAR_WINDOW_BACK_MONTHS, DateTimeUnit.MONTH)..
+        today.plus(CALENDAR_WINDOW_FORWARD_MONTHS, DateTimeUnit.MONTH)
+
+/** Months since year 0 — the linear scale month paging counts on. */
+private fun monthOrdinal(date: LocalDate): Int = date.year * 12 + (date.month.number - 1)
+
+/** How many month pages [window] spans (both ends inclusive). */
+fun monthPageCount(window: ClosedRange<LocalDate>): Int =
+    monthOrdinal(window.endInclusive) - monthOrdinal(window.start) + 1
+
+/**
+ * The page [date]'s month sits on. Clamped into [window]: a cached event from outside the fetched
+ * span must not produce a page the pager has no room for.
+ */
+fun monthIndexOf(window: ClosedRange<LocalDate>, date: LocalDate): Int =
+    (monthOrdinal(date) - monthOrdinal(window.start)).coerceIn(0, monthPageCount(window) - 1)
+
+/** The first of the month [page] shows. Clamped like [monthIndexOf]. */
+fun monthAtPage(window: ClosedRange<LocalDate>, page: Int): LocalDate {
+    val ordinal = monthOrdinal(window.start) + page.coerceIn(0, monthPageCount(window) - 1)
+    return LocalDate(ordinal / 12, ordinal % 12 + 1, 1)
+}
+
+/** How many week pages [window] spans, counting from the Monday its first day falls in. */
+fun weekPageCount(window: ClosedRange<LocalDate>): Int =
+    weekStart(window.start).daysUntil(weekStart(window.endInclusive)) / DaysPerWeek + 1
+
+/** The page [date]'s week sits on, clamped into [window] for the same reason as [monthIndexOf]. */
+fun weekIndexOf(window: ClosedRange<LocalDate>, date: LocalDate): Int =
+    (weekStart(window.start).daysUntil(weekStart(date)) / DaysPerWeek)
+        .coerceIn(0, weekPageCount(window) - 1)
+
+/** The Monday of the week [page] shows. Clamped like [weekIndexOf]. */
+fun weekAtPage(window: ClosedRange<LocalDate>, page: Int): LocalDate =
+    weekStart(window.start).plus(page.coerceIn(0, weekPageCount(window) - 1) * DaysPerWeek, DateTimeUnit.DAY)
 
 /**
  * One event placed in a day column of the week grid: its resolved [startMinute]/[endMinute] bounds
