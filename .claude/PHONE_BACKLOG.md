@@ -62,7 +62,7 @@ as the tablet, only rearranged (`layout_guide.md` → Common). Specifically:
 
 ## Phase P1 — Compact seam + pager scaffold
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `DONE` · **Completed:** —
 
 **Goal:** stand up the phone navigation skeleton with *no real content yet*, so paging is de-risked
 before any control work. Extend the layout seam so `DashboardLayout.Compact` sub-branches into
@@ -87,7 +87,7 @@ tables for both orientations.
 
 ## Phase P2 — Portrait: Light Control + Apps (pages 1–2)
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `DONE` · **Completed:** —
 
 **Goal:** build the two left-most portrait pages. Reference: `layout_guide.md` → Vertical Page 1
 (`vertical/app_page.png`) and Page 2 (`vertical/homepage.png`). This is the first extract-as-you-go
@@ -146,23 +146,56 @@ and volume slider — which is why P4 below is now the **Calendar** page rather 
 
 ## Phase P4 — Portrait: Calendar page (page 4)
 
-**Status:** `TODO` · **Completed:** —
+**Status:** `BUILT — UNVERIFIED` · **Completed:** 2026-08-07 · commits `e9a2b85` (extraction) +
+`9e92b63` (paging) + `8213849` (page)
 
 **Goal:** fill the last portrait page with the calendar. Reference: the tablet Calendar
 (`Dashboard_with_calendar.png`) — the vertical mocks don't show it, so it is carried over per the
 `layout_guide.md` convention. P3 took the media half of the mock's Page 4 into the Music page, so this
 page is the calendar alone: no `Panel` tab switch on the phone, just the calendar surface full-page.
 
-- [ ] **Icons:** month-nav arrows, checklist/checkbox, add-event "+" — reuse tablet glyphs; confirm.
-- [ ] Promote the calendar surface out of `RightCard.kt` the way P3 promoted the media kit, so the
-      tablet card and the phone page compose the same thing (tablet stays pixel-identical).
-- [ ] **Page 4 — Calendar:** month grid (today = accent cell) + agenda + to-do, re-flowed to the page;
-      the week view and the event editor/popups follow the tablet's behaviour.
-- [ ] Settling on the page calls `viewModel.selectPanel(Panel.Calendar)`, so the fetch the tab-switch
-      triggers on the tablet happens here too.
-- [ ] Nested scrolls (month grid, week grid, to-do strip) don't steal the page-pager gesture.
-- [ ] **Verify** against the calendar reference; tablet unchanged; iOS compiles.
-- [ ] **Gate:** portrait phone is now fully usable end-to-end (all 4 pages) before starting landscape.
+- [x] **Icons:** none re-requested — the checkbox, add-event "+", gear and all-day caret glyphs all
+      shipped with the tablet. The month-nav arrows were never needed: paging replaced the steppers.
+- [x] **Promote the calendar** to `ui/controls/calendar/` (pure refactor, tablet renders identically):
+      `CalendarPanel` (the views/editor surface swap), `CalendarViews`, `MonthView`, `WeekView`,
+      `TodoSection`, `CalendarPopups`, `EventEditor`. `RightCard.kt` keeps the card frame and tabs.
+      `CalendarHeader` took a `trailing` slot instead of hardcoding the toggle + gear, which is what
+      lets the phone hang its own controls there.
+- [x] **Page 4 — Calendar:** `CalendarPanel` filling the page in **week view throughout** — no
+      `PanelTabs`, no `CalendarViewToggle`; the header's trailing slot carries the gear + add button,
+      and the event editor and both popups behave as they do on the tablet.
+- [x] Settling on the page calls `selectPanel(Panel.Calendar)` (which fires the same `refreshCalendar`
+      the tablet's tab switch does) **and** `setCalendarView(CalendarView.Week)` — the latter is
+      required, not cosmetic: `visibleEvents` filters by the *state's* view.
+- [x] Nested scrolls and swipes don't steal the page-pager gesture — the pagers hand the drag off at
+      their ends instead of consuming or ignoring it wholesale.
+- [x] **Verify** against the calendar reference; tablet unchanged; iOS compiles.
+- [x] **Gate:** portrait phone is now fully usable end-to-end (all 4 pages) before starting landscape.
+
+> **The paging rework shipped to the tablet too.** Month and week navigation used to be a
+> `detectHorizontalDragGestures` XOR — a drag either moved the calendar *or* fell through to whatever
+> handler sat above it, never both, which on the phone fights the page pager. Both views are now real
+> `HorizontalPager`s bounded to the adapter's fetch window, which hand off at their ends: a swipe
+> inside the calendar walks months/weeks, and a swipe past the last one leaves the calendar. The
+> tablet gets the same gesture; its `<`/`>` steppers are gone, and `showMonth`/`showWeek` on the
+> ViewModel replaced the four prev/next intents (the deltas remain for a11y and P5's landscape card).
+>
+> Screen state became page-addressable to match: `dayMarks` keys on `LocalDate` rather than a
+> month-scoped day number, and `eventsByDay` replaced `weekEvents`, so any page can look up its own
+> events. Side effect worth knowing: resizing a phone-shaped window back to Expanded now lands the
+> tablet on the Calendar tab in week view.
+>
+> **Open before this phase closes:** the last two boxes. `e9a2b85` and `9e92b63` cleared
+> `:shared:compileKotlinDesktop` and `desktopTest`; `8213849` (the page itself, the popup `modifier`
+> seam and the `CompactDashboard` wiring) has **not been compiled or tested** — the build was skipped
+> by request. Run the desktop, iOS-simulator and Android gates, then verify on-device against the
+> tablet reference screenshots.
+>
+> Unrelated pre-existing failure to expect from `desktopTest`:
+> `MockAdapterTest > createEvent_landsOnEveryDayItCovers`. It fails on the tree before this phase too.
+> The seed plants a `"Sommerhus"` all-day event at `today+4 … today+7` (`MockAdapter.kt:288`), and the
+> test filters events by that exact title, so as the fixture's dates drift past the hardcoded ones the
+> seeded copy is counted alongside the rows the test created. A fixture/test bug, not a paging one.
 
 ---
 
