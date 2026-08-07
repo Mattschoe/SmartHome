@@ -1,0 +1,57 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :shared:compileKotlinMetadata -q)",
+      "Bash(./gradlew allTests :shared:compileKotlinIosSimulatorArm64)",
+      "Bash(./gradlew :androidApp:installDebug)",
+      "Bash(adb shell *)",
+      "Bash(android screen *)",
+      "Bash(./gradlew :shared:compileDebugKotlinAndroid -q)",
+      "Bash(./gradlew :androidApp:assembleDebug -q)",
+      "Bash(./gradlew :shared:tasks --all)",
+      "Bash(./gradlew :shared:compileDebugKotlinAndroid)",
+      "Bash(./gradlew :shared:compileCommonMainKotlinMetadata)",
+      "Bash(adb devices *)",
+      "Bash(./gradlew allTests)",
+      "Bash(git rm *)",
+      "Bash(./gradlew tasks *)",
+      "Bash(./gradlew :shared:compileCommonMainKotlinMetadata -q)",
+      "Bash(git --no-pager diff -- app/shared/src/commonMain/kotlin/com/mattschoe/smarthome/ui/pages/homepage/RightCard.kt)",
+      "Bash(git --no-pager diff --cached --stat -- app/shared/src/commonMain/kotlin/com/mattschoe/smarthome/ui/pages/homepage/RightCard.kt)",
+      "Bash(git --no-pager diff -- shared/src/commonMain/kotlin/com/mattschoe/smarthome/ui/pages/homepage/RightCard.kt)",
+      "Bash(./gradlew :shared:run *)",
+      "Bash(break)",
+      "Bash(git check-ignore *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(./gradlew :shared:compileKotlinMetadata :shared:desktopTest --tests \"com.mattschoe.smarthome.data.ha.HaDiscoveryTest\")",
+      "Bash(./gradlew :shared:desktopTest)",
+      "Bash(fd -e kt . /home/matt/Projects/SmartHome/app/shared/src/commonTest -x echo '{}')",
+      "WebFetch(domain:www.home-assistant.io)",
+      "WebSearch",
+      "Bash(./gradlew :shared:desktopTest --tests \"*MaMappingTest*\" --console=plain)",
+      "Bash(python3 -c \"import websockets\")",
+      "Bash(python3 -c \"import websocket\")",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.music-assistant.io)",
+      "Bash(python3 -c ' *)",
+      "WebFetch(domain:developers.home-assistant.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git commit *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/matt/.local/bin/headroom wrap selfheal --marker headroom-wrap-selfheal",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
