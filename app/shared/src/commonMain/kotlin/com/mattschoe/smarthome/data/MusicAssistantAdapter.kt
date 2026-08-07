@@ -16,12 +16,14 @@ import com.mattschoe.smarthome.data.ma.mapSearchResults
 import com.mattschoe.smarthome.data.ma.mapSpotifyPlaylists
 import com.mattschoe.smarthome.data.ma.matchQueuesToRooms
 import com.mattschoe.smarthome.data.ma.parseMaUri
+import com.mattschoe.smarthome.data.ma.planEnqueue
 import com.mattschoe.smarthome.data.ma.toMediaTrack
 import com.mattschoe.smarthome.data.ma.upNextOffset
 import com.mattschoe.smarthome.data.ma.withoutQueueItem
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.MusicSource
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.Room
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
@@ -97,6 +99,15 @@ class MusicAssistantAdapter(private val config: MaConfig) {
 
     // Coalesces queue-refresh requests from push events and the poll fallback into one refetch at a time.
     private val queueRefreshTrigger = Channel<Unit>(Channel.CONFLATED)
+
+    // The bottom of each room's block of user-queued entries, as one queue-item id — the whole of what
+    // [enqueue] remembers, since MA records no per-item provenance. See [planEnqueue]: a marker no
+    // longer in the queue reads as "the block is empty", which is how this self-heals across track
+    // advances, replaces and edits made in MA's own web UI, with no pruning on the refresh path.
+    @Volatile private var userBlockTailByRoom: Map<Room, String> = emptyMap()
+
+    // Serializes enqueues: two long-presses in a row must not interleave their before/after diffs.
+    private val enqueueMutex = Mutex()
 
     // Pending request/response correlation. The single read loop completes these; [command] awaits them.
     private val pendingMutex = Mutex()
@@ -314,7 +325,72 @@ class MusicAssistantAdapter(private val config: MaConfig) {
             put("option", "replace")
             put("radio_mode", radio)
         })
+        // A replace provably empties the user block, so the marker goes with it.
+        userBlockTailByRoom = userBlockTailByRoom - room
         queueRefreshTrigger.trySend(Unit)
+    }
+
+    /**
+     * Queue [uri] behind what [room] is already playing. The insert itself is `play_media` with
+     * `option = "next"`, which MA drops in just past its playback buffer without interrupting the
+     * current track (and expands a playlist/album uri into its tracks itself, so this stays
+     * single-uri). `add` would append *below* the auto-appended continuations and `replace_next` would
+     * wipe the user block, so neither can serve either mode.
+     *
+     * Where the run lands relative to the existing user block is then [planEnqueue]'s job, over an
+     * up-next snapshot taken either side of the insert. The snapshots take their own un-debounced
+     * fetch — [refreshQueues] sits behind a conflated debounce and re-enables Don't Stop the Music as
+     * a side effect — and read a deeper window than the UI's, so a queued album can't push the marker
+     * out of sight.
+     *
+     * Everything the reorder touches sits below the buffer watermark MA inserted after, so the moves
+     * are structurally safe; a track ending mid-sequence is the residual risk. A refused move leaves
+     * the item queued but higher than intended (at worst reading as "play next"), which is not worth
+     * failing the whole gesture over — so it stops the sequence quietly and keeps the old marker
+     * rather than recording a bottom the queue doesn't have.
+     */
+    suspend fun enqueue(room: Room, uri: String, mode: QueueMode) {
+        val queueId = queueIdByRoom[room]
+            ?: throw MaCommandException("player_queues/play_media", null,
+                "no MA queue matched for $room (known: ${queueIdByRoom.keys.joinToString().ifBlank { "none" }})")
+        enqueueMutex.withLock {
+            val offset = upNextOffset(currentIndexOf(queueId))
+            val before = upNextIds(queueId, offset)
+            command("player_queues/play_media", buildJsonObject {
+                put("queue_id", queueId)
+                put("media", uri)
+                put("option", "next")
+                put("radio_mode", false)
+            }, timeoutMs = PLAY_ALL_TIMEOUT_MS)
+            val plan = planEnqueue(before, upNextIds(queueId, offset), userBlockTailByRoom[room], mode)
+            val landed = plan.moves.all { move ->
+                runCatching {
+                    command("player_queues/move_item", buildJsonObject {
+                        put("queue_id", queueId)
+                        put("queue_item_id", move.queueItemId)
+                        put("pos_shift", move.posShift)
+                    })
+                }.isSuccess
+            }
+            if (landed) plan.tailId?.let { userBlockTailByRoom = userBlockTailByRoom + (room to it) }
+            queueRefreshTrigger.trySend(Unit)
+        }
+    }
+
+    /** [queueId]'s `current_index` off a fresh `player_queues/all` — where "up next" starts. */
+    private suspend fun currentIndexOf(queueId: String): Int? {
+        val queues: List<MaQueue> = json.decodeFromJsonElement(command("player_queues/all"))
+        return queues.firstOrNull { it.queue_id == queueId }?.current_index
+    }
+
+    /** The queue-item ids of one [ENQUEUE_WINDOW]-deep up-next page — [enqueue]'s before/after snapshot. */
+    private suspend fun upNextIds(queueId: String, offset: Int): List<String> {
+        val items: List<MaQueueItem> = json.decodeFromJsonElement(
+            command("player_queues/items", buildJsonObject {
+                put("queue_id", queueId); put("limit", ENQUEUE_WINDOW); put("offset", offset)
+            })
+        )
+        return items.map { it.queue_item_id }
     }
 
     /**
@@ -338,6 +414,8 @@ class MusicAssistantAdapter(private val config: MaConfig) {
             put("option", "replace")
             put("radio_mode", false)
         }, timeoutMs = PLAY_ALL_TIMEOUT_MS)
+        // Like [play]: the replace empties the user block, so its marker goes too.
+        userBlockTailByRoom = userBlockTailByRoom - room
         queueRefreshTrigger.trySend(Unit)
     }
 
@@ -524,6 +602,9 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         val QUEUE_POLL_MS = 30_000L
         val QUEUE_DEBOUNCE_MS = 750L
         val UP_NEXT_LIMIT = 20
+        // [enqueue]'s own window, deeper than the UI's: a queued 50-track album must not push the
+        // user block's bottom marker out of the slice the next enqueue diffs against.
+        val ENQUEUE_WINDOW = 100
         // Sits well clear of the library so the rail never truncates as playlists are added.
         val PLAYLIST_LIMIT = 100
         // Per media type — four types × 24 is far more than the grid ever scrolls to.

@@ -87,8 +87,11 @@ private fun formatEventDate(date: LocalDate): String {
 /** Minutes from midnight — the agenda's sort key for a timed event. */
 fun minutesOfDay(time: LocalTime): Int = time.hour * 60 + time.minute
 
+/** Hours in a full day — the week grid's row count. */
+const val HoursPerDay: Int = 24
+
 /** Minutes in a full day: the end of a day that an event runs past, and the week grid's full height. */
-const val MinutesPerDay: Int = 24 * 60
+const val MinutesPerDay: Int = HoursPerDay * 60
 
 /**
  * Turn what the event editor's fields hold into the draft the write intents take. Pure, so the two

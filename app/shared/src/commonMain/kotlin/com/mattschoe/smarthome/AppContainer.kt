@@ -6,9 +6,12 @@ import com.mattschoe.smarthome.data.HaConfig
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.HomeAssistantAdapter
 import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
+import com.mattschoe.smarthome.data.InMemoryWeekZoomStore
 import com.mattschoe.smarthome.data.KeyValueCalendarCache
 import com.mattschoe.smarthome.data.KeyValueCalendarFilterStore
 import com.mattschoe.smarthome.data.KeyValueStore
+import com.mattschoe.smarthome.data.KeyValueWeekZoomStore
+import com.mattschoe.smarthome.data.WeekZoomStore
 import com.mattschoe.smarthome.data.MaConfig
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.MusicAssistantAdapter
@@ -39,6 +42,11 @@ class AppContainer(
      */
     val calendarFilters: CalendarFilterStore =
         keyValueStore?.let(::KeyValueCalendarFilterStore) ?: InMemoryCalendarFilterStore(),
+    /**
+     * How far the week grid's hours are pinched together. Kept beside the filters, and for the same
+     * reason: a wall tablet is restarted by a power cut, not by anyone finishing with the calendar.
+     */
+    val weekZoom: WeekZoomStore = keyValueStore?.let(::KeyValueWeekZoomStore) ?: InMemoryWeekZoomStore(),
     /**
      * Where the ViewModel publishes the active audio room's playback for the platform's own media
      * surfaces. Android's media session reads it; the platforms without one never look.

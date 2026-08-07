@@ -15,6 +15,7 @@ import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.MusicSource
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.ui.pages.homepage.ArtistUiState
 import com.mattschoe.smarthome.ui.pages.homepage.PendingPlay
 import com.mattschoe.smarthome.ui.pages.homepage.SearchState
@@ -55,6 +56,7 @@ fun MediaPanel(
     spotifyRecentlyPlayed: List<BrowseItem>,
     onQueryChange: (String) -> Unit,
     onPlay: (BrowseItem) -> Unit,
+    onEnqueue: (BrowseItem, QueueMode) -> Unit,
     onOpenArtist: (BrowseItem) -> Unit,
     onCloseArtist: () -> Unit,
     onPlayTopHit: (Int) -> Unit,
@@ -143,6 +145,7 @@ fun MediaPanel(
                 spotifyRecentlyPlayed = spotifyRecentlyPlayed,
                 onQueryChange = onQueryChange,
                 onPlay = onPlay,
+                onEnqueue = onEnqueue,
                 onOpenArtist = onOpenArtist,
                 bottomInset = bottomInset,
                 headerTrailing = headerTrailing,

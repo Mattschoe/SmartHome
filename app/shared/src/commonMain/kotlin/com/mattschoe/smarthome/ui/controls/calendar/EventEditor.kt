@@ -1,4 +1,4 @@
-package com.mattschoe.smarthome.ui.pages.homepage
+package com.mattschoe.smarthome.ui.controls.calendar
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,6 +64,7 @@ import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.ui.components.InsetSurface
 import com.mattschoe.smarthome.ui.components.PillChip
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
+import com.mattschoe.smarthome.ui.pages.homepage.EventEditorTarget
 import com.mattschoe.smarthome.ui.theme.Card
 import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.ChipIdle

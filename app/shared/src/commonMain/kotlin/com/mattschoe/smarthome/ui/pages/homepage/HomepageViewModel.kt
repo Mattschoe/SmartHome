@@ -7,6 +7,9 @@ import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
+import com.mattschoe.smarthome.data.InMemoryWeekZoomStore
+import com.mattschoe.smarthome.data.WeekZoomStore
+import com.mattschoe.smarthome.data.clampWeekHourHeight
 import com.mattschoe.smarthome.data.MediaCommands
 import com.mattschoe.smarthome.data.NowPlayingBridge
 import com.mattschoe.smarthome.data.nowPlayingSnapshot
@@ -19,10 +22,13 @@ import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
+import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import com.mattschoe.smarthome.data.rotateFrom
+// Aliased: [showWeek] takes a week start, the import is the math that snaps one to its Monday.
+import com.mattschoe.smarthome.data.weekStart as weekStartOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -47,6 +53,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.minus
 import kotlinx.datetime.number
 import kotlinx.datetime.plus
@@ -63,6 +70,8 @@ import kotlin.time.Clock
 class HomepageViewModel(
     private val adapter: HomeAdapter,
     private val filterStore: CalendarFilterStore = InMemoryCalendarFilterStore(),
+    /** Where the week grid's pinch level is kept between runs. See [setWeekHourHeight]. */
+    private val zoomStore: WeekZoomStore = InMemoryWeekZoomStore(),
     /**
      * Where the active audio room's playback is published for the platform's own media surfaces (the
      * Android notification / lock screen). A default instance keeps the ViewModel constructible on a
@@ -118,6 +127,7 @@ class HomepageViewModel(
     private val _savingEvent = MutableStateFlow(false)
     private val _calendarFilters = MutableStateFlow(filterStore.read())
     private val _calendarSettingsOpen = MutableStateFlow(false)
+    private val _weekHourHeight = MutableStateFlow(clampWeekHourHeight(zoomStore.read()))
 
     /**
      * The debounced search pipeline. A blank query passes straight through so clearing the field
@@ -172,15 +182,17 @@ class HomepageViewModel(
                 RightCardSelection(panel, minimized, query, search, media)
             },
             // Everything the calendar's own surfaces own folds into one flow, since this combine's
-            // typed overload is full at 5 — and so, once more, is the fold's (hence the filters and
-            // the gear riding along as a pair).
+            // typed overload is full at 5 — and so, once more, is the fold's (hence the filters, the
+            // gear and the week's zoom riding along as a triple).
             combine(
                 _displayedMonth, _selectedDay, today, nowMinutes,
                 combine(
                     _calendarView, _eventEditor, _eventDetail, _savingEvent,
-                    combine(_calendarFilters, _calendarSettingsOpen) { filters, open -> filters to open },
-                ) { view, editor, detail, saving, (filters, settingsOpen) ->
-                    CalendarSurfaceSelection(view, editor, detail, saving, filters, settingsOpen)
+                    combine(_calendarFilters, _calendarSettingsOpen, _weekHourHeight) { filters, open, hourHeight ->
+                        Triple(filters, open, hourHeight)
+                    },
+                ) { view, editor, detail, saving, (filters, settingsOpen, hourHeight) ->
+                    CalendarSurfaceSelection(view, editor, detail, saving, filters, settingsOpen, hourHeight)
                 },
             ) { month, day, now, minute, surface ->
                 CalendarSelection(month, day, now, minute, surface)
@@ -218,6 +230,7 @@ class HomepageViewModel(
                 eventDetail = calendar.surface.eventDetail,
                 calendarFilters = calendar.surface.filters,
                 calendarSettingsOpen = calendar.surface.settingsOpen,
+                weekHourHeight = calendar.surface.weekHourHeight,
                 savingEvent = calendar.surface.savingEvent,
             )
         }.stateIn(
@@ -227,6 +240,13 @@ class HomepageViewModel(
         )
 
     init {
+        // The pinch settles far more often than it ends, so the level reaches disk on a pause in the
+        // gesture rather than per frame. The initial emission re-writes what was just read, which is
+        // a no-op write of the same number.
+        viewModelScope.launch {
+            @OptIn(FlowPreview::class)
+            _weekHourHeight.debounce(ZOOM_WRITE_DEBOUNCE_MS).collect(zoomStore::write)
+        }
         // Published off the adapter directly rather than off [screenState]: that flow is
         // `WhileSubscribed`, and collecting it here would pin the whole dashboard hot for as long as
         // the ViewModel lives. This is the notification's read-model — the active room's track and
@@ -341,15 +361,19 @@ class HomepageViewModel(
 
     // Calendar selection (VM-owned, never on the adapter). Months stay pinned to the 1st. Navigating
     // is also the moment to nudge the adapter, for the same reason opening the panel is.
-    fun showPreviousMonth() {
-        _displayedMonth.update { it.minus(1, DateTimeUnit.MONTH) }
+    /**
+     * Show the month [month] falls in — the **one** month-navigation path. The grid is a pager, and a
+     * pager settles on an absolute page rather than on a delta, so this takes the month itself; the
+     * steppers and the screen-reader actions below are thin deltas over it.
+     */
+    fun showMonth(month: LocalDate) {
+        _displayedMonth.value = LocalDate(month.year, month.month.number, 1)
         adapter.refreshCalendar()
     }
 
-    fun showNextMonth() {
-        _displayedMonth.update { it.plus(1, DateTimeUnit.MONTH) }
-        adapter.refreshCalendar()
-    }
+    fun showPreviousMonth() = showMonth(_displayedMonth.value.minus(1, DateTimeUnit.MONTH))
+
+    fun showNextMonth() = showMonth(_displayedMonth.value.plus(1, DateTimeUnit.MONTH))
 
     fun selectDay(date: LocalDate) { _selectedDay.value = date }
 
@@ -365,6 +389,16 @@ class HomepageViewModel(
 
     fun toggleCalendarFilter(sourceId: String) {
         filterStore.write(_calendarFilters.updateAndGet { it.toggle(_calendarView.value, sourceId) })
+    }
+
+    /**
+     * How tall one hour row of the week grid is, in dp — what pinching the grid sets, clamped to what
+     * it can draw. Unlike the filters this is *not* written through on every change: a pinch emits a
+     * value per frame and disk has no use for the ones in between, so the write is debounced (see
+     * [init]).
+     */
+    fun setWeekHourHeight(hourHeightDp: Float) {
+        _weekHourHeight.value = clampWeekHourHeight(hourHeightDp)
     }
 
     /**
@@ -391,20 +425,28 @@ class HomepageViewModel(
     }
 
     /**
-     * Week navigation, which is [_selectedDay] navigation: the week shown is the one the selected day
-     * falls in, so there is no separate week-start state to keep in step. The displayed month follows
-     * along, so toggling back to the month grid lands on the month just been looked at rather than
-     * the one left behind.
+     * Show the week starting [weekStart] — the **one** week-navigation path, [showMonth]'s sibling
+     * and, like it, absolute because the week grid is a pager.
+     *
+     * Week navigation is [_selectedDay] navigation: the week shown is the one the selected day falls
+     * in, so there is no separate week-start state to keep in step. The weekday within the week is
+     * kept, so paging weeks doesn't quietly re-scope the checklist to another day. The displayed
+     * month follows along, so toggling back to the month grid lands on the month just been looked at
+     * rather than the one left behind.
      */
+    fun showWeek(weekStart: LocalDate) {
+        val day = weekStartOf(weekStart).plus(_selectedDay.value.dayOfWeek.isoDayNumber - 1, DateTimeUnit.DAY)
+        _selectedDay.value = day
+        _displayedMonth.value = LocalDate(day.year, day.month.number, 1)
+        adapter.refreshCalendar()
+    }
+
     fun showPreviousWeek() = shiftWeek(-DaysPerWeek)
 
     fun showNextWeek() = shiftWeek(DaysPerWeek)
 
-    private fun shiftWeek(days: Int) {
-        val day = _selectedDay.updateAndGet { it.plus(days, DateTimeUnit.DAY) }
-        _displayedMonth.value = LocalDate(day.year, day.month.number, 1)
-        adapter.refreshCalendar()
-    }
+    private fun shiftWeek(days: Int) =
+        showWeek(weekStartOf(_selectedDay.value).plus(days, DateTimeUnit.DAY))
 
     /**
      * Open a blank event form. Always on **today**, not on the selected day: the "+" is reached from
@@ -515,6 +557,36 @@ class HomepageViewModel(
     fun play(item: BrowseItem) {
         val uri = item.uri ?: return
         startPlay(item) { room -> adapter.play(room, uri, radio = false) }
+    }
+
+    /**
+     * Queue a browse tile behind what the active audio room is already playing — the long-press
+     * actions on a tile. [QueueMode.Next] lands it at the top of the block of user-queued entries,
+     * [QueueMode.Last] at its bottom; neither interrupts the music.
+     *
+     * Deliberately **not** [startPlay]: nothing is starting, so the search query, the artist surface,
+     * a minimized player and any pending play all stay exactly as they are — the browse surface the
+     * long-press came from is where the user still is. With nothing playing there is nothing to queue
+     * behind, and a long-press that produced neither audio nor any visible change would read as a
+     * dropped gesture, so that case falls back to [play].
+     *
+     * Both outcomes are announced: an enqueue changes nothing on screen (the up-next list isn't even
+     * showing when the browse surface is), so the confirmation is the only feedback there is.
+     */
+    fun enqueue(item: BrowseItem, mode: QueueMode) {
+        val uri = item.uri ?: return
+        val room = _activeAudioRoom.value
+        if (nowPlayingOf(room) == null) return play(item)
+        viewModelScope.launch {
+            try {
+                adapter.enqueue(room, uri, mode)
+                showToast(if (mode == QueueMode.Next) PLAY_NEXT_TOAST else ENQUEUED_TOAST)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showToast(ENQUEUE_FAILED_TOAST)
+            }
+        }
     }
 
     /**
@@ -668,6 +740,9 @@ class HomepageViewModel(
         /** Long enough that a typed word issues one search, short enough to feel like live results. */
         const val SEARCH_DEBOUNCE_MS = 350L
 
+        /** How long the week grid's zoom must hold still before it is written to disk. */
+        const val ZOOM_WRITE_DEBOUNCE_MS = 500L
+
         /**
          * How long after a successful play/skip reply to keep the pending state up while the device
          * state catches up. HA echoed the new track within ~0.3s in measurements; this only bounds
@@ -689,6 +764,11 @@ class HomepageViewModel(
         const val GROUP_CHANGE_GRACE_MS = 5_000L
 
         const val PLAY_FAILED_TOAST = "Kunne ikke afspille"
+
+        // Queueing is invisible where it is triggered from, so its *success* is announced too.
+        const val PLAY_NEXT_TOAST = "Afspilles som næste"
+        const val ENQUEUED_TOAST = "Tilføjet til køen"
+        const val ENQUEUE_FAILED_TOAST = "Kunne ikke tilføje til kø"
 
         const val SAVE_FAILED_TOAST = "Kunne ikke gemme"
         const val DELETE_FAILED_TOAST = "Kunne ikke slette"
@@ -726,6 +806,7 @@ private data class CalendarSurfaceSelection(
     val savingEvent: Boolean,
     val filters: CalendarFilters,
     val settingsOpen: Boolean,
+    val weekHourHeight: Float,
 )
 
 /**

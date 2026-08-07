@@ -1,4 +1,4 @@
-package com.mattschoe.smarthome.ui.pages.homepage
+package com.mattschoe.smarthome.ui.controls.calendar
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -63,6 +63,11 @@ import smarthome.shared.generated.resources.edit_filled
  * so, like every other surface in this card, they leave the lights, dial and volume beside them live.
  * The container already clips to the card's rounded rect and insets by its content padding, which is
  * what bounds them to the card.
+ *
+ * Both take a `modifier` for that inset, because the phone's Calendar page floats them over a bare
+ * page with no card padding to inherit — it passes the page's own margins instead. The modifier
+ * insets the *card*, never the scrim: the scrim covers whatever box the popup was emitted into, which
+ * on the phone is the whole page and on the tablet is the card.
  */
 
 /**
@@ -81,6 +86,7 @@ fun BoxScope.EventDetailPopup(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val source = sources.firstOrNull { it.id == event.sourceId }
     val canWrite = source?.canWrite == true && event.uid != null
@@ -88,7 +94,7 @@ fun BoxScope.EventDetailPopup(
 
     PopupScrim(onClose)
     PopupCard(
-        modifier = Modifier
+        modifier = modifier
             .align(Alignment.Center)
             .widthIn(max = Dimensions.eventDetailMaxWidth)
             .heightIn(max = Dimensions.eventDetailMaxHeight),
@@ -202,11 +208,12 @@ fun BoxScope.CalendarSettingsPopup(
     filters: CalendarFilters,
     onToggle: (String) -> Unit,
     onClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val hidden = filters.hidden(view)
     PopupScrim(onClose)
     PopupCard(
-        modifier = Modifier
+        modifier = modifier
             .align(Alignment.TopEnd)
             .offset(y = Dimensions.calendarSettingsTopOffset)
             .widthIn(max = Dimensions.eventDetailMaxWidth)

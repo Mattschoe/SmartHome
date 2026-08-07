@@ -79,6 +79,7 @@ fun PortraitMusicPage(
             spotifyRecentlyPlayed = ready.spotifyRecentlyPlayed,
             onQueryChange = viewModel::setSearchQuery,
             onPlay = viewModel::play,
+            onEnqueue = viewModel::enqueue,
             onOpenArtist = viewModel::openArtist,
             onCloseArtist = viewModel::closeArtist,
             onPlayTopHit = viewModel::playTopHits,
