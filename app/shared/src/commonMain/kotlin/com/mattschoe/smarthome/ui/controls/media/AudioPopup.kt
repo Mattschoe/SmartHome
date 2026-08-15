@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.ui.components.PopupCard
@@ -38,12 +39,19 @@ import smarthome.shared.generated.resources.speaker_outline
 val FloatingStackGap = 8.dp
 
 /** Which trigger the card was dropped from, and so where it hangs. */
-enum class AudioPopupAnchor {
+sealed interface AudioPopupAnchor {
     /** From the browse surface's header — under the search row, at the page's trailing edge. */
-    Header,
+    data object Header : AudioPopupAnchor
 
     /** From the now-playing surface — above the floating disc stack it was opened from. */
-    Transport,
+    data object Transport : AudioPopupAnchor
+
+    /**
+     * From the speaker disc floating over a landscape card's bottom end. [cardWidth] is the card's
+     * own width, which the page measures: the popup's right edge lines up with the disc's rather
+     * than with the page's — the disc sits inside the card's content padding, not the page's margin.
+     */
+    data class Card(val cardWidth: Dp) : AudioPopupAnchor
 }
 
 /**
@@ -88,6 +96,19 @@ fun BoxScope.AudioPopup(
                 .padding(
                     bottom = Dimensions.phonePageBottomClearance +
                         Dimensions.minTouch * 2 + FloatingStackGap * 2,
+                )
+            is AudioPopupAnchor.Card -> Modifier
+                .align(Alignment.BottomEnd)
+                // Lined up with the disc that opened it: the disc hangs at the left card's bottom end,
+                // inside the card's content padding, so the popup's right edge follows it there — the
+                // card and the page gap are shifted off the page's own right edge.
+                .offset(
+                    x = -(anchor.cardWidth + Dimensions.phoneCardGap + Dimensions.phoneCardPaddingH),
+                )
+                // Clears the disc it drops from, which sits [phoneCardPadding] up from the card's
+                // bottom edge (the card itself fills the page's padded area, so no page pad term).
+                .padding(
+                    bottom = Dimensions.phoneCardPadding + Dimensions.minTouch + FloatingStackGap,
                 )
         }.widthIn(max = Dimensions.audioPopupMaxWidth),
     ) {

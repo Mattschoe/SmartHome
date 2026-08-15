@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.ui.components.SectionLabel
+import com.mattschoe.smarthome.ui.components.verticalScrollFade
 import com.mattschoe.smarthome.ui.theme.ArtScrim
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
@@ -47,8 +50,12 @@ import smarthome.shared.generated.resources.equalizer_filled
  * While [loading] (a tapped item whose stream Music Assistant is still resolving) the art carries a
  * spinner and every control is inert — the surface is pure feedback until the real track arrives.
  *
- * The art/scrubber/transport block is pinned; only [UpNextSection] scrolls, so reaching down the queue
- * never pushes the controls out of view.
+ * By default the art/scrubber/transport block is pinned and only [UpNextSection] scrolls, so reaching
+ * down the queue never pushes the controls out of view. [wholeSurfaceScroll] is the landscape music
+ * card's arrangement — the whole surface scrolls as one column, and scrolling down the queue pushes
+ * the art and transport off the top. The queue then renders as a plain column ([UpNextSection]'s
+ * wrap-content form) that the same outer scroll moves, since a lazy list cannot be measured under a
+ * `verticalScroll`.
  */
 @Composable
 fun NowPlayingSurface(
@@ -67,9 +74,19 @@ fun NowPlayingSurface(
     onMoveQueueItem: (String, Int) -> Unit,
     modifier: Modifier = Modifier,
     layout: MediaLayout = MediaLayout.Tablet,
+    wholeSurfaceScroll: Boolean = false,
 ) {
-    Column(modifier.fillMaxSize()) {
-        val positionSec = if (loading) 0 else rememberLivePositionSec(audioState, track)
+    val positionSec = if (loading) 0 else rememberLivePositionSec(audioState, track)
+    val scrollState = rememberScrollState()
+    Column(
+        modifier.fillMaxSize().then(
+            if (wholeSurfaceScroll) {
+                Modifier.verticalScrollFade(scrollState).verticalScroll(scrollState)
+            } else {
+                Modifier
+            },
+        ),
+    ) {
         when (layout) {
             MediaLayout.Tablet -> TabletNowPlayingHeader(
                 track = track,
@@ -101,7 +118,13 @@ fun NowPlayingSurface(
             // hold a loader instead of showing them (or the freshly played track itself) as "up next".
             loading || queueRefreshing -> {
                 Spacer(Modifier.height(Dimensions.mediaSectionGap))
-                UpNextLoader(modifier = Modifier.weight(1f))
+                UpNextLoader(
+                    modifier = if (wholeSurfaceScroll) {
+                        Modifier.fillMaxWidth().height(120.dp)
+                    } else {
+                        Modifier.weight(1f)
+                    },
+                )
             }
             audioState.queue.isNotEmpty() -> {
                 Spacer(Modifier.height(Dimensions.mediaSectionGap))
@@ -111,7 +134,8 @@ fun NowPlayingSurface(
                     pendingQueueItemId = pendingQueueItemId,
                     onPlayQueueItem = onPlayQueueItem,
                     onMoveQueueItem = onMoveQueueItem,
-                    modifier = Modifier.weight(1f),
+                    fillRemaining = !wholeSurfaceScroll,
+                    modifier = if (wholeSurfaceScroll) Modifier.fillMaxWidth() else Modifier.weight(1f),
                 )
             }
         }

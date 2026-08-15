@@ -102,8 +102,10 @@ private fun WarmthSwatch(warmth: Warmth, selected: Boolean, onSelect: () -> Unit
  * to spend and no room for the swatch row's horizontal spread. Same state, same effect as
  * [WarmthSwatches]: selecting a row recolors the dial and turns the light on.
  *
- * The selected row reads as raised purely through white-on-cream plus a border in its own warmth
- * color; it carries **no** elevation and is the same height as its siblings, matching the mock.
+ * Each row is a solid bar in its warmth color with nothing drawn inside it — no dot, no label, no
+ * check: the color alone is the option, and the row is deliberately bare. Selection reads through a
+ * thicker, darker border in the row's own color; the row carries no elevation and keeps its height,
+ * so the list doesn't reflow as the selection moves.
  */
 @Composable
 fun WarmthRows(
@@ -141,6 +143,6 @@ private fun WarmthRow(warmth: Warmth, selected: Boolean, onSelect: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-
+        // Deliberately empty: the row is a bare color bar, and the warmth color itself is the option.
     }
 }
