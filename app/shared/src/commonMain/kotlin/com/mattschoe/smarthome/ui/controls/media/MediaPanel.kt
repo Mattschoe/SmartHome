@@ -74,17 +74,10 @@ fun MediaPanel(
     headerTrailing: (@Composable () -> Unit)? = null,
 ) {
     // A pending play paints the tapped item as the (loading) now-playing track right away — the real
-    // track takes several seconds to arrive, and this surface is the feedback for the tap.
-    val pendingTrack = pendingPlay?.let {
-        MediaTrack(
-            title = it.title,
-            artist = it.subtitle.orEmpty(),
-            album = null,
-            artworkUrl = it.artworkUrl,
-            durationSec = 0,
-        )
-    }
-    val track = pendingTrack ?: rememberLatchedTrack(audioState.nowPlaying)
+    // track takes several seconds to arrive, and this surface is the feedback for the tap. The same
+    // synthesis feeds the landscape music card, so the loading feedback is identical on both.
+    val pending = pendingTrack(pendingPlay)
+    val track = pending ?: rememberLatchedTrack(audioState.nowPlaying)
     val hasTrack = pendingPlay != null || audioState.nowPlaying != null
     val surface = when {
         artist != null -> MediaSurface.Artist
@@ -153,4 +146,20 @@ fun MediaPanel(
             )
         }
     }
+}
+
+/**
+ * The synthetic now-playing track for a play request in flight: a copy of the tapped browse item's
+ * title/artist/artwork, so the tapped tile reads as a (loading) now-playing surface until the real
+ * track arrives (see [PendingPlay]). Shared by [MediaPanel] and the landscape music card, so the
+ * loading feedback is identical on both surfaces.
+ */
+internal fun pendingTrack(pendingPlay: PendingPlay?): MediaTrack? = pendingPlay?.let {
+    MediaTrack(
+        title = it.title,
+        artist = it.subtitle.orEmpty(),
+        album = null,
+        artworkUrl = it.artworkUrl,
+        durationSec = 0,
+    )
 }

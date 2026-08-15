@@ -40,6 +40,9 @@ import org.jetbrains.compose.resources.painterResource
  * [selectedColor] overrides the fill of a **selected** pill, for the one selection that is about a
  * colour: the editor's calendar chips, which fill with the calendar's own. The text follows it
  * through [onCalendarColor], since half the palette is far too light to carry cream.
+ *
+ * [compact] is the landscape light card's room pills — a step down from the 44dp chip (height,
+ * side padding, type) so the fixed card fits without scrolling. Everything else keeps the full size.
  */
 @Composable
 fun PillChip(
@@ -50,6 +53,7 @@ fun PillChip(
     leadingIcon: DrawableResource? = null,
     contentColor: Color? = null,
     selectedColor: Color = Forest,
+    compact: Boolean = false,
 ) {
     val shape = RoundedCornerShape(percent = 50)
     val resolvedContentColor =
@@ -64,8 +68,8 @@ fun PillChip(
             .clip(shape)
             .then(base)
             .selectable(selected = selected, onClick = onClick, role = Role.Tab)
-            .heightIn(min = Dimensions.minTouch)
-            .padding(horizontal = 18.dp),
+            .heightIn(min = if (compact) Dimensions.phonePillMinHeight else Dimensions.minTouch)
+            .padding(horizontal = if (compact) Dimensions.phonePillHorizontalPadding else 18.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -74,14 +78,14 @@ fun PillChip(
                 painter = painterResource(leadingIcon),
                 contentDescription = null,
                 tint = resolvedContentColor,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(if (compact) 18.dp else 20.dp)
             )
         }
         Text(
             text = text,
             color = resolvedContentColor,
             fontWeight = FontWeight.Medium,
-            fontSize = 17.sp,
+            fontSize = if (compact) Dimensions.phonePillTextSize else 17.sp,
         )
     }
 }

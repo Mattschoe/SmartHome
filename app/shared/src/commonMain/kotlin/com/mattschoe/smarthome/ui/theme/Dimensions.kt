@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.ui.theme
 
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.WeekHourHeightRange
 
 /** Shared geometry tokens so no composable hardcodes a corner radius or hit-target size. */
@@ -55,14 +56,13 @@ object Dimensions {
     val warmthHaloRingWidth = 3.dp
 
     // The phone's warmth rows (the same presets as the swatches above, laid out as a full-width list).
-    // Selection thickens the border and adds the check badge; the row height never changes, so the list
-    // doesn't reflow as the selection moves. Measured off mobile_phone_layout/vertical/homepage.png.
+    // A row is a bare bar in its warmth color — the color alone is the option, no dot/label/check
+    // glyphs. Selection thickens and darkens its border; the row height never changes, so the list
+    // doesn't reflow as the selection moves.
     val warmthRowHeight = 52.dp
     val warmthRowRadius = 14.dp
     val warmthRowGap = 10.dp
     val warmthRowInset = 15.dp
-    val warmthRowDot = 26.dp
-    val warmthRowCheck = 36.dp
     val warmthRowBorder = 1.dp
     val warmthRowSelectedBorder = 1.5.dp
 
@@ -225,6 +225,17 @@ object Dimensions {
     // its two cards on the sage surface, which is why there is no portrait equivalent of the gap.
     val phoneSurfacePad = 14.dp
     val phoneCardGap = 24.dp
+    // The landscape cards' inner padding: one value for the light/utility cards, and a tighter
+    // horizontal inset for the music cards, which pack art + text + queue into the same width.
+    // The speaker disc and its audio popup hang off [phoneCardPadding] too (see AudioPopup).
+    val phoneCardPadding = 18.dp
+    val phoneCardPaddingH = 14.dp
+    // The landscape light card's room pills — a step down from the 44dp chips so the card's fixed
+    // content (chips, dial, readout) fits without scrolling. 36dp still clears most touch guidance,
+    // and it is what the fixed card needs; the tablet's chips are untouched.
+    val phonePillMinHeight = 36.dp
+    val phonePillHorizontalPadding = 12.dp
+    val phonePillTextSize = 15.sp
     val phonePagePad = 24.dp
     // A portrait page pads itself rather than being padded by the pager, so a control can still run to
     // the screen edge. [phonePageTopPad] sits under the status-bar inset; [phonePageBottomClearance]

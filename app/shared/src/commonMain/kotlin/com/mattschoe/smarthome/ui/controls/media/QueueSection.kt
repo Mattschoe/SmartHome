@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,7 +60,9 @@ import smarthome.shared.generated.resources.music_note_filled
  *
  * It is the only scrolling part of the now-playing surface (art, scrubber and transport stay pinned
  * above it), so it fills whatever height is left and drag auto-scroll carries a picked-up row past
- * the bottom of that short viewport.
+ * the bottom of that short viewport. [fillRemaining] drops that contract: the landscape music card
+ * wraps the whole surface in one scroll instead, so it renders [UpNextColumn] — a plain column the
+ * outer scroll can own (see there for what the drag gesture trades away).
  */
 @Composable
 fun UpNextSection(
@@ -69,7 +72,12 @@ fun UpNextSection(
     onPlayQueueItem: (String) -> Unit,
     onMoveQueueItem: (String, Int) -> Unit,
     modifier: Modifier = Modifier,
+    fillRemaining: Boolean = true,
 ) {
+    if (!fillRemaining) {
+        UpNextColumn(queue, enabled, pendingQueueItemId, onPlayQueueItem, modifier)
+        return
+    }
     // Skipping to a row takes Music Assistant seconds of stream resolution; while one skip is in
     // flight the tapped row spins and the whole list stops accepting taps — a re-tap of a row that
     // hasn't visibly reacted is a retry, not a new intent.
@@ -131,6 +139,55 @@ fun UpNextSection(
         }
     }
 }
+
+/**
+ * The whole-surface-scroll arrangement of the up-next list: the same rows as [UpNextSection], but in
+ * a plain column that the surface's own scroll moves. A [LazyColumn] cannot sit under a
+ * `verticalScroll` — it is measured with infinite height and throws — and the outer scroll already
+ * owns paging, so there is nothing to virtualize (the queue is bounded, and every row renders).
+ *
+ * The long-press drag-reorder gesture does not survive this arrangement — it is a lazy-list gesture
+ * that needs the list's own scroll (drag auto-scroll is what moves a row past the viewport's edge).
+ * The rows keep the tap-to-skip and the per-row loading spinner; the tablet and portrait surfaces
+ * keep the full gesture set. The bottom clearance plays the same role as the lazy list's: the last
+ * row can scroll clear of the speaker disc floating over the landscape card's bottom end.
+ */
+@Composable
+private fun UpNextColumn(
+    queue: List<MediaTrack>,
+    enabled: Boolean,
+    pendingQueueItemId: String?,
+    onPlayQueueItem: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Same rule as the lazy list: while a skip is in flight the tapped row spins and the rest stop
+    // accepting taps — a re-tap of a row that hasn't visibly reacted is a retry, not a new intent.
+    val tapsBlocked = !enabled || pendingQueueItemId != null
+    Column(modifier.fillMaxWidth()) {
+        SectionLabel("Up next")
+        Spacer(Modifier.height(12.dp))
+        Column(
+            modifier = Modifier.padding(bottom = Dimensions.minTouch),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            queue.forEachIndexed { index, track ->
+                val queueItemId = track.queueItemId
+                QueueRow(
+                    index = index,
+                    track = track,
+                    dragging = false,
+                    loading = queueItemId != null && queueItemId == pendingQueueItemId,
+                    modifier = Modifier
+                        .clickable(enabled = queueItemId != null && !tapsBlocked) {
+                            queueItemId?.let(onPlayQueueItem)
+                        }
+                        .semantics { if (queueItemId != null) contentDescription = "Afspil ${track.title}" },
+                )
+            }
+        }
+    }
+}
+
 
 /** List/reorder identity, matching `DashboardLogic`'s handle convention for the fixture tracks. */
 private fun MediaTrack.queueKey(): String = queueItemId ?: title

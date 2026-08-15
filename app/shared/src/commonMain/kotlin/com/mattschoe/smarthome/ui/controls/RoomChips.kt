@@ -21,10 +21,16 @@ import org.jetbrains.compose.resources.DrawableResource
 /** Gap between room chips, shared by both arrangements. */
 private val ChipGap = 10.dp
 
+/** The wrapping row's gap in the compact (landscape light card) size. */
+private val ChipGapCompact = 8.dp
+
 /**
  * A wrapping row of room pill toggles — the tablet arrangement, where every chip fits the card. Used
  * for both the light selector (all [Room.entries]) and the AUDIO selector ([Room.audioRooms] with a
  * speaker [leadingIcon]); selecting swaps that section's state via [activeRoom].
+ *
+ * [compact] shrinks the chips (see [PillChip]) and tightens the row's gaps — the landscape light
+ * card's arrangement, where the fixed card needs the room the full-size row would take.
  */
 @Composable
 fun WrappingRoomChips(
@@ -33,11 +39,15 @@ fun WrappingRoomChips(
     onSelectRoom: (Room) -> Unit,
     modifier: Modifier = Modifier,
     leadingIcon: DrawableResource? = null,
+    compact: Boolean = false,
 ) {
     FlowRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(ChipGap, Alignment.CenterHorizontally),
-        verticalArrangement = Arrangement.spacedBy(ChipGap),
+        horizontalArrangement = Arrangement.spacedBy(
+            if (compact) ChipGapCompact else ChipGap,
+            Alignment.CenterHorizontally,
+        ),
+        verticalArrangement = Arrangement.spacedBy(if (compact) ChipGapCompact else ChipGap),
     ) {
         rooms.forEach { room ->
             PillChip(
@@ -45,6 +55,7 @@ fun WrappingRoomChips(
                 selected = room == activeRoom,
                 onClick = { onSelectRoom(room) },
                 leadingIcon = leadingIcon,
+                compact = compact,
             )
         }
     }
