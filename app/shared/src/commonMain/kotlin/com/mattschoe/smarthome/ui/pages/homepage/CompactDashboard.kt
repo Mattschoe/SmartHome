@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.ui.components.PageIndicator
@@ -54,6 +55,12 @@ private const val LANDSCAPE_CALENDAR_PAGE = 2
 /**
  * Portrait: four horizontally paged screens on a full-bleed cream surface — no floating card, the
  * content sits directly on the page. The dot row floats bottom-centre over it.
+ *
+ * `Ready` is destructured into the narrow slices each page reads, mirroring the Expanded assembly in
+ * Homepage.kt — never handed to the pages whole. A change anywhere else in `Ready` then leaves a
+ * composed page skippable (its params are unchanged), instead of re-composing every page on every
+ * emission. The calendar's derived collections ([HomeScreenState.Ready.dayMarks] and friends) are
+ * lazy, and only the calendar branch reads them, so they stay uncomputed while the page is not up.
  */
 @Composable
 private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewModel) {
@@ -80,23 +87,71 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
     Box(Modifier.fillMaxSize().background(Card)) {
         HorizontalPager(
             state = pagerState,
+            // The neighbouring page is composed before the drag reaches it, so the first swipe into
+            // Music doesn't build the whole browse tree on the drag's first frame. The pages can
+            // afford to stay composed because they skip when their slices haven't changed.
+            beyondViewportPageCount = 1,
             // The editor's fields are `remember(target)`-local, so swiping away would silently discard
             // what has been typed. Its own back arrow is the way out.
             userScrollEnabled = ready.eventEditor == null,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            PortraitPage(
-                page = page,
-                ready = ready,
-                viewModel = viewModel,
-                // Insets are applied here rather than around the pager so a page's content clears the
-                // status bar and gesture pill while the pager itself still spans the whole screen.
-                // The side margin is deliberately *not* applied here: a page that runs a control to the
-                // screen edge (the light page's chip row) needs the full width, so each page pads itself.
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
-            )
+            // Only the composed pages' branches run, so the calendar branch's lazy derivations are
+            // only forced when the calendar page is actually up.
+            val modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+            when (page) {
+                0 -> PortraitAppsPage(modifier)
+                1 -> PortraitLightPage(
+                    activeLightRoom = ready.activeLightRoom,
+                    lightRoomState = ready.lightRoomState,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+                2 -> PortraitMusicPage(
+                    audioRoom = ready.activeAudioRoom,
+                    audioState = ready.audioState,
+                    mediaMinimized = ready.mediaMinimized,
+                    searchQuery = ready.searchQuery,
+                    search = ready.search,
+                    pendingPlay = ready.pendingPlay,
+                    pendingQueueItemId = ready.pendingQueueItemId,
+                    queueRefreshing = ready.queueRefreshing,
+                    artist = ready.artist,
+                    musicSource = ready.musicSource,
+                    playlists = ready.playlists,
+                    quickPicks = ready.quickPicks,
+                    mixedForYou = ready.mixedForYou,
+                    spotifyPlaylists = ready.spotifyPlaylists,
+                    spotifyRecentlyPlayed = ready.spotifyRecentlyPlayed,
+                    joinTarget = ready.joinTarget,
+                    audioJoined = ready.audioJoined,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+                else -> PortraitCalendarPage(
+                    calendar = ready.calendar,
+                    eventEditor = ready.eventEditor,
+                    savingEvent = ready.savingEvent,
+                    today = ready.today,
+                    displayedMonth = ready.displayedMonth,
+                    selectedDay = ready.selectedDay,
+                    calendarView = ready.calendarView,
+                    eventsByDay = ready.eventsByDay,
+                    selectedDayTodos = ready.selectedDayTodos,
+                    weekDays = ready.weekDays,
+                    calendarWindow = ready.calendarWindow,
+                    nowMinutes = ready.nowMinutes,
+                    dayMarks = ready.dayMarks,
+                    weekHourHeight = ready.weekHourHeight,
+                    eventDetail = ready.eventDetail,
+                    calendarSettingsOpen = ready.calendarSettingsOpen,
+                    calendarFilters = ready.calendarFilters,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+            }
         }
         PageIndicator(
             state = pagerState,
@@ -125,7 +180,8 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
 /**
  * Landscape: three vertically paged screens on the sage surface, each holding two equal cream
  * [CardContainer]s — literally the tablet's card. The indicator floats in the right-hand margin beside
- * them, so the cards keep the full width between the outer paddings.
+ * them, so the cards keep the full width between the outer paddings. Same narrow-slice destructuring
+ * as the portrait pager.
  */
 @Composable
 private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageViewModel) {
@@ -148,24 +204,71 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
     Box(Modifier.fillMaxSize().background(SageSurface)) {
         VerticalPager(
             state = pagerState,
+            // The neighbouring page is composed before the drag reaches it, so the first swipe
+            // doesn't build the page's whole tree on the drag's first frame.
+            beyondViewportPageCount = 1,
             // The editor's fields are `remember(target)`-local, so swiping away would silently discard
             // what has been typed. Its own back arrow is the way out.
             userScrollEnabled = ready.eventEditor == null,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            LandscapePage(
-                page = page,
-                ready = ready,
-                viewModel = viewModel,
-                // Insets are applied here rather than around the pager so a page's content clears the
-                // status bar and gesture pill while the pager itself still spans the whole screen. The
-                // side margin is applied here too — unlike the portrait pages, no landscape control
-                // runs to the screen edge, so the pages can share one padded modifier.
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(Dimensions.phoneSurfacePad),
-            )
+            // Insets are applied here rather than around the pager so a page's content clears the
+            // status bar and gesture pill while the pager itself still spans the whole screen. The
+            // side margin is applied here too — unlike the portrait pages, no landscape control runs
+            // to the screen edge, so the pages can share one padded modifier.
+            val modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(Dimensions.phoneSurfacePad)
+            when (page) {
+                0 -> LandscapeHomePage(
+                    activeLightRoom = ready.activeLightRoom,
+                    lightRoomState = ready.lightRoomState,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+                1 -> LandscapeMusicPage(
+                    audioRoom = ready.activeAudioRoom,
+                    audioState = ready.audioState,
+                    pendingPlay = ready.pendingPlay,
+                    pendingQueueItemId = ready.pendingQueueItemId,
+                    queueRefreshing = ready.queueRefreshing,
+                    artist = ready.artist,
+                    searchQuery = ready.searchQuery,
+                    search = ready.search,
+                    musicSource = ready.musicSource,
+                    playlists = ready.playlists,
+                    quickPicks = ready.quickPicks,
+                    mixedForYou = ready.mixedForYou,
+                    spotifyPlaylists = ready.spotifyPlaylists,
+                    spotifyRecentlyPlayed = ready.spotifyRecentlyPlayed,
+                    joinTarget = ready.joinTarget,
+                    audioJoined = ready.audioJoined,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+                else -> LandscapeCalendarPage(
+                    calendar = ready.calendar,
+                    eventEditor = ready.eventEditor,
+                    savingEvent = ready.savingEvent,
+                    today = ready.today,
+                    displayedMonth = ready.displayedMonth,
+                    selectedDay = ready.selectedDay,
+                    calendarView = ready.calendarView,
+                    eventsByDay = ready.eventsByDay,
+                    selectedDayTodos = ready.selectedDayTodos,
+                    weekDays = ready.weekDays,
+                    calendarWindow = ready.calendarWindow,
+                    nowMinutes = ready.nowMinutes,
+                    dayMarks = ready.dayMarks,
+                    weekHourHeight = ready.weekHourHeight,
+                    eventDetail = ready.eventDetail,
+                    calendarSettingsOpen = ready.calendarSettingsOpen,
+                    calendarFilters = ready.calendarFilters,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+            }
         }
         PageIndicator(
             state = pagerState,
@@ -189,36 +292,5 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(bottom = Dimensions.phoneSurfacePad),
         )
-    }
-}
-
-/** One portrait screen. */
-@Composable
-private fun PortraitPage(
-    page: Int,
-    ready: HomeScreenState.Ready,
-    viewModel: HomepageViewModel,
-    modifier: Modifier = Modifier,
-) {
-    when (page) {
-        0 -> PortraitAppsPage(modifier)
-        1 -> PortraitLightPage(ready, viewModel, modifier)
-        2 -> PortraitMusicPage(ready, viewModel, modifier)
-        else -> PortraitCalendarPage(ready, viewModel, modifier)
-    }
-}
-
-/** One landscape screen's pair of cards, laid out by the page that owns it. */
-@Composable
-private fun LandscapePage(
-    page: Int,
-    ready: HomeScreenState.Ready,
-    viewModel: HomepageViewModel,
-    modifier: Modifier = Modifier,
-) {
-    when (page) {
-        0 -> LandscapeHomePage(ready, viewModel, modifier)
-        1 -> LandscapeMusicPage(ready, viewModel, modifier)
-        else -> LandscapeCalendarPage(ready, viewModel, modifier)
     }
 }

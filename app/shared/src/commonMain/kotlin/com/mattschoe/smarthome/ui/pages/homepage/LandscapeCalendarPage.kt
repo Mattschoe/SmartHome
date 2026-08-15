@@ -11,7 +11,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
@@ -20,6 +24,7 @@ import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
 import com.mattschoe.smarthome.ui.theme.Dimensions
+import kotlinx.datetime.LocalDate
 
 /**
  * Landscape page 3 — Utility. The reserved Apps slot beside the calendar, which works exactly like
@@ -32,10 +37,29 @@ import com.mattschoe.smarthome.ui.theme.Dimensions
  * The left card is the same reserved slot as the portrait Apps page and the tablet's `AppsCard`:
  * a section label over blank space, since there is no app model, tile composable or icon set
  * anywhere in the tree — apps land on all three surfaces in one later pass.
+ *
+ * Takes the narrow slices it reads rather than the whole [HomeScreenState.Ready] — the phone pagers
+ * destructure, so a page whose slices didn't change skips recomposition entirely.
  */
 @Composable
 fun LandscapeCalendarPage(
-    ready: HomeScreenState.Ready,
+    calendar: CalendarState,
+    eventEditor: EventEditorTarget?,
+    savingEvent: Boolean,
+    today: LocalDate,
+    displayedMonth: LocalDate,
+    selectedDay: LocalDate,
+    calendarView: CalendarView,
+    eventsByDay: Map<LocalDate, List<CalendarEvent>>,
+    selectedDayTodos: List<TodoItem>,
+    weekDays: List<LocalDate>,
+    calendarWindow: ClosedRange<LocalDate>,
+    nowMinutes: Int,
+    dayMarks: Map<LocalDate, DayMarks>,
+    weekHourHeight: Float,
+    eventDetail: CalendarEvent?,
+    calendarSettingsOpen: Boolean,
+    calendarFilters: CalendarFilters,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
@@ -63,26 +87,26 @@ fun LandscapeCalendarPage(
                 // The month/week pagers nest safely under the page's vertical pager — the axes don't
                 // collide at all, which is simpler than the portrait case.
                 CalendarPanel(
-                    eventEditor = ready.eventEditor,
-                    savingEvent = ready.savingEvent,
-                    today = ready.today,
-                    displayedMonth = ready.displayedMonth,
-                    selectedDay = ready.selectedDay,
+                    eventEditor = eventEditor,
+                    savingEvent = savingEvent,
+                    today = today,
+                    displayedMonth = displayedMonth,
+                    selectedDay = selectedDay,
                     // Week view, always — the phone's calendar is week-only. The settle effect keeps
                     // the *state* in week too, so the event filtering (`visibleEvents`) matches the
                     // week grid that is drawn here; forcing it at the panel is the belt-and-braces
                     // that makes the month grid unreachable on this page no matter what the state is.
                     calendarView = CalendarView.Week,
-                    eventsByDay = ready.eventsByDay,
-                    selectedDayTodos = ready.selectedDayTodos,
-                    weekDays = ready.weekDays,
-                    calendarWindow = ready.calendarWindow,
-                    nowMinutes = ready.nowMinutes,
-                    calendarSources = ready.calendar.sources,
-                    calendarStale = ready.calendar.stale,
-                    calendarHasTodoList = ready.calendar.hasTodoList,
-                    dayMarks = ready.dayMarks,
-                    weekHourHeight = ready.weekHourHeight,
+                    eventsByDay = eventsByDay,
+                    selectedDayTodos = selectedDayTodos,
+                    weekDays = weekDays,
+                    calendarWindow = calendarWindow,
+                    nowMinutes = nowMinutes,
+                    calendarSources = calendar.sources,
+                    calendarStale = calendar.stale,
+                    calendarHasTodoList = calendar.hasTodoList,
+                    dayMarks = dayMarks,
+                    weekHourHeight = weekHourHeight,
                     onShowMonth = viewModel::showMonth,
                     onShowWeek = viewModel::showWeek,
                     onSelectDay = viewModel::selectDay,
@@ -99,7 +123,7 @@ fun LandscapeCalendarPage(
                     // blank form would discard what is typed.
                     headerTrailing = {
                         CalendarSettingsButton(viewModel::openCalendarSettings)
-                        if (ready.eventEditor == null) AddEventButton(viewModel::openNewEvent)
+                        if (eventEditor == null) AddEventButton(viewModel::openNewEvent)
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -110,21 +134,21 @@ fun LandscapeCalendarPage(
         // a popup remembered down there would scroll away from the control that opened it. The
         // detail card centres over the right card — the offset moves the page's centre across the
         // left card and the gap, where the calendar card's centre sits.
-        ready.eventDetail?.let { event ->
+        eventDetail?.let { event ->
             EventDetailPopup(
                 event = event,
-                sources = ready.calendar.sources,
+                sources = calendar.sources,
                 onEdit = viewModel::editEventDetail,
                 onDelete = viewModel::deleteEventDetail,
                 onClose = viewModel::closeEventDetail,
                 modifier = Modifier.offset(x = (cardWidth + Dimensions.phoneCardGap) / 2),
             )
         }
-        if (ready.calendarSettingsOpen) {
+        if (calendarSettingsOpen) {
             CalendarSettingsPopup(
-                view = ready.calendarView,
-                sources = ready.calendar.sources,
-                filters = ready.calendarFilters,
+                view = calendarView,
+                sources = calendar.sources,
+                filters = calendarFilters,
                 onToggle = viewModel::toggleCalendarFilter,
                 onClose = viewModel::closeCalendarSettings,
                 // Its own drop is measured from the header row, so only the card's content inset is

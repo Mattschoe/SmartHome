@@ -232,11 +232,15 @@ sealed interface HomeScreenState {
          * `calendar.events`, so hiding a calendar hides it from all of what the view shows: in month
          * view the grid's dots **and** the agenda list, in week view the blocks **and** the all-day
          * chips.
+         *
+         * Cached (`by lazy`): several consumers read it per composition, and every read re-derived
+         * a fresh list before. Equality is unaffected — lazy fields are not constructor params.
          */
-        private val visibleEvents: List<CalendarEvent>
-            get() = calendarFilters.hidden(calendarView).let { hidden ->
+        private val visibleEvents: List<CalendarEvent> by lazy {
+            calendarFilters.hidden(calendarView).let { hidden ->
                 if (hidden.isEmpty()) calendar.events else calendar.events.filterNot { it.sourceId in hidden }
             }
+        }
 
         /**
          * Every event the showing view may draw, grouped by day, in `sortCalendarEvents` order (the
@@ -246,21 +250,23 @@ sealed interface HomeScreenState {
          * a pager composes its neighbours, so each page slices the days it draws out of this one
          * grouping rather than each needing its own derivation.
          */
-        val eventsByDay: Map<LocalDate, List<CalendarEvent>> get() = visibleEvents.groupBy { it.date }
+        val eventsByDay: Map<LocalDate, List<CalendarEvent>> by lazy { visibleEvents.groupBy { it.date } }
 
         /** Read-only events bound to [selectedDay] (the agenda list). */
         val selectedDayEvents: List<CalendarEvent> get() = eventsByDay[selectedDay].orEmpty()
 
         /** Todos bound to [selectedDay] (the checklist), unfinished ones first. */
-        val selectedDayTodos: List<TodoItem>
-            get() = sortTodos(calendar.todos.filter { it.due == selectedDay })
+        val selectedDayTodos: List<TodoItem> by lazy {
+            sortTodos(calendar.todos.filter { it.due == selectedDay })
+        }
 
         /** Monday of the week [selectedDay] falls in — the week view's first column. */
         val weekStart: LocalDate get() = weekStartOf(selectedDay)
 
         /** The week view's seven columns, Monday first. */
-        val weekDays: List<LocalDate>
-            get() = weekStart.let { start -> List(DaysPerWeek) { start.plus(it, DateTimeUnit.DAY) } }
+        val weekDays: List<LocalDate> by lazy {
+            weekStart.let { start -> List(DaysPerWeek) { start.plus(it, DateTimeUnit.DAY) } }
+        }
 
         /**
          * The span the adapter holds events for, around [today] — the range both view pagers are
@@ -274,19 +280,18 @@ sealed interface HomeScreenState {
          * each page looks its own days up here. Calendars are listed in `calendar.sources` order so a
          * day's dots keep the same left-to-right identity from one month to the next.
          */
-        val dayMarks: Map<LocalDate, DayMarks>
-            get() {
-                val sourceOrder = calendar.sources.withIndex().associate { (i, source) -> source.id to i }
-                val sourcesByDay = mutableMapOf<LocalDate, MutableSet<String>>()
-                visibleEvents.forEach { sourcesByDay.getOrPut(it.date) { mutableSetOf() } += it.sourceId }
-                val todoDays = calendar.todos.mapTo(mutableSetOf()) { it.due }
-                return (sourcesByDay.keys + todoDays).associateWith { date ->
-                    DayMarks(
-                        // An id no source claims (a cached event from a since-removed calendar) sorts last.
-                        sourceIds = sourcesByDay[date].orEmpty().sortedBy { sourceOrder[it] ?: Int.MAX_VALUE },
-                        hasTodo = date in todoDays,
-                    )
-                }
+        val dayMarks: Map<LocalDate, DayMarks> by lazy {
+            val sourceOrder = calendar.sources.withIndex().associate { (i, source) -> source.id to i }
+            val sourcesByDay = mutableMapOf<LocalDate, MutableSet<String>>()
+            visibleEvents.forEach { sourcesByDay.getOrPut(it.date) { mutableSetOf() } += it.sourceId }
+            val todoDays = calendar.todos.mapTo(mutableSetOf()) { it.due }
+            (sourcesByDay.keys + todoDays).associateWith { date ->
+                DayMarks(
+                    // An id no source claims (a cached event from a since-removed calendar) sorts last.
+                    sourceIds = sourcesByDay[date].orEmpty().sortedBy { sourceOrder[it] ?: Int.MAX_VALUE },
+                    hasTodo = date in todoDays,
+                )
             }
+        }
     }
 }

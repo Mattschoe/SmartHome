@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.model.Room
+import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.controls.BrightnessDial
 import com.mattschoe.smarthome.ui.controls.WarmthRows
@@ -39,14 +40,15 @@ import com.mattschoe.smarthome.ui.theme.Ink
  */
 @Composable
 fun LandscapeHomePage(
-    ready: HomeScreenState.Ready,
+    activeLightRoom: Room,
+    lightRoomState: RoomState,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
-    // Captured once, per the Expanded assembly convention in Homepage.kt: the callbacks stay bound to
-    // the room that was on screen when they were created.
-    val lightRoom = ready.activeLightRoom
-    val roomState = ready.lightRoomState
+    // The narrow-slice param names, bound once: the callbacks stay bound to the room that was on
+    // screen when they were created.
+    val lightRoom = activeLightRoom
+    val roomState = lightRoomState
 
     Row(
         modifier = modifier.fillMaxSize(),

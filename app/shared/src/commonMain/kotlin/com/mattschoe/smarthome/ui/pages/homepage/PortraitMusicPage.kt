@@ -18,6 +18,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.mattschoe.smarthome.data.cycle
+import com.mattschoe.smarthome.data.model.AudioState
+import com.mattschoe.smarthome.data.model.BrowseItem
+import com.mattschoe.smarthome.data.model.MusicSource
+import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.ui.controls.media.AudioPopup
 import com.mattschoe.smarthome.ui.controls.media.AudioPopupAnchor
 import com.mattschoe.smarthome.ui.controls.media.FloatingStackGap
@@ -42,15 +46,26 @@ import com.mattschoe.smarthome.ui.theme.Dimensions
  */
 @Composable
 fun PortraitMusicPage(
-    ready: HomeScreenState.Ready,
+    audioRoom: Room,
+    audioState: AudioState,
+    mediaMinimized: Boolean,
+    searchQuery: String,
+    search: SearchState,
+    pendingPlay: PendingPlay?,
+    pendingQueueItemId: String?,
+    queueRefreshing: Boolean,
+    artist: ArtistUiState?,
+    musicSource: MusicSource,
+    playlists: List<BrowseItem>,
+    quickPicks: List<BrowseItem>,
+    mixedForYou: List<BrowseItem>,
+    spotifyPlaylists: List<BrowseItem>,
+    spotifyRecentlyPlayed: List<BrowseItem>,
+    joinTarget: Room?,
+    audioJoined: Boolean,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
-    // Captured once, like the Expanded assembly in Homepage.kt: a new `Ready` lands on every state
-    // change, and capturing the room/audio directly keeps the callbacks' identity stable across them.
-    val audioRoom = ready.activeAudioRoom
-    val audioState = ready.audioState
-
     // Transient and phone-only, with no consumer outside this page — the precedent is the week view's
     // all-day strip. `activeAudioRoom` itself stays ViewModel-owned, per the CORE RULE.
     var audioPopupOpen by remember { mutableStateOf(false) }
@@ -59,24 +74,24 @@ fun PortraitMusicPage(
     val hasTrack = audioState.nowPlaying != null
     // The now-playing surface is up and settled: the two discs float over it, and the popup drops from
     // them rather than from the search row that isn't there.
-    val onNowPlaying = hasTrack && !ready.mediaMinimized && ready.artist == null && ready.pendingPlay == null
+    val onNowPlaying = hasTrack && !mediaMinimized && artist == null && pendingPlay == null
 
     Box(modifier.fillMaxSize()) {
         MediaPanel(
             audioState = audioState,
-            minimized = ready.mediaMinimized,
-            searchQuery = ready.searchQuery,
-            search = ready.search,
-            pendingPlay = ready.pendingPlay,
-            pendingQueueItemId = ready.pendingQueueItemId,
-            queueRefreshing = ready.queueRefreshing,
-            artist = ready.artist,
-            musicSource = ready.musicSource,
-            playlists = ready.playlists,
-            quickPicks = ready.quickPicks,
-            mixedForYou = ready.mixedForYou,
-            spotifyPlaylists = ready.spotifyPlaylists,
-            spotifyRecentlyPlayed = ready.spotifyRecentlyPlayed,
+            minimized = mediaMinimized,
+            searchQuery = searchQuery,
+            search = search,
+            pendingPlay = pendingPlay,
+            pendingQueueItemId = pendingQueueItemId,
+            queueRefreshing = queueRefreshing,
+            artist = artist,
+            musicSource = musicSource,
+            playlists = playlists,
+            quickPicks = quickPicks,
+            mixedForYou = mixedForYou,
+            spotifyPlaylists = spotifyPlaylists,
+            spotifyRecentlyPlayed = spotifyRecentlyPlayed,
             onQueryChange = viewModel::setSearchQuery,
             onPlay = viewModel::play,
             onEnqueue = viewModel::enqueue,
@@ -109,7 +124,7 @@ fun PortraitMusicPage(
         // arrangement as the right card, only pinned to the page's bottom edge, outside its side
         // margin, so a long title has the width to scroll in.
         AnimatedVisibility(
-            visible = hasTrack && (ready.mediaMinimized || ready.artist != null),
+            visible = hasTrack && (mediaMinimized || artist != null),
             enter = slideInVertically { h -> h } + fadeIn(),
             exit = slideOutVertically { h -> h } + fadeOut(),
             modifier = Modifier
@@ -150,8 +165,8 @@ fun PortraitMusicPage(
                 anchor = if (onNowPlaying) AudioPopupAnchor.Transport else AudioPopupAnchor.Header,
                 activeAudioRoom = audioRoom,
                 volumePct = audioState.volumePct,
-                joinTarget = ready.joinTarget,
-                audioJoined = ready.audioJoined,
+                joinTarget = joinTarget,
+                audioJoined = audioJoined,
                 onSelectAudioRoom = viewModel::selectAudioRoom,
                 onVolumeChange = { value -> viewModel.setVolume(audioRoom, value) },
                 onToggleAudioJoin = viewModel::toggleAudioJoin,

@@ -5,12 +5,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.CalendarState
+import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
 import com.mattschoe.smarthome.ui.theme.Dimensions
+import kotlinx.datetime.LocalDate
 
 /**
  * Portrait page 4 — Calendar. The tablet right card's Calendar panel given the whole screen, and week
@@ -21,31 +27,50 @@ import com.mattschoe.smarthome.ui.theme.Dimensions
  *
  * With no tab row to hang controls off, the header's trailing slot carries both: the gear that picks
  * the calendars, then the add button — the same order the tablet uses, minus the toggle between them.
+ *
+ * Takes the narrow slices it reads rather than the whole [HomeScreenState.Ready] — the phone pagers
+ * destructure, so a page whose slices didn't change skips recomposition entirely.
  */
 @Composable
 fun PortraitCalendarPage(
-    ready: HomeScreenState.Ready,
+    calendar: CalendarState,
+    eventEditor: EventEditorTarget?,
+    savingEvent: Boolean,
+    today: LocalDate,
+    displayedMonth: LocalDate,
+    selectedDay: LocalDate,
+    calendarView: CalendarView,
+    eventsByDay: Map<LocalDate, List<CalendarEvent>>,
+    selectedDayTodos: List<TodoItem>,
+    weekDays: List<LocalDate>,
+    calendarWindow: ClosedRange<LocalDate>,
+    nowMinutes: Int,
+    dayMarks: Map<LocalDate, DayMarks>,
+    weekHourHeight: Float,
+    eventDetail: CalendarEvent?,
+    calendarSettingsOpen: Boolean,
+    calendarFilters: CalendarFilters,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize()) {
         CalendarPanel(
-            eventEditor = ready.eventEditor,
-            savingEvent = ready.savingEvent,
-            today = ready.today,
-            displayedMonth = ready.displayedMonth,
-            selectedDay = ready.selectedDay,
-            calendarView = ready.calendarView,
-            eventsByDay = ready.eventsByDay,
-            selectedDayTodos = ready.selectedDayTodos,
-            weekDays = ready.weekDays,
-            calendarWindow = ready.calendarWindow,
-            nowMinutes = ready.nowMinutes,
-            calendarSources = ready.calendar.sources,
-            calendarStale = ready.calendar.stale,
-            calendarHasTodoList = ready.calendar.hasTodoList,
-            dayMarks = ready.dayMarks,
-            weekHourHeight = ready.weekHourHeight,
+            eventEditor = eventEditor,
+            savingEvent = savingEvent,
+            today = today,
+            displayedMonth = displayedMonth,
+            selectedDay = selectedDay,
+            calendarView = calendarView,
+            eventsByDay = eventsByDay,
+            selectedDayTodos = selectedDayTodos,
+            weekDays = weekDays,
+            calendarWindow = calendarWindow,
+            nowMinutes = nowMinutes,
+            calendarSources = calendar.sources,
+            calendarStale = calendar.stale,
+            calendarHasTodoList = calendar.hasTodoList,
+            dayMarks = dayMarks,
+            weekHourHeight = weekHourHeight,
             onShowMonth = viewModel::showMonth,
             onShowWeek = viewModel::showWeek,
             onSelectDay = viewModel::selectDay,
@@ -58,11 +83,11 @@ fun PortraitCalendarPage(
             onSaveEvent = viewModel::saveEvent,
             onDeleteEvent = viewModel::deleteEvent,
             onCloseEventEditor = viewModel::closeEventEditor,
-            // The "+" stands down while the editor is open, as on the tablet — re-opening a blank form
-            // would discard what is typed.
+            // The "+" stands down while the editor is open, as on the tablet — re-opening a blank
+            // form would discard what is typed.
             headerTrailing = {
                 CalendarSettingsButton(viewModel::openCalendarSettings)
-                if (ready.eventEditor == null) AddEventButton(viewModel::openNewEvent)
+                if (eventEditor == null) AddEventButton(viewModel::openNewEvent)
             },
             modifier = Modifier
                 .padding(horizontal = Dimensions.phonePagePad)
@@ -81,21 +106,21 @@ fun PortraitCalendarPage(
         val popupInset = Modifier
             .padding(horizontal = Dimensions.phonePagePad)
             .padding(top = Dimensions.phonePageTopPad, bottom = Dimensions.phonePageBottomClearance)
-        ready.eventDetail?.let { event ->
+        eventDetail?.let { event ->
             EventDetailPopup(
                 event = event,
-                sources = ready.calendar.sources,
+                sources = calendar.sources,
                 onEdit = viewModel::editEventDetail,
                 onDelete = viewModel::deleteEventDetail,
                 onClose = viewModel::closeEventDetail,
                 modifier = popupInset,
             )
         }
-        if (ready.calendarSettingsOpen) {
+        if (calendarSettingsOpen) {
             CalendarSettingsPopup(
-                view = ready.calendarView,
-                sources = ready.calendar.sources,
-                filters = ready.calendarFilters,
+                view = calendarView,
+                sources = calendar.sources,
+                filters = calendarFilters,
                 onToggle = viewModel::toggleCalendarFilter,
                 onClose = viewModel::closeCalendarSettings,
                 modifier = popupInset,

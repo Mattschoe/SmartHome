@@ -149,9 +149,13 @@ fun BrowseSurface(
                     val onSelect: (Int, BrowseItem) -> Unit = { _, item ->
                         if (item.kind == BrowseKind.Artist) onOpenArtist(item) else onPlay(item)
                     }
-                    val shelves = browseShelvesFor(
-                        source, playlists, quickPicks, mixedForYou, spotifyPlaylists, spotifyRecentlyPlayed,
-                    ).filter { it.items.isNotEmpty() }
+                    // Three shelf objects plus a filter, rebuilt once per input change rather than
+                    // on every recomposition.
+                    val shelves = remember(source, playlists, quickPicks, mixedForYou, spotifyPlaylists, spotifyRecentlyPlayed) {
+                        browseShelvesFor(
+                            source, playlists, quickPicks, mixedForYou, spotifyPlaylists, spotifyRecentlyPlayed,
+                        )
+                    }.filter { it.items.isNotEmpty() }
                     shelves.forEachIndexed { index, shelf ->
                         // The search bar already left a gap, so only the shelves after the first add one.
                         if (index > 0) Spacer(Modifier.height(Dimensions.mediaSectionGap))

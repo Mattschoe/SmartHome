@@ -279,8 +279,14 @@ class HomepageViewModel(
      * Switch the right card's tab. Opening the Calendar asks the adapter for a fresh window — events
      * are fetched rather than pushed, and a subscribed calendar (a work roster) is polled only once a
      * day unless something forces it. Which tab is showing stays here, never on the adapter.
+     *
+     * The refresh only fires when the panel actually *changes*: the phone pager reads `targetPage`,
+     * which flips mid-drag, so swiping toward the Calendar page — and back and forth — re-selects
+     * the same panel many times per gesture. Re-selection is a no-op; a real Media→Calendar (or
+     * back) switch still fetches, exactly as before.
      */
     fun selectPanel(panel: Panel) {
+        if (_panel.value == panel) return
         _panel.value = panel
         if (panel == Panel.Calendar) adapter.refreshCalendar()
     }

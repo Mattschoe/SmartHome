@@ -2,6 +2,7 @@ package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.Room
+import kotlin.time.Clock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,7 +66,14 @@ fun nowPlayingSnapshot(room: Room, audio: AudioState?): NowPlayingSnapshot? {
         album = track.album,
         artworkUrl = track.artworkUrl,
         isPlaying = audio.isPlaying,
-        positionSec = audio.positionSec,
+        // Projected at publish time: the session extrapolates from here, and the state's own
+        // position is HA's raw frozen pair (see AudioState.positionUpdatedAtIso).
+        positionSec = livePositionSec(
+            positionSec = audio.positionSec,
+            updatedAtIso = audio.positionUpdatedAtIso,
+            isPlaying = audio.isPlaying,
+            now = Clock.System.now(),
+        ),
         durationSec = track.durationSec,
         volumePct = audio.volumePct,
     )

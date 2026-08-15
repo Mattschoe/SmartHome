@@ -146,6 +146,17 @@ dependencies {
     androidRuntimeClasspath(libs.compose.uiTooling)
 }
 
+composeCompiler {
+    // Objective stability proof: the emitted report/metrics show which state types are stable and
+    // which composables actually skip. Build-only — no runtime effect. (See the phone-performance
+    // plan: Step 0 establishes the baseline, Step 1's verification diffs the report.)
+    reportsDestination = layout.buildDirectory.dir("compose-reports")
+    metricsDestination = layout.buildDirectory.dir("compose-metrics")
+    // Types we don't own but pass as composable params (kotlinx-datetime, stdlib collections) are
+    // declared stable here — see compose-stability.conf.
+    stabilityConfigurationFiles.add(layout.projectDirectory.file("compose-stability.conf"))
+}
+
 // Desktop (JVM) entry point. `./gradlew :shared:run` launches the dashboard in a resizable window.
 compose.desktop {
     application {
