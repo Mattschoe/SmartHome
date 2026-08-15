@@ -23,6 +23,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.cycle
+import com.mattschoe.smarthome.data.model.AudioState
+import com.mattschoe.smarthome.data.model.BrowseItem
+import com.mattschoe.smarthome.data.model.MusicSource
+import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.controls.media.AudioPopup
 import com.mattschoe.smarthome.ui.controls.media.AudioPopupAnchor
@@ -53,23 +57,33 @@ import smarthome.shared.generated.resources.equalizer_filled
  */
 @Composable
 fun LandscapeMusicPage(
-    ready: HomeScreenState.Ready,
+    audioRoom: Room,
+    audioState: AudioState,
+    pendingPlay: PendingPlay?,
+    pendingQueueItemId: String?,
+    queueRefreshing: Boolean,
+    artist: ArtistUiState?,
+    searchQuery: String,
+    search: SearchState,
+    musicSource: MusicSource,
+    playlists: List<BrowseItem>,
+    quickPicks: List<BrowseItem>,
+    mixedForYou: List<BrowseItem>,
+    spotifyPlaylists: List<BrowseItem>,
+    spotifyRecentlyPlayed: List<BrowseItem>,
+    joinTarget: Room?,
+    audioJoined: Boolean,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
-    // Captured once, like the Expanded assembly in Homepage.kt: a new `Ready` lands on every state
-    // change, and capturing the room/audio directly keeps the callbacks' identity stable across them.
-    val audioRoom = ready.activeAudioRoom
-    val audioState = ready.audioState
-
     // Transient and phone-only, with no consumer outside this page — the same precedent as the
     // portrait page's popup. `activeAudioRoom` itself stays ViewModel-owned, per the CORE RULE.
     var audioPopupOpen by remember { mutableStateOf(false) }
 
     // A pending play paints the tapped item as the (loading) now-playing track right away — the same
     // synthesis [MediaPanel] uses, so the loading feedback is identical on both surfaces.
-    val track = pendingTrack(ready.pendingPlay) ?: rememberLatchedTrack(audioState.nowPlaying)
-    val hasTrack = ready.pendingPlay != null || audioState.nowPlaying != null
+    val track = pendingTrack(pendingPlay) ?: rememberLatchedTrack(audioState.nowPlaying)
+    val hasTrack = pendingPlay != null || audioState.nowPlaying != null
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         // The cards are equal and fill the page's padded area, so this is the left card's width —
@@ -98,9 +112,9 @@ fun LandscapeMusicPage(
                     NowPlayingSurface(
                         track = track,
                         audioState = audioState,
-                        loading = ready.pendingPlay != null,
-                        queueRefreshing = ready.queueRefreshing,
-                        pendingQueueItemId = ready.pendingQueueItemId,
+                        loading = pendingPlay != null,
+                        queueRefreshing = queueRefreshing,
+                        pendingQueueItemId = pendingQueueItemId,
                         onTogglePlay = { viewModel.togglePlay(audioRoom) },
                         onNext = { viewModel.next(audioRoom) },
                         onPrevious = { viewModel.previous(audioRoom) },
@@ -138,7 +152,6 @@ fun LandscapeMusicPage(
                     vertical = Dimensions.phoneCardPadding,
                 ),
             ) {
-                val artist = ready.artist
                 if (artist != null) {
                     ArtistSurface(
                         artist = artist,
@@ -153,14 +166,14 @@ fun LandscapeMusicPage(
                     // No floating mini player over a landscape card, so no bottom inset to reserve —
                     // and no header trigger: the speaker disc floats over the other card instead.
                     BrowseSurface(
-                        query = ready.searchQuery,
-                        search = ready.search,
-                        source = ready.musicSource,
-                        playlists = ready.playlists,
-                        quickPicks = ready.quickPicks,
-                        mixedForYou = ready.mixedForYou,
-                        spotifyPlaylists = ready.spotifyPlaylists,
-                        spotifyRecentlyPlayed = ready.spotifyRecentlyPlayed,
+                        query = searchQuery,
+                        search = search,
+                        source = musicSource,
+                        playlists = playlists,
+                        quickPicks = quickPicks,
+                        mixedForYou = mixedForYou,
+                        spotifyPlaylists = spotifyPlaylists,
+                        spotifyRecentlyPlayed = spotifyRecentlyPlayed,
                         onQueryChange = viewModel::setSearchQuery,
                         onPlay = viewModel::play,
                         onEnqueue = viewModel::enqueue,
@@ -189,8 +202,8 @@ fun LandscapeMusicPage(
                 anchor = AudioPopupAnchor.Card(cardWidth),
                 activeAudioRoom = audioRoom,
                 volumePct = audioState.volumePct,
-                joinTarget = ready.joinTarget,
-                audioJoined = ready.audioJoined,
+                joinTarget = joinTarget,
+                audioJoined = audioJoined,
                 onSelectAudioRoom = viewModel::selectAudioRoom,
                 onVolumeChange = { value -> viewModel.setVolume(audioRoom, value) },
                 onToggleAudioJoin = viewModel::toggleAudioJoin,

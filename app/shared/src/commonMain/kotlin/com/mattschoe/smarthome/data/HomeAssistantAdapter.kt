@@ -933,7 +933,10 @@ class HomeAssistantAdapter(
     }
 
     private fun buildAudio(mp: HaStateDto?, syncLeader: Room?): AudioState {
-        if (mp == null) return AudioState(volumePct = 0, isPlaying = false, nowPlaying = null, positionSec = 0, queue = emptyList())
+        if (mp == null) return AudioState(
+            volumePct = 0, isPlaying = false, nowPlaying = null, positionSec = 0,
+            positionUpdatedAtIso = null, queue = emptyList(),
+        )
         val nowPlaying = mp.attrString("media_title")?.let { title ->
             MediaTrack(
                 title = title,
@@ -947,14 +950,13 @@ class HomeAssistantAdapter(
             volumePct = volumePctFromLevel(mp.attrDouble("volume_level")),
             isPlaying = mp.state == "playing",
             nowPlaying = nowPlaying,
-            // HA freezes `media_position` at `media_position_updated_at`; project it to now while
-            // playing, or the scrubber only moves when some other state change happens to come in.
-            positionSec = livePositionSec(
-                positionSec = mp.attrInt("media_position"),
-                updatedAtIso = mp.attrString("media_position_updated_at"),
-                isPlaying = mp.state == "playing",
-                now = Clock.System.now(),
-            ),
+            // HA freezes `media_position` at `media_position_updated_at`; the pair is carried raw so
+            // a playing track's state stays equal to itself between position updates — projecting
+            // here made any mapped entity change re-emit the whole dashboard. The projection to
+            // wall-clock time happens at consumption ([livePositionSec] in the scrubber and the
+            // media-session bridge).
+            positionSec = mp.attrInt("media_position") ?: 0,
+            positionUpdatedAtIso = mp.attrString("media_position_updated_at"),
             queue = emptyList(), // HA media_player exposes no standard play-queue
             isShuffle = mp.attrBool("shuffle") ?: false,
             repeat = repeatModeFromHa(mp.attrString("repeat")),
@@ -976,7 +978,10 @@ class HomeAssistantAdapter(
                 brightnessPct = 0,
                 isLightOn = false,
                 lightWarmth = Warmth.Neutral,
-                audio = if (room.hasSpeaker) AudioState(0, false, null, 0, emptyList()) else null,
+                audio = if (room.hasSpeaker) AudioState(
+                    volumePct = 0, isPlaying = false, nowPlaying = null, positionSec = 0,
+                    positionUpdatedAtIso = null, queue = emptyList(),
+                ) else null,
             )
         },
         climate = ClimateState(null, null, null, null, null),

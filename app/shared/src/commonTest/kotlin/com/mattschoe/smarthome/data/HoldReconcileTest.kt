@@ -29,7 +29,9 @@ class HoldReconcileTest {
         brightnessPct = brightness,
         isLightOn = on,
         lightWarmth = warmth,
-        audio = if (hasAudio) AudioState(volume, playing, null, 0, emptyList()) else null,
+        audio = if (hasAudio) AudioState(
+            volume, playing, null, 0, positionUpdatedAtIso = null, queue = emptyList(),
+        ) else null,
     )
 
     @Test

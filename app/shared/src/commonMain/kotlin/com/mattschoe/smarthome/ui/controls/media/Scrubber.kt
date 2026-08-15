@@ -41,26 +41,43 @@ import com.mattschoe.smarthome.data.formatTrackTime
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.volumeFractionFromX
+import com.mattschoe.smarthome.data.livePositionSec
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.InsetFill
 import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.Rose
+import kotlin.time.Clock
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
  * The scrubber's displayed position, ticked forward locally once a second while playing. The device
- * state's [AudioState.positionSec] is already projected to "now" when it is built, but it only
- * *emits* on state changes — without this ticker the knob sits still between them. Any new emission
- * (position, play/pause, track change) resets the tick base to the fresher value.
+ * state's [AudioState.positionSec] is HA's raw position frozen at its update stamp, so this anchors
+ * it to *now* ([livePositionSec]) when the raw pair changes and ticks from there — the single place
+ * the elapsed time is added. Any new device emission (position, play/pause, track change) resets
+ * the tick base to the fresher value.
  */
 @Composable
 internal fun rememberLivePositionSec(audioState: AudioState, track: MediaTrack): Int {
-    val base = audioState.positionSec
-    var live by remember(base, audioState.isPlaying, track.title) { mutableStateOf(base) }
-    LaunchedEffect(base, audioState.isPlaying, track.title) {
-        while (audioState.isPlaying) {
+    // The ticker is keyed on the *raw* pair rather than on a projected value: projecting here at
+    // every composition would make the base shift with each `Ready` emission and tear the ticker
+    // down at HA-event rate, which is itself a source of scrubber jitter.
+    val basePositionSec = audioState.positionSec
+    val updatedAtIso = audioState.positionUpdatedAtIso
+    val playing = audioState.isPlaying
+    var live by remember(basePositionSec, updatedAtIso, playing, track.title) {
+        mutableStateOf(
+            livePositionSec(
+                positionSec = basePositionSec,
+                updatedAtIso = updatedAtIso,
+                isPlaying = playing,
+                now = Clock.System.now(),
+            )
+        )
+    }
+    LaunchedEffect(basePositionSec, updatedAtIso, playing, track.title) {
+        while (playing) {
             delay(1_000)
             live = (live + 1).coerceAtMost(if (track.durationSec > 0) track.durationSec else Int.MAX_VALUE)
         }

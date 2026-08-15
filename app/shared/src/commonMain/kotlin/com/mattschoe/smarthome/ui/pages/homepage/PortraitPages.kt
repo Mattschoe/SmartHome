@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.model.Room
+import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
 import com.mattschoe.smarthome.ui.controls.BrightnessDial
@@ -50,14 +51,13 @@ fun PortraitAppsPage(modifier: Modifier = Modifier) {
  */
 @Composable
 fun PortraitLightPage(
-    ready: HomeScreenState.Ready,
+    activeLightRoom: Room,
+    lightRoomState: RoomState,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
-    // Captured once so the callbacks below stay bound to the room that was on screen when they were
-    // created, matching the Expanded assembly in Homepage.kt.
-    val lightRoom = ready.activeLightRoom
-    val roomState = ready.lightRoomState
+    val lightRoom = activeLightRoom
+    val roomState = lightRoomState
     val scrollState = rememberScrollState()
 
     BoxWithConstraints(modifier) {

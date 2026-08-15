@@ -102,20 +102,34 @@ class CompositeHomeAdapter(
  * room's queue from its matching MA queue, and enrich its now-playing track ([enrichNowPlaying]).
  * When [MusicData] is empty (MA not yet connected) this is a no-op — the shelves stay blank and the
  * rooms untouched, exactly as HA-only.
+ *
+ * Identity is preserved, the same way the shelves' `ifEmpty` keeps the old list: a room whose queue
+ * and track the overlay leaves unchanged passes through as the same instance, and the map is reused
+ * when no room changed. That lets the merged StateFlow's `equals` short-circuit on identity instead
+ * of deep-walking every queue.
  */
-internal fun HomeState.withMusic(music: MusicData): HomeState = copy(
-    playlists = music.playlists.ifEmpty { playlists },
-    quickPicks = music.quickPicks.ifEmpty { quickPicks },
-    mixedForYou = music.mixedForYou.ifEmpty { mixedForYou },
-    spotifyPlaylists = music.spotifyPlaylists.ifEmpty { spotifyPlaylists },
-    spotifyRecentlyPlayed = music.spotifyRecentlyPlayed.ifEmpty { spotifyRecentlyPlayed },
-    rooms = rooms.mapValues { (room, roomState) ->
+internal fun HomeState.withMusic(music: MusicData): HomeState {
+    var changed = false
+    val mergedRooms = rooms.mapValues { (room, roomState) ->
         val audio = roomState.audio ?: return@mapValues roomState
         val queue = music.queuesByRoom[room] ?: audio.queue
         val nowPlaying = enrichNowPlaying(audio.nowPlaying, music.nowPlayingByRoom[room])
-        roomState.copy(audio = audio.copy(queue = queue, nowPlaying = nowPlaying))
-    },
-)
+        if (queue === audio.queue && nowPlaying === audio.nowPlaying) {
+            roomState
+        } else {
+            changed = true
+            roomState.copy(audio = audio.copy(queue = queue, nowPlaying = nowPlaying))
+        }
+    }
+    return copy(
+        playlists = music.playlists.ifEmpty { playlists },
+        quickPicks = music.quickPicks.ifEmpty { quickPicks },
+        mixedForYou = music.mixedForYou.ifEmpty { mixedForYou },
+        spotifyPlaylists = music.spotifyPlaylists.ifEmpty { spotifyPlaylists },
+        spotifyRecentlyPlayed = music.spotifyRecentlyPlayed.ifEmpty { spotifyRecentlyPlayed },
+        rooms = if (changed) mergedRooms else rooms,
+    )
+}
 
 /**
  * Keep HA authoritative for the playing track but take the fields it reports worse: its cover art is
@@ -129,11 +143,14 @@ internal fun HomeState.withMusic(music: MusicData): HomeState = copy(
 private fun enrichNowPlaying(ha: MediaTrack?, ma: MediaTrack?): MediaTrack? {
     if (ha == null || ma == null) return ha
     if (ha.title.normalizedTitle() != ma.title.normalizedTitle()) return ha
-    return ha.copy(
+    val enriched = ha.copy(
         artworkUrl = ma.artworkUrl ?: ha.artworkUrl,
         uri = ma.uri ?: ha.uri,
         queueItemId = ma.queueItemId ?: ha.queueItemId,
     )
+    // Back to the same instance when the enrichment changed nothing, so the caller's identity check
+    // (`nowPlaying === audio.nowPlaying`) holds across merges.
+    return if (enriched == ha) ha else enriched
 }
 
 private fun String.normalizedTitle(): String = trim().lowercase()

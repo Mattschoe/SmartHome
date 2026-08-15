@@ -1,5 +1,6 @@
 package com.mattschoe.smarthome.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.serialization.Serializable
@@ -36,7 +37,7 @@ enum class Room(val displayName: String, val hasSpeaker: Boolean) {
 
     companion object {
         /** The rooms the AUDIO selector offers — those with a speaker. Derived from [hasSpeaker]. */
-        val audioRooms: List<Room> get() = entries.filter { it.hasSpeaker }
+        val audioRooms: List<Room> = entries.filter { it.hasSpeaker }
     }
 }
 
@@ -76,6 +77,7 @@ enum class QueueMode { Next, Last }
  * @param queueItemId Music Assistant queue-item handle — stable per queue entry, and what the
  *   skip-to/reorder intents address. `null` for tracks that come from anywhere but a queue.
  */
+@Immutable
 data class MediaTrack(
     val title: String,
     val artist: String,
@@ -99,6 +101,7 @@ enum class BrowseKind { Track, Album, Artist, Playlist, Other }
  * track-count source from Music Assistant). [artworkUrl] is real cover art when available (else the
  * tile falls back to a colored glyph); [uri] is the Music Assistant uri tapped to play.
  */
+@Immutable
 data class BrowseItem(
     val name: String,
     val subtitle: String? = null,
@@ -111,6 +114,7 @@ data class BrowseItem(
  * An artist's drill-in payload: [topTracks] is played as an ordered block (tap a hit and it plays
  * from there on), [albums] are individual play targets in a rail.
  */
+@Immutable
 data class ArtistDetail(
     val topTracks: List<BrowseItem>,
     val albums: List<BrowseItem>,
@@ -125,11 +129,20 @@ data class ArtistDetail(
  * Per-room audio session. It is `null` on a [RoomState] for rooms without a speaker (no HA
  * `media_player` entity). Transport/volume transitions on a speaker-less room are no-ops.
  */
+@Immutable
 data class AudioState(
     val volumePct: Int,
     val isPlaying: Boolean,
     val nowPlaying: MediaTrack?,
+    /**
+     * HA's raw `media_position` — the position as it was *frozen* at [positionUpdatedAtIso], not
+     * projected to now. Carrying the raw pair lets a playing track's state stay equal to itself
+     * between device updates (see [positionUpdatedAtIso]); the projection to wall-clock time
+     * happens where the value is consumed ([com.mattschoe.smarthome.data.livePositionSec]).
+     */
     val positionSec: Int,
+    /** HA `media_position_updated_at`, ISO-8601; `null` when absent (paused/idle, a mock, a seek). */
+    val positionUpdatedAtIso: String? = null,
     val queue: List<MediaTrack>,
     val isShuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
@@ -146,6 +159,7 @@ data class AudioState(
  * happens inside it, both its lights and its own audio playback ([audio], `null` when the room has
  * no speaker).
  */
+@Immutable
 data class RoomState(
     val brightnessPct: Int,
     val isLightOn: Boolean,
@@ -168,6 +182,7 @@ enum class WeatherCondition {
  * [feelsLikeC] is an apparent temperature computed from the weather entity's readings rather than its
  * plain air temperature — the raw temp is a mapper input, not something the tile shows.
  */
+@Immutable
 data class ClimateState(
     val indoorTempC: Double?,
     val humidityPct: Int?,
@@ -211,6 +226,7 @@ data class CalendarSource(
  * nothing about which day it started), so the edit surface reads these instead of parsing its own
  * rows back. Nullable: an entry read from a cache written before they existed simply has none.
  */
+@Immutable
 @Serializable
 data class CalendarEvent(
     val date: LocalDate,
@@ -276,6 +292,7 @@ data class TodoItem(
  * [stale] marks data being rendered from the offline cache rather than from a live backend — the
  * panel still shows the last-known calendar, labelled as such, instead of going blank.
  */
+@Immutable
 data class CalendarState(
     val events: List<CalendarEvent>,
     val todos: List<TodoItem>,
@@ -289,7 +306,7 @@ data class CalendarState(
     val hasTodoList: Boolean = true,
 ) {
     /** The calendars an event may be written to — the add/edit surface's only legal targets. */
-    val writableSources: List<CalendarSource> get() = sources.filter { it.canWrite }
+    val writableSources: List<CalendarSource> by lazy { sources.filter { it.canWrite } }
 }
 
 /**
@@ -303,6 +320,7 @@ data class CalendarState(
  * @param spotifyRecentlyPlayed Spotify items from MA's "recently played" folder; Spotify serves no
  *   algorithmic feed of its own, so this and [spotifyPlaylists] are all its browse side has.
  */
+@Immutable
 data class HomeState(
     val rooms: Map<Room, RoomState>,
     val climate: ClimateState,
