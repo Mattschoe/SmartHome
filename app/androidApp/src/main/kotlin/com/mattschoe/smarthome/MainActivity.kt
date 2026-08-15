@@ -10,6 +10,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.mattschoe.smarthome.data.SharedPreferencesStore
 import com.mattschoe.smarthome.media.SmartHomeMediaService
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +33,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        hideSystemBars()
 
         val app = application as AppApplication
         val appContainer = app.appContainer
@@ -68,6 +72,21 @@ class MainActivity : ComponentActivity() {
         foregroundScope?.cancel()
         foregroundScope = null
         super.onStop()
+    }
+
+    // The system nudges bars back on focus loss/regain (e.g. after a dialog, app-switcher, or
+    // notification shade); this is the documented hook to re-hide them for a wall-mounted kiosk.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
+    private fun hideSystemBars() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 }
 
