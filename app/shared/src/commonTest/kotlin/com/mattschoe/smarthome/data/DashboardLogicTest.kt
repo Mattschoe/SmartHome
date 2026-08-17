@@ -421,6 +421,20 @@ class DashboardLogicTest {
     }
 
     @Test
+    fun dayPaging_isAOneToOneMapBetweenDaysAndPages() {
+        val window = calendarWindow(LocalDate(2026, 8, 7))
+        assertEquals(window.start, dayAtPage(window, 0))
+        assertEquals(0, dayIndexOf(window, window.start))
+        assertEquals(1, dayIndexOf(window, window.start.plus(1, DateTimeUnit.DAY)))
+        // Both ends are pages of their own — the window is inclusive.
+        assertEquals(window.endInclusive, dayAtPage(window, dayPageCount(window) - 1))
+        assertEquals(dayPageCount(window) - 1, dayIndexOf(window, window.endInclusive))
+        for (page in 0 until dayPageCount(window)) {
+            assertEquals(page, dayIndexOf(window, dayAtPage(window, page)))
+        }
+    }
+
+    @Test
     fun paging_clampsDatesFromOutsideTheWindow() {
         // A cached event from outside the fetched span must not produce a page the pager has no room
         // for — in either direction.
@@ -429,9 +443,12 @@ class DashboardLogicTest {
         assertEquals(monthPageCount(window) - 1, monthIndexOf(window, LocalDate(2030, 1, 1)))
         assertEquals(0, weekIndexOf(window, LocalDate(2020, 1, 1)))
         assertEquals(weekPageCount(window) - 1, weekIndexOf(window, LocalDate(2030, 1, 1)))
+        assertEquals(0, dayIndexOf(window, LocalDate(2020, 1, 1)))
+        assertEquals(dayPageCount(window) - 1, dayIndexOf(window, LocalDate(2030, 1, 1)))
         // And a page index from outside the range clamps the same way rather than throwing.
         assertEquals(monthAtPage(window, 0), monthAtPage(window, -1))
         assertEquals(weekAtPage(window, 0), weekAtPage(window, -1))
+        assertEquals(dayAtPage(window, 0), dayAtPage(window, -1))
     }
 
     // --- Week view ---
@@ -608,9 +625,35 @@ class DashboardLogicTest {
     @Test
     fun toggleTodo_flipsDone() {
         val seed = seedHome()
-        val target = seed.calendar.todos.first()
-        val after = seed.toggleTodo(target.id)
-        assertEquals(!target.done, after.calendar.todos.first { it.id == target.id }.done)
+        val target = seed.calendar.todos.first { !it.done }
+        val today = LocalDate(2026, 7, 15)
+        val after = seed.toggleTodo(target.id, today)
+        assertEquals(true, after.calendar.todos.first { it.id == target.id }.done)
+    }
+
+    @Test
+    fun toggleTodo_stampsTheDayItWasClosedAndClearsItOnReopening() {
+        val seed = seedHome()
+        val target = seed.calendar.todos.first { !it.done }
+        val closedOn = LocalDate(2026, 7, 15)
+
+        val closed = seed.toggleTodo(target.id, closedOn).calendar.todos.first { it.id == target.id }
+        assertEquals(closedOn, closed.completedOn)
+        assertEquals(closedOn, closed.closedOn)
+
+        // Re-opening drops the stamp, so closing it again dates it afresh rather than keeping the old day.
+        val reopened = seed.toggleTodo(target.id, closedOn)
+            .toggleTodo(target.id, closedOn.plus(1, DateTimeUnit.DAY))
+            .calendar.todos.first { it.id == target.id }
+        assertNull(reopened.completedOn)
+        assertFalse(reopened.done)
+    }
+
+    @Test
+    fun closedOn_fallsBackToTheDueDayWithoutAStamp() {
+        // What a task ticked off in the Home Assistant app looks like: completed, no marker written.
+        val due = LocalDate(2026, 7, 12)
+        assertEquals(due, TodoItem("x", due, "Vask op", done = true).closedOn)
     }
 
     @Test
@@ -631,24 +674,157 @@ class DashboardLogicTest {
     }
 
     @Test
-    fun sortTodos_sinksDoneItemsAndKeepsAddOrderWithinEachGroup() {
-        val due = LocalDate(2026, 7, 15)
+    fun todoPage_carriesWhatIsStillOpenFromEveryPassedDay() {
+        val today = LocalDate(2026, 7, 15)
         val todos = listOf(
-            TodoItem("a", due, "Vask op", done = true),
-            TodoItem("b", due, "Køb mælk", done = false),
-            TodoItem("c", due, "Hent pakke", done = true),
-            TodoItem("d", due, "Ring til mor", done = false),
+            TodoItem("today-open", today, "Køb kaffe", done = false),
+            TodoItem("late-a", today.plus(-3, DateTimeUnit.DAY), "Ring til tandlæge", done = false),
+            TodoItem("later", today.plus(4, DateTimeUnit.DAY), "Skift dæk", done = false),
+            TodoItem("late-b", today.plus(-1, DateTimeUnit.DAY), "Svar udlejeren", done = false),
         )
-        // Unfinished first, and inside each group the order they were added in — a ticked row drops
-        // to the bottom, it doesn't shuffle the rest.
-        assertEquals(listOf("b", "d", "a", "c"), sortTodos(todos).map { it.id })
+        val page = todoPage(todos, today)
+        // One group per day, nearest first — and the day after today is not on today's page.
+        assertEquals(listOf(today, today.plus(-1, DateTimeUnit.DAY), today.plus(-3, DateTimeUnit.DAY)), page.open.map { it.due })
+        assertEquals(listOf("today-open", "late-b", "late-a"), page.open.flatMap { g -> g.items.map { it.id } })
+        assertTrue(page.done.isEmpty())
     }
 
     @Test
-    fun sortTodos_leavesAnUntickedListExactlyAsItIs() {
-        val due = LocalDate(2026, 7, 15)
-        val todos = List(4) { TodoItem("t$it", due, "Opgave $it", done = false) }
-        assertEquals(todos, sortTodos(todos))
+    fun todoPage_showsALaterDayOnceItsOwnPageIsReached() {
+        val today = LocalDate(2026, 7, 15)
+        val tomorrow = today.plus(1, DateTimeUnit.DAY)
+        val todos = listOf(
+            TodoItem("today-open", today, "Køb kaffe", done = false),
+            TodoItem("tomorrow", tomorrow, "Skift dæk", done = false),
+        )
+        assertEquals(listOf("today-open"), todoPage(todos, today).open.flatMap { g -> g.items.map { it.id } })
+        // Tomorrow's page still carries today's — nothing has to be swiped back to.
+        assertEquals(listOf("tomorrow", "today-open"), todoPage(todos, tomorrow).open.flatMap { g -> g.items.map { it.id } })
+    }
+
+    @Test
+    fun todoPage_sinksWhatIsTickedIntoItsOwnSection() {
+        val today = LocalDate(2026, 7, 15)
+        val yesterday = today.plus(-1, DateTimeUnit.DAY)
+        val todos = listOf(
+            TodoItem("today-done", today, "Vand planter", done = true, completedOn = today),
+            TodoItem("today-open", today, "Køb kaffe", done = false),
+            // Due yesterday, but closed today — the case the done half's grouping exists for.
+            TodoItem("late-done", yesterday, "Vask op", done = true, completedOn = today),
+        )
+        val page = todoPage(todos, today)
+        assertEquals(listOf("today-open"), page.open.flatMap { g -> g.items.map { it.id } })
+        // Both were closed today, so both are on today's page — grouped by the day they were *due*,
+        // which is what separates "it was today's" from "it had been hanging over from yesterday".
+        assertEquals(listOf(today, yesterday), page.done.map { it.due })
+        assertEquals(listOf("today-done", "late-done"), page.done.flatMap { g -> g.items.map { it.id } })
+    }
+
+    @Test
+    fun todoPage_leavesTheNextDayACleanSlate() {
+        val today = LocalDate(2026, 7, 15)
+        val tomorrow = today.plus(1, DateTimeUnit.DAY)
+        val todos = listOf(
+            TodoItem("today-done", today, "Vand planter", done = true, completedOn = today),
+            TodoItem("late-done", today.plus(-1, DateTimeUnit.DAY), "Vask op", done = true, completedOn = today),
+        )
+        assertEquals(2, todoPage(todos, today).done.sumOf { it.items.size })
+        // Closed on the 15th means closed on the 15th — the 16th does not inherit them, and with
+        // nothing open either it opens blank.
+        val next = todoPage(todos, tomorrow)
+        assertTrue(next.done.isEmpty())
+        assertTrue(next.open.isEmpty())
+    }
+
+    @Test
+    fun todoPage_doesNotShowATaskClosedAfterTheDayBeingLookedAt() {
+        val today = LocalDate(2026, 7, 15)
+        val closedTomorrow = TodoItem(
+            "later-close", today, "Vand planter", done = true, completedOn = today.plus(1, DateTimeUnit.DAY),
+        )
+        // Swiping back to the day it was *due* must not show it as finished there — it wasn't yet.
+        assertTrue(todoPage(listOf(closedTomorrow), today).done.isEmpty())
+        assertTrue(todoPage(listOf(closedTomorrow), today).open.isEmpty())
+        assertEquals(1, todoPage(listOf(closedTomorrow), today.plus(1, DateTimeUnit.DAY)).done.sumOf { it.items.size })
+    }
+
+    @Test
+    fun todoPage_filesAnUnstampedDoneTaskOnItsDueDay() {
+        // Ticked off in the Home Assistant app, so no marker was ever written. Every client derives
+        // the same fallback, so they still agree on where it sits.
+        val due = LocalDate(2026, 7, 12)
+        val todos = listOf(TodoItem("ha-side", due, "Vask op", done = true))
+        assertEquals(1, todoPage(todos, due).done.sumOf { it.items.size })
+        assertTrue(todoPage(todos, due.plus(1, DateTimeUnit.DAY)).done.isEmpty())
+    }
+
+    @Test
+    fun todoPage_doesNotShowATaskOnDaysBeforeItWasWrittenDown() {
+        val today = LocalDate(2026, 8, 8)
+        val yesterday = today.plus(-1, DateTimeUnit.DAY)
+        // Due in the past but only written down today: a task cannot have been standing on a day it
+        // did not exist on, so it starts on today's page and carries forward from there.
+        val backdated = TodoItem("backdated", yesterday, "Vask op", done = false, createdOn = today)
+
+        assertTrue(todoPage(listOf(backdated), yesterday).open.isEmpty())
+        assertEquals(1, todoPage(listOf(backdated), today).open.sumOf { it.items.size })
+        assertEquals(1, todoPage(listOf(backdated), today.plus(3, DateTimeUnit.DAY)).open.sumOf { it.items.size })
+    }
+
+    @Test
+    fun todoPage_stillStartsALaterTaskOnItsOwnDay() {
+        val today = LocalDate(2026, 8, 8)
+        val friday = today.plus(4, DateTimeUnit.DAY)
+        // Written down today for Friday — adding on a later page is how this surface picks a due
+        // date, so the creation day must not drag it forward onto today.
+        val ahead = TodoItem("ahead", friday, "Book flybilletter", done = false, createdOn = today)
+
+        assertTrue(todoPage(listOf(ahead), today).open.isEmpty())
+        assertEquals(1, todoPage(listOf(ahead), friday).open.sumOf { it.items.size })
+    }
+
+    @Test
+    fun todoPage_carriesATaskWithNoRecordedCreationDayFromItsDueDay() {
+        val due = LocalDate(2026, 8, 5)
+        // Added from the Home Assistant app, or before the creation day was recorded: unchanged
+        // behaviour — it stands from its due day forward.
+        val old = TodoItem("old", due, "Skift dæk", done = false)
+
+        assertTrue(todoPage(listOf(old), due.plus(-1, DateTimeUnit.DAY)).open.isEmpty())
+        assertEquals(1, todoPage(listOf(old), due).open.sumOf { it.items.size })
+        assertEquals(1, todoPage(listOf(old), due.plus(9, DateTimeUnit.DAY)).open.sumOf { it.items.size })
+    }
+
+    @Test
+    fun addTodo_recordsTheDayItWasWrittenDown() {
+        val seed = seedHome()
+        val due = LocalDate(2026, 8, 5)
+        val today = LocalDate(2026, 8, 8)
+
+        val added = seed.addTodo("new", due, "Vask op", createdOn = today).calendar.todos.last()
+
+        assertEquals(due, added.due)
+        assertEquals(today, added.createdOn)
+        assertEquals(today, added.showsFrom)
+    }
+
+    @Test
+    fun todoPage_ordersADayAlphabeticallyIgnoringCase() {
+        val today = LocalDate(2026, 7, 15)
+        val todos = listOf(
+            TodoItem("c", today, "ærinde", done = false),
+            TodoItem("a", today, "Bage brød", done = false),
+            TodoItem("b", today, "aflever pakke", done = false),
+        )
+        // A page mixes days, so append order would put no two rows anywhere predictable.
+        assertEquals(listOf("b", "a", "c"), todoPage(todos, today).open.single().items.map { it.id })
+    }
+
+    @Test
+    fun todoPage_onAnEmptyListIsTwoEmptySections() {
+        val page = todoPage(emptyList(), LocalDate(2026, 7, 15))
+        assertTrue(page.open.isEmpty())
+        assertTrue(page.done.isEmpty())
     }
 
     @Test

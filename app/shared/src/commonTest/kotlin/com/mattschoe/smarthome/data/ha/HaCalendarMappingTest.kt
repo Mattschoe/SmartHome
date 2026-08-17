@@ -5,6 +5,7 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class HaCalendarMappingTest {
@@ -134,5 +135,95 @@ class HaCalendarMappingTest {
         val todos = mapTodoItems(listOf(HaTodoItemDto(uid = "x", summary = "Løst punkt")), fallbackDue = today)
 
         assertEquals(today, todos.single().due)
+    }
+
+    // --- The closing-day marker: the one thing HA has no field for, so it rides in the description ---
+
+    @Test
+    fun closingDayRoundTripsThroughTheDescription() {
+        val closed = LocalDate(2026, 8, 17)
+        // What one client writes, every other client reads back — the whole point of storing it here
+        // instead of on the device that happened to tick the box.
+        assertEquals(closed, parseClosedOn(formatClosedMarker(closed)))
+    }
+
+    @Test
+    fun closingDayIsReadOffACompletedItem() {
+        val today = LocalDate(2026, 8, 17)
+        val items = listOf(
+            HaTodoItemDto(
+                uid = "a", summary = "Svar udlejeren", status = "completed", due = "2026-08-16",
+                description = formatClosedMarker(today),
+            ),
+            // Completed in the Home Assistant app, so nothing was ever stamped.
+            HaTodoItemDto(uid = "b", summary = "Vask op", status = "completed", due = "2026-08-16"),
+            // An open item carries no closing day whatever its description happens to say.
+            HaTodoItemDto(
+                uid = "c", summary = "Vand planterne", status = "needs_action", due = "2026-08-16",
+                description = formatClosedMarker(today),
+            ),
+        )
+
+        val todos = mapTodoItems(items, fallbackDue = today)
+
+        assertEquals(today, todos[0].completedOn)
+        assertEquals(today, todos[0].closedOn)
+        // No marker falls back to the due day — derived the same way on every client, so they agree.
+        assertNull(todos[1].completedOn)
+        assertEquals(LocalDate(2026, 8, 16), todos[1].closedOn)
+        assertNull(todos[2].completedOn)
+    }
+
+    @Test
+    fun creationDayRoundTripsThroughTheDescriptionBesideTheClosingDay() {
+        val created = LocalDate(2026, 8, 8)
+        val closed = LocalDate(2026, 8, 17)
+        val description = formatTodoDescription(createdOn = created, closedOn = closed)
+
+        // Both markers share the field, so a write that changes one has to carry the other back.
+        assertEquals(created, parseCreatedOn(description))
+        assertEquals(closed, parseClosedOn(description))
+        // Un-ticking keeps the creation day and drops the closing one.
+        val reopened = formatTodoDescription(createdOn = created, closedOn = null)
+        assertEquals(created, parseCreatedOn(reopened))
+        assertNull(parseClosedOn(reopened))
+        assertEquals("", formatTodoDescription(createdOn = null, closedOn = null))
+    }
+
+    @Test
+    fun creationDayIsReadOffAnItemAndIsAbsentOnOneThisAppDidNotAdd() {
+        val today = LocalDate(2026, 8, 17)
+        val items = listOf(
+            // Written down today, on a page a day back: it is a task from today on, not from the 16th.
+            HaTodoItemDto(
+                uid = "a", summary = "Vask op", status = "needs_action", due = "2026-08-16",
+                description = formatCreatedMarker(today),
+            ),
+            // Written down today for a later day — the creation day must not drag it forward.
+            HaTodoItemDto(
+                uid = "b", summary = "Book flybilletter", status = "needs_action", due = "2026-08-20",
+                description = formatCreatedMarker(today),
+            ),
+            // Added from the Home Assistant app: no creation day, so it stands from its due day.
+            HaTodoItemDto(uid = "c", summary = "Skift dæk", status = "needs_action", due = "2026-08-16"),
+        )
+
+        val todos = mapTodoItems(items, fallbackDue = today)
+
+        assertEquals(today, todos[0].createdOn)
+        assertEquals(today, todos[0].showsFrom)
+        assertEquals(LocalDate(2026, 8, 20), todos[1].showsFrom)
+        assertNull(todos[2].createdOn)
+        assertEquals(LocalDate(2026, 8, 16), todos[2].showsFrom)
+    }
+
+    @Test
+    fun aDescriptionWithNoMarkerOrAMalformedOneYieldsNothing() {
+        assertNull(parseClosedOn(null))
+        assertNull(parseClosedOn(""))
+        assertNull(parseClosedOn("Husk kvitteringen"))
+        assertNull(parseClosedOn("[lukket:17-08-2026]"))
+        // Found even with text around it, so a description someone typed into does not hide it.
+        assertEquals(LocalDate(2026, 8, 17), parseClosedOn("Husk kvitteringen [lukket:2026-08-17]"))
     }
 }

@@ -391,6 +391,18 @@ fun weekIndexOf(window: ClosedRange<LocalDate>, date: LocalDate): Int =
 fun weekAtPage(window: ClosedRange<LocalDate>, page: Int): LocalDate =
     weekStart(window.start).plus(page.coerceIn(0, weekPageCount(window) - 1) * DaysPerWeek, DateTimeUnit.DAY)
 
+/** How many day pages [window] spans (both ends inclusive) — the Opgaver panel's paging scale. */
+fun dayPageCount(window: ClosedRange<LocalDate>): Int =
+    window.start.daysUntil(window.endInclusive) + 1
+
+/** The page [date] sits on, clamped into [window] for the same reason as [monthIndexOf]. */
+fun dayIndexOf(window: ClosedRange<LocalDate>, date: LocalDate): Int =
+    window.start.daysUntil(date).coerceIn(0, dayPageCount(window) - 1)
+
+/** The day [page] shows. Clamped like [dayIndexOf]. */
+fun dayAtPage(window: ClosedRange<LocalDate>, page: Int): LocalDate =
+    window.start.plus(page.coerceIn(0, dayPageCount(window) - 1), DateTimeUnit.DAY)
+
 /**
  * One event placed in a day column of the week grid: its resolved [startMinute]/[endMinute] bounds
  * (never shorter than [MinEventSpanMinutes]) plus which of the day's overlap [lane]s it takes and how
@@ -534,27 +546,65 @@ const val UntitledEventTitle = "(uden titel)"
 fun sortCalendarEvents(events: List<CalendarEvent>): List<CalendarEvent> =
     events.sortedWith(compareBy({ it.date }, { it.startMinute ?: -1 }, { it.title }))
 
-/**
- * Checklist order: what is left to do first, done items sunk to the bottom. The sort is stable, so
- * [addTodo]'s append order survives inside each group and a row only ever moves when it is ticked.
- */
-fun sortTodos(todos: List<TodoItem>): List<TodoItem> = todos.sortedBy { it.done }
+/** One day's rows under a single date header on an Opgaver page. Never empty. */
+data class TodoGroup(val due: LocalDate, val items: List<TodoItem>)
+
+/** What one Opgaver page draws: what is still open, and what has been ticked off. See [todoPage]. */
+data class TodoPage(val open: List<TodoGroup>, val done: List<TodoGroup>)
 
 /**
- * Append a todo bound to [due]. [id] is supplied by the caller (the adapter mints a fresh one) so this
- * stays deterministic/testable. A blank [label] is a no-op — `todo.add_item` requires a summary, so
- * the ghost add-row never commits an empty item. New items append (stable order → rows never jump).
+ * The page for [day], whose two halves are scoped by two different questions.
+ *
+ * **Open** is every todo still to do whose [TodoItem.showsFrom] day has been reached, so an unticked
+ * Tuesday keeps standing on Wednesday's page rather than having to be swiped back to. Anything due
+ * later belongs to a later page — and so does anything that did not yet exist: a task carries
+ * *forward* from the day it was written down, never backwards onto days it was not yet a task on.
+ *
+ * **Done** is what was ticked off *on this day* — not everything ever finished up to it. Closing
+ * Tuesday's task on Wednesday files it under Wednesday, and Thursday opens clean. Both halves group
+ * by **due** day, nearest first, so the done half still separates "finished, and it was today's" from
+ * "finished, but it had been hanging over from yesterday".
+ *
+ * Alphabetical inside a group rather than the list's own order because a page mixes days: an append
+ * order that spans several days puts no two rows anywhere a reader can predict.
  */
-fun HomeState.addTodo(id: String, due: LocalDate, label: String): HomeState {
-    val trimmed = label.trim()
-    if (trimmed.isEmpty()) return this
-    return copy(calendar = calendar.copy(todos = calendar.todos + TodoItem(id, due, trimmed, done = false)))
+fun todoPage(todos: List<TodoItem>, day: LocalDate): TodoPage {
+    fun group(items: List<TodoItem>) = items
+        .groupBy { it.due }
+        .map { (due, sameDay) -> TodoGroup(due, sameDay.sortedBy { it.label.lowercase() }) }
+        .sortedByDescending { it.due }
+    return TodoPage(
+        open = group(todos.filter { !it.done && it.showsFrom <= day }),
+        done = group(todos.filter { it.done && it.closedOn == day }),
+    )
 }
 
-/** Flip a todo's `done` (the tap gesture ↔ HA needs_action/completed). */
-fun HomeState.toggleTodo(id: String): HomeState =
+/**
+ * Append a todo bound to [due], written down on [createdOn]. [id] is supplied by the caller (the
+ * adapter mints a fresh one) so this stays deterministic/testable. A blank [label] is a no-op —
+ * `todo.add_item` requires a summary, so the ghost add-row never commits an empty item. New items
+ * append (stable order → rows never jump).
+ *
+ * [createdOn] defaults to [due] — the day-is-the-day case — so a caller with no clock in reach still
+ * gets the behaviour the checklist had before the creation day was recorded.
+ */
+fun HomeState.addTodo(id: String, due: LocalDate, label: String, createdOn: LocalDate = due): HomeState {
+    val trimmed = label.trim()
+    if (trimmed.isEmpty()) return this
+    val item = TodoItem(id, due, trimmed, done = false, createdOn = createdOn)
+    return copy(calendar = calendar.copy(todos = calendar.todos + item))
+}
+
+/**
+ * Flip a todo's `done` (the tap gesture ↔ HA needs_action/completed), stamping [today] as the day it
+ * was closed — or clearing that stamp when it is re-opened, so closing it again dates it afresh.
+ */
+fun HomeState.toggleTodo(id: String, today: LocalDate): HomeState =
     copy(calendar = calendar.copy(
-        todos = calendar.todos.map { if (it.id == id) it.copy(done = !it.done) else it },
+        todos = calendar.todos.map {
+            if (it.id != id) it
+            else it.copy(done = !it.done, completedOn = if (it.done) null else today)
+        },
     ))
 
 /**

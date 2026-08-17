@@ -41,8 +41,11 @@ enum class Room(val displayName: String, val hasSpeaker: Boolean) {
     }
 }
 
-/** The two mutually-exclusive right-card panels. */
-enum class Panel { Media, Calendar }
+/**
+ * The mutually-exclusive right-card panels. Declaration order is the tab order, and the panel swap
+ * slides off the ordinal, so a new panel belongs where it sits in the row.
+ */
+enum class Panel { Media, Calendar, Opgaver }
 
 /** How the Calendar panel draws the days: the month grid, or the selected day's week as a time grid. */
 enum class CalendarView { Month, Week }
@@ -274,6 +277,25 @@ data class CalendarEventDraft(
  * [done] ↔ `status` (needs_action/completed), [due] the day it is bound to. "Todos for a day" is a
  * client-side filter on [due] over one shared list — the per-day bucket is a UI idea, not backend
  * structure.
+ *
+ * [completedOn] is the day the task was ticked off — what puts a finished task on the page of the day
+ * it was finished rather than leaving it standing on every later one. Home Assistant's `todo` API
+ * carries no completion timestamp (only needs_action/completed), so the day is **written into the
+ * item's `description`** as a marker and read back from there. That makes it shared truth living in
+ * HA rather than a per-device note: tick a task on the tablet and the phone reads the same day back,
+ * whether or not it was even running at the time.
+ *
+ * `null` while the task is open, and cleared when a row is un-ticked so closing it again re-stamps
+ * it. A completed row without a marker — ticked from the Home Assistant app, or closed before this
+ * was recorded — falls back to its [due] day via [closedOn]. Every client derives that identically,
+ * so they still agree.
+ *
+ * [createdOn] is the day the task came into existence, carried in the same `description` field by the
+ * same argument: a task must not appear on days it did not yet exist on. [due] alone cannot say that
+ * — it is the day the task is *for*, and nothing stops it landing in the past (a list item added from
+ * the Home Assistant app with a back-dated due, an item with no due date at all, or a deliberate add
+ * on a passed page). `null` for every item this app did not add, which reads as "as old as its [due]"
+ * and is exactly how the checklist behaved before the day was recorded.
  */
 @Serializable
 data class TodoItem(
@@ -281,7 +303,18 @@ data class TodoItem(
     val due: LocalDate,
     val label: String,
     val done: Boolean,
-)
+    val completedOn: LocalDate? = null,
+    val createdOn: LocalDate? = null,
+) {
+    /** The day this belongs on once ticked off — [completedOn] where we have it, else [due]. */
+    val closedOn: LocalDate get() = completedOn ?: due
+
+    /**
+     * The first day this is shown on: its [due] day, but never before it existed. An open task then
+     * carries forward from here onto every later page, and backwards onto none.
+     */
+    val showsFrom: LocalDate get() = createdOn?.let { maxOf(due, it) } ?: due
+}
 
 /**
  * The calendar payload the adapter exposes: a flat list of [events] and [todos] over whatever window

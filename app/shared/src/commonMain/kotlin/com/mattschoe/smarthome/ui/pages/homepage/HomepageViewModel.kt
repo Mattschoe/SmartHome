@@ -124,6 +124,8 @@ class HomepageViewModel(
 
     private val _displayedMonth = MutableStateFlow(currentDay().let { LocalDate(it.year, it.month.number, 1) })
     private val _selectedDay = MutableStateFlow(currentDay())
+    // The Opgaver panel's own day, kept apart from [_selectedDay] on purpose — see Ready.todoDay.
+    private val _todoDay = MutableStateFlow(currentDay())
     private val _calendarView = MutableStateFlow(CalendarView.Month)
     private val _eventEditor = MutableStateFlow<EventEditorTarget?>(null)
     private val _eventDetail = MutableStateFlow<CalendarEvent?>(null)
@@ -192,11 +194,13 @@ class HomepageViewModel(
                 _displayedMonth, _selectedDay, today, nowMinutes,
                 combine(
                     _calendarView, _eventEditor, _eventDetail, _savingEvent,
-                    combine(_calendarFilters, _calendarSettingsOpen, _weekHourHeight) { filters, open, hourHeight ->
-                        Triple(filters, open, hourHeight)
+                    combine(
+                        _calendarFilters, _calendarSettingsOpen, _weekHourHeight, _todoDay,
+                    ) { filters, open, hourHeight, todoDay ->
+                        CalendarChrome(filters, open, hourHeight, todoDay)
                     },
-                ) { view, editor, detail, saving, (filters, settingsOpen, hourHeight) ->
-                    CalendarSurfaceSelection(view, editor, detail, saving, filters, settingsOpen, hourHeight)
+                ) { view, editor, detail, saving, chrome ->
+                    CalendarSurfaceSelection(view, editor, detail, saving, chrome)
                 },
             ) { month, day, now, minute, surface ->
                 CalendarSelection(month, day, now, minute, surface)
@@ -228,13 +232,14 @@ class HomepageViewModel(
                 today = calendar.today,
                 displayedMonth = calendar.displayedMonth,
                 selectedDay = calendar.selectedDay,
+                todoDay = calendar.surface.chrome.todoDay,
                 calendarView = calendar.surface.calendarView,
                 nowMinutes = calendar.nowMinutes,
                 eventEditor = calendar.surface.eventEditor,
                 eventDetail = calendar.surface.eventDetail,
-                calendarFilters = calendar.surface.filters,
-                calendarSettingsOpen = calendar.surface.settingsOpen,
-                weekHourHeight = calendar.surface.weekHourHeight,
+                calendarFilters = calendar.surface.chrome.filters,
+                calendarSettingsOpen = calendar.surface.chrome.settingsOpen,
+                weekHourHeight = calendar.surface.chrome.weekHourHeight,
                 savingEvent = calendar.surface.savingEvent,
             )
         }.stateIn(
@@ -286,6 +291,10 @@ class HomepageViewModel(
      * are fetched rather than pushed, and a subscribed calendar (a work roster) is polled only once a
      * day unless something forces it. Which tab is showing stays here, never on the adapter.
      *
+     * Opening Opgaver puts it back on today, rather than wherever it was last swiped to: on a wall
+     * tablet the checklist is opened to ask what is outstanding *now*, and this is also what carries
+     * it over midnight.
+     *
      * The refresh only fires when the panel actually *changes*: the phone pager reads `targetPage`,
      * which flips mid-drag, so swiping toward the Calendar page — and back and forth — re-selects
      * the same panel many times per gesture. Re-selection is a no-op; a real Media→Calendar (or
@@ -295,6 +304,7 @@ class HomepageViewModel(
         if (_panel.value == panel) return
         _panel.value = panel
         if (panel == Panel.Calendar) adapter.refreshCalendar()
+        if (panel == Panel.Opgaver) _todoDay.value = currentDay()
     }
 
     /** Switch which provider's listening the browse shelves show. Search is unaffected by design. */
@@ -561,6 +571,12 @@ class HomepageViewModel(
             }
         }
     }
+
+    /**
+     * Page the checklist to [date] — pure UI selection, and deliberately not [selectDay]: the two
+     * panels swipe independently.
+     */
+    fun showTodoDay(date: LocalDate) { _todoDay.value = date }
 
     // Todo intents forward to the adapter (optimistic, synchronous). Add mints the id there.
     fun addTodo(due: LocalDate, label: String) = adapter.addTodo(due, label)
@@ -874,9 +890,19 @@ private data class CalendarSurfaceSelection(
     val eventEditor: EventEditorTarget?,
     val eventDetail: CalendarEvent?,
     val savingEvent: Boolean,
+    val chrome: CalendarChrome,
+)
+
+/**
+ * What [CalendarSurfaceSelection]'s own combine has no room left for: the gear's filters and popup,
+ * the week grid's zoom, and the Opgaver panel's day. Not a family so much as the overflow — both
+ * folds above it are full at their typed overload's five arguments.
+ */
+private data class CalendarChrome(
     val filters: CalendarFilters,
     val settingsOpen: Boolean,
     val weekHourHeight: Float,
+    val todoDay: LocalDate,
 )
 
 /**

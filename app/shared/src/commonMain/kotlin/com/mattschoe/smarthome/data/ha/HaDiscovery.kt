@@ -51,6 +51,12 @@ private const val CalendarCreateEvent = 1
 private const val TodoSetDueDate = 16
 
 /**
+ * `TodoListEntityFeature.SET_DESCRIPTION_ON_ITEM`. Unlike [TodoSetDueDate] this is not required to
+ * use a list, only to record when a task was closed — see [todoSupportsDescription].
+ */
+private const val TodoSetDescription = 64
+
+/**
  * The home's calendars, from the `get_states` snapshot: every `calendar.*` entity, labelled by its
  * `friendly_name` and marked writable from its own `supported_features`. Derived rather than
  * configured, so adding a calendar in Home Assistant is all it takes for the app to see it — and a
@@ -96,6 +102,17 @@ fun discoverTodoEntity(states: List<HaStateDto>): String? = states
     .sortedBy { it.entity_id }
     .firstOrNull { (it.attrInt("supported_features") ?: 0) and TodoSetDueDate != 0 }
     ?.entity_id
+
+/**
+ * Whether [entityId]'s list lets `todo.update_item` write a description — where the day a task was
+ * ticked off is stamped (see `formatClosedMarker`). Not a requirement for using the list, only for
+ * recording that day: a list without it still works, and its finished tasks fall back to sitting on
+ * the day they were due.
+ */
+fun todoSupportsDescription(states: List<HaStateDto>, entityId: String?): Boolean = states
+    .firstOrNull { it.entity_id == entityId }
+    ?.let { (it.attrInt("supported_features") ?: 0) and TodoSetDescription != 0 }
+    ?: false
 
 /**
  * The home's weather entity, backing the outdoor climate tile: the first `weather.*` by entity id.

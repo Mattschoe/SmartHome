@@ -9,7 +9,6 @@ import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
-import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
 import com.mattschoe.smarthome.ui.controls.calendar.TodayButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
@@ -42,7 +41,6 @@ fun PortraitCalendarPage(
     selectedDay: LocalDate,
     calendarView: CalendarView,
     eventsByDay: Map<LocalDate, List<CalendarEvent>>,
-    selectedDayTodos: List<TodoItem>,
     weekDays: List<LocalDate>,
     calendarWindow: ClosedRange<LocalDate>,
     nowMinutes: Int,
@@ -63,21 +61,16 @@ fun PortraitCalendarPage(
             selectedDay = selectedDay,
             calendarView = calendarView,
             eventsByDay = eventsByDay,
-            selectedDayTodos = selectedDayTodos,
             weekDays = weekDays,
             calendarWindow = calendarWindow,
             nowMinutes = nowMinutes,
             calendarSources = calendar.sources,
             calendarStale = calendar.stale,
-            calendarHasTodoList = calendar.hasTodoList,
             dayMarks = dayMarks,
             weekHourHeight = weekHourHeight,
             onShowMonth = viewModel::showMonth,
             onShowWeek = viewModel::showWeek,
             onSelectDay = viewModel::selectDay,
-            onAddTodo = viewModel::addTodo,
-            onToggleTodo = viewModel::toggleTodo,
-            onEditTodo = viewModel::editTodo,
             onOpenEvent = viewModel::openEvent,
             onOpenEventDetail = viewModel::openEventDetail,
             onNewEventAt = viewModel::openNewEventAt,

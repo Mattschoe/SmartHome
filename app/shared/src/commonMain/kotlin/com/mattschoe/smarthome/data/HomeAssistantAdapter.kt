@@ -12,6 +12,9 @@ import com.mattschoe.smarthome.data.ha.SWITCH_LIGHTS_BY_ROOM
 import com.mattschoe.smarthome.data.ha.discoverCalendarSources
 import com.mattschoe.smarthome.data.ha.discoverRoomEntities
 import com.mattschoe.smarthome.data.ha.discoverTodoEntity
+import com.mattschoe.smarthome.data.ha.formatClosedMarker
+import com.mattschoe.smarthome.data.ha.formatTodoDescription
+import com.mattschoe.smarthome.data.ha.todoSupportsDescription
 import com.mattschoe.smarthome.data.ha.discoverWeatherEntity
 import com.mattschoe.smarthome.data.ha.feelsLikeC
 import com.mattschoe.smarthome.data.ha.mapCalendarEvents
@@ -135,6 +138,8 @@ class HomeAssistantAdapter(
     // True until a live fetch lands — what the panel labels as showing cached, possibly outdated data.
     private val calendarStale = MutableStateFlow(true)
     @Volatile private var todoEntityId: String? = null
+    // Whether that list can take a description, which is where the day a task was closed is stamped.
+    @Volatile private var todoDescriptionCapable: Boolean = false
     @Volatile private var weatherEntityId: String? = null
     // The list the live subscription follows; null before one is taken out and after every drop,
     // since a socket takes its subscriptions with it.
@@ -339,31 +344,70 @@ class HomeAssistantAdapter(
     /**
      * Add a todo due on [due]. HA mints the real `uid`, so the optimistic row carries a temporary one
      * until the echo lands (rows are keyed by id, so it re-keys rather than rebuilds).
+     *
+     * Today rides along in the `description` as the day it was written down (see
+     * [formatTodoDescription]), which is what keeps it off the pages of days before it existed — [due]
+     * cannot say that, being the day the task is *for* and free to sit in the past. A list that cannot
+     * take a description simply records no creation day, and those rows behave as they always did:
+     * shown from their [due] day forward.
      */
     @OptIn(ExperimentalUuidApi::class)
     override fun addTodo(due: LocalDate, label: String) {
         val entityId = todoEntityId ?: return
         val trimmed = label.trim()
         if (trimmed.isEmpty()) return
-        mutateTodos { it.addTodo(Uuid.random().toString(), due, trimmed) }
+        val today = today()
+        val createdOn = today.takeIf { todoDescriptionCapable }
+        mutateTodos { it.addTodo(Uuid.random().toString(), due, trimmed, createdOn = createdOn ?: due) }
         callService(
             "todo",
             "add_item",
-            buildJsonObject { put("item", trimmed); put("due_date", due.toString()) },
+            buildJsonObject {
+                put("item", trimmed)
+                put("due_date", due.toString())
+                if (createdOn != null) {
+                    put("description", formatTodoDescription(createdOn = createdOn, closedOn = null))
+                }
+            },
             entityTarget(entityId),
         )
     }
 
+    /**
+     * Tick a todo off, or re-open it. The day it was closed rides along in the item's `description`
+     * (see [formatClosedMarker]) — Home Assistant has nowhere else to put it, and putting it there
+     * rather than in this device's own storage is what lets every client agree on which day a task
+     * belongs to. Re-opening clears the stamp, so closing it again dates it afresh.
+     *
+     * A list that cannot take a description is written without one; its finished tasks then fall back
+     * to sitting on the day they were due, identically on every client.
+     */
     override fun toggleTodo(id: String) {
         val entityId = todoEntityId ?: return
-        val wasDone = todoItems.value.firstOrNull { it.id == id }?.done ?: return
-        mutateTodos { it.toggleTodo(id) }
+        val existing = todoItems.value.firstOrNull { it.id == id } ?: return
+        val wasDone = existing.done
+        val today = today()
+        mutateTodos { it.toggleTodo(id, today) }
         callService(
             "todo",
             "update_item",
             // Always address by uid: `update_item` matches on uid *or* summary, and two todos may
             // well share a summary.
-            buildJsonObject { put("item", id); put("status", if (wasDone) "needs_action" else "completed") },
+            buildJsonObject {
+                put("item", id)
+                put("status", if (wasDone) "needs_action" else "completed")
+                if (todoDescriptionCapable) {
+                    // The write replaces the field, so the creation day has to be carried back
+                    // through it — un-ticking clears only the closing day.
+                    put(
+                        "description",
+                        formatTodoDescription(
+                            createdOn = existing.createdOn,
+                            closedOn = today.takeUnless { wasDone },
+                        ),
+                    )
+                }
+            },
             entityTarget(entityId),
         )
     }
@@ -605,6 +649,7 @@ class HomeAssistantAdapter(
         // Their colors are a registry option rather than an entity attribute, hence both inputs.
         calendarSources.value = discoverCalendarSources(states, entities)
         todoEntityId = discoverTodoEntity(states)
+        todoDescriptionCapable = todoSupportsDescription(states, todoEntityId)
         // A home that lost its todo list keeps no rows from it: the checklist says there is no list.
         if (todoEntityId == null) todoItems.value = emptyList()
         rebuild()

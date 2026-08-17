@@ -2,13 +2,10 @@ package com.mattschoe.smarthome.ui.controls.calendar
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
@@ -46,65 +43,30 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.model.TodoItem
-import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
 import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.Muted
-import kotlinx.datetime.LocalDate
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
 import smarthome.shared.generated.resources.checkbox_blank
 import smarthome.shared.generated.resources.checkbox_filled
 
 /**
- * "OPGAVER" label over the day's keyed todo rows, then the ghost add row. A home whose Home Assistant
- * has no due-date-capable todo list ([hasTodoList]) gets a note instead: every todo intent is inert
- * without one, so an add row there would silently swallow whatever is typed into it.
- */
-@Composable
-internal fun TodoSection(
-    selectedDay: LocalDate,
-    todos: List<TodoItem>,
-    hasTodoList: Boolean,
-    onAddTodo: (LocalDate, String) -> Unit,
-    onToggleTodo: (String) -> Unit,
-    onEditTodo: (String, String) -> Unit,
-) {
-    Column(Modifier.fillMaxWidth()) {
-        SectionLabel("Opgaver", fontSize = 18.sp)
-        Spacer(Modifier.height(4.dp))
-        if (!hasTodoList) {
-            Text(
-                text = "Ingen opgaveliste i Home Assistant",
-                color = Muted,
-                fontSize = 15.sp,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-            return@Column
-        }
-        // Keyed by stable id so a backend echo (Phase 9) re-keys existing rows instead of rebuilding.
-        todos.forEach { todo ->
-            key(todo.id) {
-                TodoRow(
-                    todo = todo,
-                    onToggle = { onToggleTodo(todo.id) },
-                    onCommitEdit = { text -> onEditTodo(todo.id, text) },
-                )
-            }
-        }
-        AddTodoRow(onAdd = { text -> onAddTodo(selectedDay, text) })
-    }
-}
-
-/**
  * A todo row with two targets, the split every checklist uses: **the box toggles done, the label
  * opens the editor**. Editing was a long-press before, which a mouse has no comfortable equivalent
  * for — a plain tap on the label reads the same on the tablet and in the desktop window. Done rows
  * are struck through and muted; committing a blank label removes the item (the delete escape).
+ *
+ * The row prints no date: the Opgaver panel stacks its rows under a date header per day, so saying
+ * it again on every row would only repeat the header down the whole group.
  */
 @Composable
-private fun TodoRow(todo: TodoItem, onToggle: () -> Unit, onCommitEdit: (String) -> Unit) {
+internal fun TodoRow(
+    todo: TodoItem,
+    onToggle: () -> Unit,
+    onCommitEdit: (String) -> Unit,
+) {
     var editing by remember { mutableStateOf(false) }
     if (editing) {
         TodoInlineEdit(
@@ -157,7 +119,7 @@ private fun TodoRow(todo: TodoItem, onToggle: () -> Unit, onCommitEdit: (String)
  * Enter) — on the desktop window that is the whole point, and the soft keyboard stays up on touch.
  */
 @Composable
-private fun AddTodoRow(onAdd: (String) -> Unit) {
+internal fun AddTodoRow(onAdd: (String) -> Unit) {
     var adding by remember { mutableStateOf(false) }
     // Bumped per keyboard commit purely to remount the field with an empty value.
     var round by remember { mutableIntStateOf(0) }

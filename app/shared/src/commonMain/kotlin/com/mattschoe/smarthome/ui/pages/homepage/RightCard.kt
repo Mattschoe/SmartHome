@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
@@ -51,6 +50,7 @@ import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.TodoItem
+import com.mattschoe.smarthome.data.formatDayAndMonth
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
@@ -59,6 +59,7 @@ import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarViewToggle
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
 import com.mattschoe.smarthome.ui.controls.calendar.TodayButton
+import com.mattschoe.smarthome.ui.controls.calendar.TodoPanel
 import com.mattschoe.smarthome.ui.controls.media.MediaPanel
 import com.mattschoe.smarthome.ui.controls.media.MiniPlayerBar
 import com.mattschoe.smarthome.ui.controls.media.MinimizeHandle
@@ -74,11 +75,12 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
 import smarthome.shared.generated.resources.calender_filled
+import smarthome.shared.generated.resources.checklist
 import smarthome.shared.generated.resources.media_outline
 
 /**
- * The flex-1.12 right card: a fixed Media/Calendar [PanelTabs] segmented control over a scrolling
- * content region. The Media panel swaps between the now-playing surface and the browse surface
+ * The flex-1.12 right card: a fixed Musik/Kalender/Opgaver [PanelTabs] segmented control over a
+ * scrolling content region. The Media panel swaps between the now-playing surface and the browse surface
  * (Quick Picks + Mixed for you) by playback state *and* [mediaMinimized] — collapsing the player
  * hands the panel back to browsing while a [MiniPlayerBar] floats over it, keeping transport
  * reachable. Width-agnostic; the `Expanded` assembly point in [Homepage.kt] assigns its width.
@@ -103,11 +105,14 @@ fun RightCard(
     today: LocalDate,
     displayedMonth: LocalDate,
     selectedDay: LocalDate,
+    /** The day the Opgaver panel is paged to — its own selection, independent of [selectedDay]. */
+    todoDay: LocalDate,
     /** Whether the Calendar panel shows the month grid or [selectedDay]'s week. */
     calendarView: CalendarView,
     /** Every visible event grouped by day; each calendar view's pages slice it themselves. */
     eventsByDay: Map<LocalDate, List<CalendarEvent>>,
-    selectedDayTodos: List<TodoItem>,
+    /** The whole checklist; the Opgaver panel's pages slice it themselves, as the calendar's do. */
+    todos: List<TodoItem>,
     /** The week view's seven columns (Monday first) for the week being shown. */
     weekDays: List<LocalDate>,
     /** The span the adapter holds events for — the range the calendar's pagers are bounded to. */
@@ -156,6 +161,7 @@ fun RightCard(
     onShowMonth: (LocalDate) -> Unit,
     onShowWeek: (LocalDate) -> Unit,
     onSelectDay: (LocalDate) -> Unit,
+    onShowTodoDay: (LocalDate) -> Unit,
     onAddTodo: (LocalDate, String) -> Unit,
     onToggleTodo: (String) -> Unit,
     onEditTodo: (String, String) -> Unit,
@@ -181,9 +187,11 @@ fun RightCard(
         contentPadding = PaddingValues(24.dp),
     ) {
         Column(Modifier.fillMaxSize()) {
-            // The tabs are wrap-content, so the trailing edge beside them is free for the control the
+            // The tabs are wrap-content, so the trailing edge beside them is free for whatever the
             // showing panel needs there: the source badge over Media, the today-and-add pair over the
-            // Calendar. Both animate, to keep the row from jumping as the tab changes. The pair stands
+            // Calendar, and over Opgaver the day it is paged to — which is a title rather than a
+            // control, but this is the card's free corner and the checklist has no header of its own.
+            // All three animate, to keep the row from jumping as the tab changes. The pair stands
             // down while the editor is open — re-opening a blank form would discard what is typed, and
             // paging the grid underneath the editor moves nothing anybody can see.
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -201,6 +209,14 @@ fun RightCard(
                         TodayButton(today = today, onClick = onShowToday)
                         AddEventButton(onClick = onAddEvent)
                     }
+                }
+                AnimatedVisibility(visible = panel == Panel.Opgaver, enter = fadeIn(), exit = fadeOut()) {
+                    Text(
+                        text = formatDayAndMonth(todoDay),
+                        color = Ink,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
             Spacer(Modifier.height(Dimensions.mediaSectionGap))
@@ -261,21 +277,16 @@ fun RightCard(
                         selectedDay = selectedDay,
                         calendarView = calendarView,
                         eventsByDay = eventsByDay,
-                        selectedDayTodos = selectedDayTodos,
                         weekDays = weekDays,
                         calendarWindow = calendarWindow,
                         nowMinutes = nowMinutes,
                         calendarSources = calendarSources,
                         calendarStale = calendarStale,
-                        calendarHasTodoList = calendarHasTodoList,
                         dayMarks = dayMarks,
                         weekHourHeight = weekHourHeight,
                         onShowMonth = onShowMonth,
                         onShowWeek = onShowWeek,
                         onSelectDay = onSelectDay,
-                        onAddTodo = onAddTodo,
-                        onToggleTodo = onToggleTodo,
-                        onEditTodo = onEditTodo,
                         onOpenEvent = onOpenEvent,
                         onOpenEventDetail = onOpenEventDetail,
                         onNewEventAt = onNewEventAt,
@@ -289,6 +300,21 @@ fun RightCard(
                             CalendarViewToggle(calendarView, onSelectCalendarView)
                             CalendarSettingsButton(onOpenCalendarSettings)
                         },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    // Opgaver owns its scroll too — it pins its add row above a day pager and scrolls
+                    // only the list beneath it, which a scroll out here would fight. It needs no
+                    // control at the trailing edge: the ghost add row is its own add affordance.
+                    Panel.Opgaver -> TodoPanel(
+                        todos = todos,
+                        day = todoDay,
+                        today = today,
+                        calendarWindow = calendarWindow,
+                        hasTodoList = calendarHasTodoList,
+                        onShowDay = onShowTodoDay,
+                        onAddTodo = onAddTodo,
+                        onToggleTodo = onToggleTodo,
+                        onEditTodo = onEditTodo,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -363,8 +389,9 @@ fun RightCard(
 }
 
 /**
- * Wrap-content pill segmented control switching the right card between Media and Calendar. Sunken
- * [InsetFill] track with two content-sized segments; the active one is a filled Forest pill.
+ * Wrap-content pill segmented control switching the right card between its three panels. Sunken
+ * [InsetFill] track with square glyph segments; the active one is a filled Forest pill. The segments
+ * carry no labels — see [PanelTab].
  */
 @Composable
 private fun PanelTabs(panel: Panel, onSelectPanel: (Panel) -> Unit, modifier: Modifier = Modifier) {
@@ -374,16 +401,22 @@ private fun PanelTabs(panel: Panel, onSelectPanel: (Panel) -> Unit, modifier: Mo
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PanelTab(
-            label = "Media",
+            label = "Musik",
             icon = Res.drawable.media_outline,
             selected = panel == Panel.Media,
             onClick = { onSelectPanel(Panel.Media) },
         )
         PanelTab(
-            label = "Calendar",
+            label = "Kalender",
             icon = Res.drawable.calender_filled,
             selected = panel == Panel.Calendar,
             onClick = { onSelectPanel(Panel.Calendar) },
+        )
+        PanelTab(
+            label = "Opgaver",
+            icon = Res.drawable.checklist,
+            selected = panel == Panel.Opgaver,
+            onClick = { onSelectPanel(Panel.Opgaver) },
         )
     }
 }
@@ -417,26 +450,28 @@ private fun SourceToggle(source: MusicSource, onToggle: (MusicSource) -> Unit, m
     }
 }
 
+/**
+ * One segment: a square glyph target, no label. Three labelled pills would run wider than the right
+ * card's own minimum with the trailing control beside them, so [label] is carried as the segment's
+ * accessible name instead of being printed.
+ */
 @Composable
 private fun PanelTab(label: String, icon: DrawableResource, selected: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(percent = 50)
-    val contentColor = if (selected) OnForest else Ink
-    Row(
+    Box(
         modifier = Modifier
             .clip(shape)
             .then(if (selected) Modifier.background(Forest, shape) else Modifier)
             .selectable(selected = selected, onClick = onClick, role = Role.Tab)
-            .heightIn(min = Dimensions.minTouch)
-            .padding(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .size(Dimensions.minTouch)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             painter = painterResource(icon),
             contentDescription = null,
-            tint = contentColor,
+            tint = if (selected) OnForest else Ink,
             modifier = Modifier.size(20.dp),
         )
-        Text(text = label, color = contentColor, fontWeight = FontWeight.Medium, fontSize = 17.sp)
     }
 }

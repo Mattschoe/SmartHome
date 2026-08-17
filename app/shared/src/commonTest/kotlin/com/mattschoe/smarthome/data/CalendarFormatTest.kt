@@ -201,4 +201,38 @@ class CalendarFormatTest {
         // function inventing a placeholder would write that placeholder to the calendar.
         assertEquals("", buildEventDraft("   ", at, at, allDay = false, location = null).summary)
     }
+
+    @Test
+    fun todoDueReadsTheThreeNeighbouringDaysAsWords() {
+        val today = LocalDate(2026, 8, 17)
+        assertEquals("i dag", formatTodoDue(today, today))
+        assertEquals("i morgen", formatTodoDue(LocalDate(2026, 8, 18), today))
+        assertEquals("i går", formatTodoDue(LocalDate(2026, 8, 16), today))
+    }
+
+    @Test
+    fun todoDueFallsBackToAnAbbreviatedDate() {
+        val today = LocalDate(2026, 8, 17)
+        assertEquals("12. aug", formatTodoDue(LocalDate(2026, 8, 12), today))
+        assertEquals("22. aug", formatTodoDue(LocalDate(2026, 8, 22), today))
+        // Two days out on either side is already a date — only the immediate neighbours are words.
+        assertEquals("19. aug", formatTodoDue(LocalDate(2026, 8, 19), today))
+        // A month whose Danish name is longer than three letters is still cut to three.
+        assertEquals("3. dec", formatTodoDue(LocalDate(2026, 12, 3), today))
+    }
+
+    @Test
+    fun todoDueCrossesAMonthBoundaryOnTheNeighbouringDays() {
+        val today = LocalDate(2026, 8, 31)
+        assertEquals("i morgen", formatTodoDue(LocalDate(2026, 9, 1), today))
+        assertEquals("i går", formatTodoDue(LocalDate(2026, 8, 30), today))
+    }
+
+    @Test
+    fun dayAndMonthNamesTheDayWithoutAWeekdayOrAYear() {
+        assertEquals("17. august", formatDayAndMonth(LocalDate(2026, 8, 17)))
+        // Unpadded, and the month spelled out in full rather than cut to three as the groups are.
+        assertEquals("1. januar", formatDayAndMonth(LocalDate(2027, 1, 1)))
+        assertEquals("31. december", formatDayAndMonth(LocalDate(2026, 12, 31)))
+    }
 }

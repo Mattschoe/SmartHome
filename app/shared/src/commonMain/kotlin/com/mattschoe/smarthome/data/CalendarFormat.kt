@@ -103,6 +103,28 @@ fun formatLongDate(date: LocalDate): String {
     return "$weekday den ${date.day}. $month ${date.year}"
 }
 
+/**
+ * A todo group's header: "i går" / "i dag" / "i morgen" for the three days a reader thinks in, and
+ * "12. aug" for anything else. An Opgaver page carries every day up to the one it shows, so each
+ * group has to say which day it is; the neighbouring days read better as words than as dates.
+ *
+ * Relative to [today], never to the day the page shows — swiping to tomorrow should still read
+ * "i morgen" at the top, not "i dag".
+ */
+fun formatTodoDue(due: LocalDate, today: LocalDate): String = when (due) {
+    today -> "i dag"
+    today.plus(1, DateTimeUnit.DAY) -> "i morgen"
+    today.plus(-1, DateTimeUnit.DAY) -> "i går"
+    else -> "${due.day}. ${danishMonths[due.month.number - 1].take(3)}"
+}
+
+/**
+ * "17. august" — the Opgaver panel's title, naming the day being shown. No weekday and no year: it
+ * sits beside the tab row in the card's corner, where the width is the tabs' leftovers, and the
+ * checklist's own date groups say the rest.
+ */
+fun formatDayAndMonth(date: LocalDate): String = "${date.day}. ${danishMonths[date.month.number - 1]}"
+
 /** Minutes from midnight — the agenda's sort key for a timed event. */
 fun minutesOfDay(time: LocalTime): Int = time.hour * 60 + time.minute
 

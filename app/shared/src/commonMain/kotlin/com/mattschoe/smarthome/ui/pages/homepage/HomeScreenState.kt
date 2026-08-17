@@ -4,7 +4,6 @@ import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.audioJoined
 import com.mattschoe.smarthome.data.audioSessionOf
-import com.mattschoe.smarthome.data.sortTodos
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarState
@@ -15,7 +14,6 @@ import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
-import com.mattschoe.smarthome.data.model.TodoItem
 // Aliased: [Ready.weekStart]/[Ready.calendarWindow] are the properties this state exposes, the
 // imports are the pure math they call.
 import com.mattschoe.smarthome.data.weekStart as weekStartOf
@@ -169,8 +167,14 @@ sealed interface HomeScreenState {
         val today: LocalDate,
         /** First-of-month of the month the calendar grid is showing (VM-owned nav selection). */
         val displayedMonth: LocalDate,
-        /** The day whose agenda + todos are shown; scopes both (VM-owned selection). */
+        /** The day whose agenda the Calendar panel shows (VM-owned selection). */
         val selectedDay: LocalDate,
+        /**
+         * The day the Opgaver panel is paged to (VM-owned selection). Its own selection, **not**
+         * [selectedDay] — swiping the checklist must not move the calendar's day, or the reverse.
+         * Reset to today whenever the panel is entered.
+         */
+        val todoDay: LocalDate,
         /** Whether the Calendar panel draws the month grid or [selectedDay]'s week (VM-owned). */
         val calendarView: CalendarView,
         /** The event the editor surface is open on, or `null` when the calendar views show (VM-owned). */
@@ -183,8 +187,8 @@ sealed interface HomeScreenState {
         val calendarSettingsOpen: Boolean,
         /**
          * How tall one hour row of the week grid is, in dp — what pinching the grid sets (VM-owned,
-         * persisted). At the top of its range the day is 576dp and scrolls; at the bottom the whole
-         * day fits and the height it gave up goes to the checklist under it.
+         * persisted). At the top of its range the day is 576dp and scrolls; the bottom is whatever
+         * height makes all 24 hours exactly fill the card, which the view computes from its own size.
          */
         val weekHourHeight: Float,
         /** Whether a save or delete from the editor is in flight — the button spins and re-taps drop. */
@@ -267,11 +271,6 @@ sealed interface HomeScreenState {
 
         /** Read-only events bound to [selectedDay] (the agenda list). */
         val selectedDayEvents: List<CalendarEvent> get() = eventsByDay[selectedDay].orEmpty()
-
-        /** Todos bound to [selectedDay] (the checklist), unfinished ones first. */
-        val selectedDayTodos: List<TodoItem> by lazy {
-            sortTodos(calendar.todos.filter { it.due == selectedDay })
-        }
 
         /** Monday of the week [selectedDay] falls in — the week view's first column. */
         val weekStart: LocalDate get() = weekStartOf(selectedDay)

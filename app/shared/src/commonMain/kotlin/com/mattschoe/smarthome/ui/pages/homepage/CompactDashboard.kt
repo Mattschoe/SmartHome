@@ -44,16 +44,21 @@ fun CompactDashboard(ready: HomeScreenState.Ready, viewModel: HomepageViewModel)
 }
 
 /** The portrait pages, left to right. The pager opens on [PORTRAIT_START_PAGE] — Light Control. */
-private val PortraitPageTitles = listOf("Apps", "Lysstyring", "Musik", "Kalender")
+private val PortraitPageTitles = listOf("Apps", "Lysstyring", "Musik", "Kalender", "Opgaver")
 private const val PORTRAIT_START_PAGE = 1
 private const val PORTRAIT_CALENDAR_PAGE = 3
-
-/** The landscape pages, top to bottom — their card pairs live in the pages themselves. */
-private const val LANDSCAPE_PAGE_COUNT = 3
-private const val LANDSCAPE_CALENDAR_PAGE = 2
+private const val PORTRAIT_TODO_PAGE = 4
 
 /**
- * Portrait: four horizontally paged screens on a full-bleed cream surface — no floating card, the
+ * The landscape pages, top to bottom — their cards live in the pages themselves. Every page but
+ * Opgaver holds a pair; that one is a single wide card, see [LandscapeTodoPage].
+ */
+private const val LANDSCAPE_PAGE_COUNT = 4
+private const val LANDSCAPE_CALENDAR_PAGE = 2
+private const val LANDSCAPE_TODO_PAGE = 3
+
+/**
+ * Portrait: five horizontally paged screens on a full-bleed cream surface — no floating card, the
  * content sits directly on the page. The dot row floats bottom-centre over it.
  *
  * `Ready` is destructured into the narrow slices each page reads, mirroring the Expanded assembly in
@@ -76,11 +81,13 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
     // forced week view rendered while state says month would draw the month's filter set.
     LaunchedEffect(pagerState, viewModel) {
         snapshotFlow { pagerState.targetPage }.collect { page ->
-            if (page == PORTRAIT_CALENDAR_PAGE) {
-                viewModel.selectPanel(Panel.Calendar)
-                viewModel.setCalendarView(CalendarView.Week)
-            } else {
-                viewModel.selectPanel(Panel.Media)
+            when (page) {
+                PORTRAIT_CALENDAR_PAGE -> {
+                    viewModel.selectPanel(Panel.Calendar)
+                    viewModel.setCalendarView(CalendarView.Week)
+                }
+                PORTRAIT_TODO_PAGE -> viewModel.selectPanel(Panel.Opgaver)
+                else -> viewModel.selectPanel(Panel.Media)
             }
         }
     }
@@ -130,7 +137,7 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
                     viewModel = viewModel,
                     modifier = modifier,
                 )
-                else -> PortraitCalendarPage(
+                PORTRAIT_CALENDAR_PAGE -> PortraitCalendarPage(
                     calendar = ready.calendar,
                     eventEditor = ready.eventEditor,
                     savingEvent = ready.savingEvent,
@@ -139,7 +146,6 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
                     selectedDay = ready.selectedDay,
                     calendarView = ready.calendarView,
                     eventsByDay = ready.eventsByDay,
-                    selectedDayTodos = ready.selectedDayTodos,
                     weekDays = ready.weekDays,
                     calendarWindow = ready.calendarWindow,
                     nowMinutes = ready.nowMinutes,
@@ -148,6 +154,15 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
                     eventDetail = ready.eventDetail,
                     calendarSettingsOpen = ready.calendarSettingsOpen,
                     calendarFilters = ready.calendarFilters,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+                else -> PortraitTodoPage(
+                    todos = ready.calendar.todos,
+                    todoDay = ready.todoDay,
+                    today = ready.today,
+                    calendarWindow = ready.calendarWindow,
+                    hasTodoList = ready.calendar.hasTodoList,
                     viewModel = viewModel,
                     modifier = modifier,
                 )
@@ -178,8 +193,8 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
 }
 
 /**
- * Landscape: three vertically paged screens on the sage surface, each holding two equal cream
- * [CardContainer]s — literally the tablet's card. The indicator floats in the right-hand margin beside
+ * Landscape: four vertically paged screens on the sage surface, each holding two equal cream
+ * [CardContainer]s — literally the tablet's card (Opgaver excepted: one wide card). The indicator floats in the right-hand margin beside
  * them, so the cards keep the full width between the outer paddings. Same narrow-slice destructuring
  * as the portrait pager.
  */
@@ -193,11 +208,13 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
     // month grid. Setting the view is not cosmetic: `visibleEvents` filters by the *state's* view.
     LaunchedEffect(pagerState, viewModel) {
         snapshotFlow { pagerState.targetPage }.collect { page ->
-            if (page == LANDSCAPE_CALENDAR_PAGE) {
-                viewModel.selectPanel(Panel.Calendar)
-                viewModel.setCalendarView(CalendarView.Week)
-            } else {
-                viewModel.selectPanel(Panel.Media)
+            when (page) {
+                LANDSCAPE_CALENDAR_PAGE -> {
+                    viewModel.selectPanel(Panel.Calendar)
+                    viewModel.setCalendarView(CalendarView.Week)
+                }
+                LANDSCAPE_TODO_PAGE -> viewModel.selectPanel(Panel.Opgaver)
+                else -> viewModel.selectPanel(Panel.Media)
             }
         }
     }
@@ -247,7 +264,7 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
                     viewModel = viewModel,
                     modifier = modifier,
                 )
-                else -> LandscapeCalendarPage(
+                LANDSCAPE_CALENDAR_PAGE -> LandscapeCalendarPage(
                     calendar = ready.calendar,
                     eventEditor = ready.eventEditor,
                     savingEvent = ready.savingEvent,
@@ -256,7 +273,6 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
                     selectedDay = ready.selectedDay,
                     calendarView = ready.calendarView,
                     eventsByDay = ready.eventsByDay,
-                    selectedDayTodos = ready.selectedDayTodos,
                     weekDays = ready.weekDays,
                     calendarWindow = ready.calendarWindow,
                     nowMinutes = ready.nowMinutes,
@@ -265,6 +281,15 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
                     eventDetail = ready.eventDetail,
                     calendarSettingsOpen = ready.calendarSettingsOpen,
                     calendarFilters = ready.calendarFilters,
+                    viewModel = viewModel,
+                    modifier = modifier,
+                )
+                else -> LandscapeTodoPage(
+                    todos = ready.calendar.todos,
+                    todoDay = ready.todoDay,
+                    today = ready.today,
+                    calendarWindow = ready.calendarWindow,
+                    hasTodoList = ready.calendar.hasTodoList,
                     viewModel = viewModel,
                     modifier = modifier,
                 )

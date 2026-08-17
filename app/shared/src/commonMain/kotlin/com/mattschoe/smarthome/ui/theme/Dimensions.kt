@@ -91,17 +91,15 @@ object Dimensions {
     // Right-card Calendar panel (week view). The grid is 24 hour rows beside a gutter of hour labels.
     // Widths stay proportional (seven weight(1f) columns), so the same composables re-flow on a phone.
     // The hour row is a **range the reader sets** by pinching the grid, not a constant: at
-    // [weekHourHeightMax] the day is 576dp and scrolls inside the ~500dp it is shown in; at
-    // [weekHourHeightMin] the whole 24h fits in 144dp, the grid stops scrolling, and the height it no
-    // longer needs goes to the checklist below it. The level is persisted (`WeekZoomStore`).
+    // [weekHourHeightMax] the day is 576dp and scrolls inside the card. The floor is not a token at
+    // all — the grid fills the card, so collapsing stops the moment all 24 hours exactly fit the
+    // height on hand, which `CalendarViews` computes from its own constraints. These two are the
+    // persisted level's storage bounds (`WeekZoomStore`) and the ceiling that layout still honours.
     val weekHourHeightMin = WeekHourHeightRange.start.dp
     val weekHourHeightMax = WeekHourHeightRange.endInclusive.dp
     // Below this much room per hour, labels and rules thin out to every 2nd, 3rd… hour rather than
     // collapsing into mush. See `hourStride` in WeekView.kt, which this token alone tunes.
     val weekHourLabelMinSpacing = 18.dp
-    // However far the grid is pinched, it keeps at least this much of the card — the floor that
-    // stops a short viewport from handing the whole panel to the checklist.
-    val weekMinGridHeight = 120.dp
     val weekTimeGutter = 34.dp
     val weekHourLabelHeight = 14.dp
     // An event block: its floor height *at full expansion* (it scales down with the zoom, so a block
@@ -117,11 +115,6 @@ object Dimensions {
     // The caret in the gutter that expands the all-day strip past its collapsed single row.
     val weekChevronSize = 18.dp
     val weekNowLineHeight = 2.dp
-    // The to-do list under the week grid: its label plus two rows, the rest scrolling inside the
-    // strip. This is the strip's **minimum** — what it keeps while the grid is expanded enough to
-    // want the rest of the card. Pinching the hours together hands the freed height down to it, and
-    // it never shrinks below this, so switching day or week still doesn't resize the grid above it.
-    val weekTodoStripHeight = 116.dp
 
     // Right-card Calendar popups (CalendarPopups.kt): the week view's event detail card and the
     // header gear's calendar-filter card, both floated inside the right card rather than over the
@@ -139,6 +132,10 @@ object Dimensions {
     // How far under the card's top edge the gear's popup hangs, so it reads as dropped from the
     // header it was opened from rather than floating free.
     val calendarSettingsTopOffset = minTouch
+
+    // The Opgaver panel's UDFØRT rule — the hairline on either side of the label that separates what
+    // is still open from what has been ticked off.
+    val todoDividerHeight = 1.dp
 
     // The media kit (ui/controls/media/). The now-playing surface (album art + scrubber + transport +
     // queue + playlists rail) and the idle browse surface (Quick Picks grid + Keep Listening rail)

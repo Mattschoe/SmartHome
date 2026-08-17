@@ -42,10 +42,8 @@ import com.mattschoe.smarthome.data.danishMonths
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
-import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
-import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.ChipIdle
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
@@ -67,22 +65,21 @@ import smarthome.shared.generated.resources.settings_filled
 /** Danish, Monday-first weekday initials for both grids' headers (Man, Tir, Ons, Tor, Fre, Lør, Søn). */
 internal val danishWeekdayInitials = listOf("M", "T", "O", "T", "F", "L", "S")
 
-/** The hairline between the week grid and the checklist under it. */
-private val StripDividerHeight = 1.dp
-
 /**
- * The calendar in either of its two views, and the owner of the scrolling.
+ * The calendar in either of its two views, and the owner of the scrolling. The checklist is **not**
+ * here any more — Opgaver is its own panel ([TodoPanel]), which is what frees the space both views
+ * spend below.
  *
- * *Month* — a Monday-first month grid that pages by month, then the selected day's read-only agenda
- * and its editable todo checklist, all in one scroll.
+ * *Month* — a Monday-first month grid that pages by month, then the selected day's read-only agenda,
+ * both in one scroll. The agenda now runs to the bottom of the card.
  *
  * *Week* — the selected day's Monday-to-Sunday week as a time grid that pages by week, which
- * **replaces** both the month grid and the agenda: the header is fixed, the hour grid takes the
- * height the day it is showing needs (bounded, so it scrolls when the hours are expanded), and the
- * todo checklist takes what is left — which is how pinching the hours together grows the checklist.
+ * **replaces** both the month grid and the agenda: the header is fixed and the hour grid fills
+ * everything under it. Zooming changes only how tall an hour is, never the frame — see the branch
+ * below for the floor that keeps the grid exactly full.
  *
- * Either way selecting a day scopes the todos (and, in month view, the agenda); [todos] arrive
- * pre-filtered to [selectedDay], while [eventsByDay] spans the whole window and each page slices it.
+ * Selecting a day scopes the month view's agenda; [eventsByDay] spans the whole window and each page
+ * slices it.
  */
 @Composable
 internal fun CalendarViews(
@@ -94,19 +91,14 @@ internal fun CalendarViews(
     weekDays: List<LocalDate>,
     calendarWindow: ClosedRange<LocalDate>,
     nowMinutes: Int,
-    todos: List<TodoItem>,
     sources: List<CalendarSource>,
     stale: Boolean,
-    hasTodoList: Boolean,
     dayMarks: Map<LocalDate, DayMarks>,
     /** The week grid's hour-row height in dp — the reader's pinch level. */
     weekHourHeight: Float,
     onShowMonth: (LocalDate) -> Unit,
     onShowWeek: (LocalDate) -> Unit,
     onSelectDay: (LocalDate) -> Unit,
-    onAddTodo: (LocalDate, String) -> Unit,
-    onToggleTodo: (String) -> Unit,
-    onEditTodo: (String, String) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onOpenEventDetail: (CalendarEvent) -> Unit,
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
@@ -138,57 +130,42 @@ internal fun CalendarViews(
                     onShowMonth = onShowMonth,
                 )
                 AgendaSection(selectedDay, today, eventsByDay[selectedDay].orEmpty(), sources, onOpenEvent)
-                Spacer(Modifier.height(Dimensions.mediaSectionGap))
-                TodoSection(selectedDay, todos, hasTodoList, onAddTodo, onToggleTodo, onEditTodo)
             }
         }
         CalendarView.Week -> Column(modifier.fillMaxWidth()) {
             CalendarHeader(displayedMonth, weekDays, view, stale, headerTrailing)
             Spacer(Modifier.height(12.dp))
-            // The grid asks for exactly the day it holds and the checklist takes whatever is left, so
-            // pinching the hours together hands every dp the day gives up straight down to OPGAVER.
-            // Which is still a *fixed* split for any one zoom level — the strip's height doesn't
-            // follow its own rows, so the hours don't jump as the day's checklist grows and shrinks,
-            // and a long list scrolls in the strip rather than pushing the hours off the bottom.
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 // What the pager keeps above its scrolling hours — the day header and the all-day
                 // strip. Reported by [WeekPager] rather than assumed, since the strip's height is the
                 // shown week's, not a constant.
                 var chrome by remember { mutableStateOf(0.dp) }
-                val ceiling = (maxHeight - Dimensions.weekTodoStripHeight - StripDividerHeight)
-                    .coerceAtLeast(Dimensions.weekMinGridHeight)
-                val hourHeight = weekHourHeight.dp
-                val gridHeight = (chrome + hourHeight * HoursPerDay)
-                    .coerceIn(Dimensions.weekMinGridHeight, ceiling)
-                Column(Modifier.fillMaxSize()) {
-                    WeekPager(
-                        weekDays = weekDays,
-                        eventsByDay = eventsByDay,
-                        today = today,
-                        selectedDay = selectedDay,
-                        calendarWindow = calendarWindow,
-                        nowMinutes = nowMinutes,
-                        sources = sources,
-                        hourHeight = hourHeight,
-                        onSelectDay = onSelectDay,
-                        onShowWeek = onShowWeek,
-                        onOpenEvent = onOpenEventDetail,
-                        onNewEventAt = onNewEventAt,
-                        onHourHeight = onWeekHourHeight,
-                        onChrome = { chrome = it },
-                        modifier = Modifier.height(gridHeight),
-                    )
-                    Box(Modifier.fillMaxWidth().height(StripDividerHeight).background(CardBorder))
-                    val todoScroll = rememberScrollState()
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(todoScroll)
-                            .padding(top = 8.dp),
-                    ) {
-                        TodoSection(selectedDay, todos, hasTodoList, onAddTodo, onToggleTodo, onEditTodo)
-                    }
-                }
+                // The grid fills the card, and the zoom's floor is the height at which all 24 hours
+                // exactly fill it: collapsing past that would only open dead space, since the hours no
+                // longer hand what they give up to anything below. Expanding scrolls, as before. The
+                // ceiling stays the token unless the card is tall enough that merely fitting the day
+                // already exceeds it. Clamping what is *shown* rather than what is stored means a level
+                // persisted from a taller window renders sanely without being silently rewritten — only
+                // a real pinch writes, and it writes already clamped.
+                val fit = ((maxHeight - chrome) / HoursPerDay).coerceAtLeast(1.dp).value
+                val ceiling = maxOf(fit, Dimensions.weekHourHeightMax.value)
+                WeekPager(
+                    weekDays = weekDays,
+                    eventsByDay = eventsByDay,
+                    today = today,
+                    selectedDay = selectedDay,
+                    calendarWindow = calendarWindow,
+                    nowMinutes = nowMinutes,
+                    sources = sources,
+                    hourHeight = weekHourHeight.coerceIn(fit, ceiling).dp,
+                    onSelectDay = onSelectDay,
+                    onShowWeek = onShowWeek,
+                    onOpenEvent = onOpenEventDetail,
+                    onNewEventAt = onNewEventAt,
+                    onHourHeight = { onWeekHourHeight(it.coerceIn(fit, ceiling)) },
+                    onChrome = { chrome = it },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }

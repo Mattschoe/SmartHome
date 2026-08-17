@@ -15,7 +15,6 @@ import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
-import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
 import com.mattschoe.smarthome.ui.pages.homepage.EventEditorTarget
 import kotlinx.datetime.LocalDate
@@ -40,7 +39,6 @@ fun CalendarPanel(
     calendarView: CalendarView,
     /** Every visible event grouped by day; each view's pages slice the days they draw out of it. */
     eventsByDay: Map<LocalDate, List<CalendarEvent>>,
-    selectedDayTodos: List<TodoItem>,
     /** The week view's seven columns (Monday first) for the week being shown. */
     weekDays: List<LocalDate>,
     /** The span the adapter holds events for — the range both view pagers are bounded to. */
@@ -49,7 +47,6 @@ fun CalendarPanel(
     nowMinutes: Int,
     calendarSources: List<CalendarSource>,
     calendarStale: Boolean,
-    calendarHasTodoList: Boolean,
     /** Per-day marks for the month grid's cells, keyed by date. */
     dayMarks: Map<LocalDate, DayMarks>,
     /** The week grid's hour-row height in dp — the reader's pinch level. */
@@ -57,9 +54,6 @@ fun CalendarPanel(
     onShowMonth: (LocalDate) -> Unit,
     onShowWeek: (LocalDate) -> Unit,
     onSelectDay: (LocalDate) -> Unit,
-    onAddTodo: (LocalDate, String) -> Unit,
-    onToggleTodo: (String) -> Unit,
-    onEditTodo: (String, String) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onOpenEventDetail: (CalendarEvent) -> Unit,
     /** An empty week-grid slot was tapped: open a blank form on that day, at that time. */
@@ -104,18 +98,13 @@ fun CalendarPanel(
                 weekDays = weekDays,
                 calendarWindow = calendarWindow,
                 nowMinutes = nowMinutes,
-                todos = selectedDayTodos,
                 sources = calendarSources,
                 stale = calendarStale,
-                hasTodoList = calendarHasTodoList,
                 dayMarks = dayMarks,
                 weekHourHeight = weekHourHeight,
                 onShowMonth = onShowMonth,
                 onShowWeek = onShowWeek,
                 onSelectDay = onSelectDay,
-                onAddTodo = onAddTodo,
-                onToggleTodo = onToggleTodo,
-                onEditTodo = onEditTodo,
                 onOpenEvent = onOpenEvent,
                 onOpenEventDetail = onOpenEventDetail,
                 onNewEventAt = onNewEventAt,

@@ -5,6 +5,7 @@ import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.buildEventDraft
+import com.mattschoe.smarthome.data.todoPage
 import com.mattschoe.smarthome.data.weekStart
 import com.mattschoe.smarthome.data.model.ArtistDetail
 import com.mattschoe.smarthome.data.model.BrowseItem
@@ -945,23 +946,26 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun selectDay_scopesEventsAndTodosToThatDay() = runTest(mainDispatcher) {
+    fun selectDay_scopesEventsToThatDayAndLeavesTodosAlone() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
-        // Seed binds 3 events + 2 todos to today (the initial selected day).
+        // Seed binds 3 events to today (the initial selected day) and 3 todos across two days.
         val ready = vm.screenState.value as HomeScreenState.Ready
         assertEquals(3, ready.selectedDayEvents.size)
-        assertEquals(2, ready.selectedDayTodos.size)
+        assertEquals(3, ready.calendar.todos.size)
         assertTrue(ready.dayMarks.containsKey(ready.today))
 
-        // A day the seed put nothing on scopes to empty.
+        // A day the seed put no events on scopes to empty — but Opgaver is its own panel now, so the
+        // checklist is unchanged by the calendar's selection.
         vm.selectDay(ready.today.plus(10, DateTimeUnit.DAY))
         advanceUntilIdle()
         val empty = vm.screenState.value as HomeScreenState.Ready
         assertTrue(empty.selectedDayEvents.isEmpty())
-        assertTrue(empty.selectedDayTodos.isEmpty())
+        assertEquals(3, empty.calendar.todos.size)
+        // And the checklist's own day is untouched by the calendar's.
+        assertEquals(ready.today, empty.todoDay)
     }
 
     @Test
@@ -1295,7 +1299,7 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun selectedDayTodos_putWhatIsLeftToDoFirst() = runTest(mainDispatcher) {
+    fun todoPage_sinksATickedRowOutOfWhatIsStillOpen() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
@@ -1304,14 +1308,50 @@ class HomepageViewModelTest {
         vm.addTodo(today, "Nyeste opgave")
         advanceUntilIdle()
 
-        val added = (vm.screenState.value as HomeScreenState.Ready).selectedDayTodos
-        val first = added.first { !it.done }
+        val added = vm.screenState.value as HomeScreenState.Ready
+        val first = todoPage(added.calendar.todos, added.todoDay).open.first().items.first()
         vm.toggleTodo(first.id)
         advanceUntilIdle()
 
-        val after = (vm.screenState.value as HomeScreenState.Ready).selectedDayTodos
-        assertEquals(first.id, after.last().id)
-        assertTrue(after.map { it.done } == after.map { it.done }.sortedBy { it })
+        val after = vm.screenState.value as HomeScreenState.Ready
+        val page = todoPage(after.calendar.todos, after.todoDay)
+        assertTrue(page.open.none { g -> g.items.any { it.id == first.id } })
+        assertTrue(page.done.any { g -> g.items.any { it.id == first.id } })
+    }
+
+    @Test
+    fun showTodoDay_pagesTheChecklistWithoutMovingTheCalendar() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val start = vm.screenState.value as HomeScreenState.Ready
+        vm.showTodoDay(start.today.plus(2, DateTimeUnit.DAY))
+        advanceUntilIdle()
+
+        val moved = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(start.today.plus(2, DateTimeUnit.DAY), moved.todoDay)
+        // The two panels swipe independently — the calendar's day is its own.
+        assertEquals(start.selectedDay, moved.selectedDay)
+    }
+
+    @Test
+    fun selectPanel_putsOpgaverBackOnToday() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val start = vm.screenState.value as HomeScreenState.Ready
+        vm.showTodoDay(start.today.plus(5, DateTimeUnit.DAY))
+        vm.selectPanel(Panel.Media)
+        advanceUntilIdle()
+        // Leaving keeps it where it was swiped to...
+        assertEquals(start.today.plus(5, DateTimeUnit.DAY), (vm.screenState.value as HomeScreenState.Ready).todoDay)
+
+        // ...and coming back asks what is outstanding now, not where the last reader left it.
+        vm.selectPanel(Panel.Opgaver)
+        advanceUntilIdle()
+        assertEquals(start.today, (vm.screenState.value as HomeScreenState.Ready).todoDay)
     }
 
     /** A one-hour event on [day], the shape the editor's wheels hand up. */
@@ -1344,7 +1384,7 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun addTodo_forwardsToAdapterAndSurfacesOnSelectedDay() = runTest(mainDispatcher) {
+    fun addTodo_forwardsToAdapterAndSurfacesInTheChecklist() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
@@ -1354,6 +1394,6 @@ class HomepageViewModelTest {
         advanceUntilIdle()
 
         val ready = vm.screenState.value as HomeScreenState.Ready
-        assertTrue(ready.selectedDayTodos.any { it.label == "Støvsug" })
+        assertTrue(ready.calendar.todos.any { it.label == "Støvsug" })
     }
 }

@@ -6,6 +6,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -273,6 +274,23 @@ class HaDiscoveryTest {
     @Test
     fun todoDiscovery_yieldsNullRatherThanWritingIntoTheWrongList() {
         assertNull(discoverTodoEntity(listOf(stateOf("todo.shopping_list", "Shopping List", 15))))
+    }
+
+    @Test
+    fun todoDiscovery_reportsWhetherTheListCanCarryAClosingDay() {
+        // 127 is every feature including SET_DESCRIPTION_ON_ITEM (64) — where the closing day is
+        // stamped. 31 has due dates but no description, so the list still works and closed tasks
+        // simply fall back to sitting on the day they were due.
+        val states = listOf(
+            stateOf("todo.huset", "Huset", 127),
+            stateOf("todo.sparsom", "Sparsom", 31),
+        )
+
+        assertTrue(todoSupportsDescription(states, "todo.huset"))
+        assertFalse(todoSupportsDescription(states, "todo.sparsom"))
+        // A home with no list at all writes nothing, rather than guessing it can.
+        assertFalse(todoSupportsDescription(states, null))
+        assertFalse(todoSupportsDescription(states, "todo.findes_ikke"))
     }
 
     @Test

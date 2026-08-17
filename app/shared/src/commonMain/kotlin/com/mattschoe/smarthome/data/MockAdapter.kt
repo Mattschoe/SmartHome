@@ -113,9 +113,11 @@ class MockAdapter(
     @OptIn(ExperimentalUuidApi::class)
     override fun addTodo(due: LocalDate, label: String) {
         val id = Uuid.random().toString()
-        _state.update { it.addTodo(id, due, label) }
+        val today = Clock.System.todayIn(TimeZone.currentSystemDefault())
+        _state.update { it.addTodo(id, due, label, createdOn = today) }
     }
-    override fun toggleTodo(id: String) = _state.update { it.toggleTodo(id) }
+    override fun toggleTodo(id: String) =
+        _state.update { it.toggleTodo(id, Clock.System.todayIn(TimeZone.currentSystemDefault())) }
     override fun editTodo(id: String, label: String) = _state.update { it.editTodo(id, label) }
 
     // The fixtures are already "fetched" — there is no window to re-request.
@@ -304,7 +306,15 @@ internal fun seedHome(): HomeState {
         ),
         todos = listOf(
             TodoItem("seed-vand", today, "Vand planterne", done = false),
-            TodoItem("seed-udlejer", today, "Svar udlejeren", done = true),
+            // Closed today, and one of them had been hanging over since yesterday — the pair the
+            // Opgaver page's UDFØRT half exists to tell apart.
+            TodoItem("seed-udlejer", today, "Svar udlejeren", done = true, completedOn = today),
+            TodoItem(
+                "seed-tandlaege", today.plus(-1, DateTimeUnit.DAY), "Ring til tandlægen",
+                done = true, completedOn = today,
+            ),
+            // Left unticked from a passed day: carried onto every page from its own day forward.
+            TodoItem("seed-daek", today.plus(-2, DateTimeUnit.DAY), "Skift dæk", done = false),
             TodoItem("seed-fly", today.plus(1, DateTimeUnit.DAY), "Book flybilletter", done = false),
         ),
     ),
