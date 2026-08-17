@@ -155,16 +155,6 @@ private fun AudioSectionHeader(audioState: AudioState, modifier: Modifier = Modi
                 tint = statusColor,
                 modifier = Modifier.size(16.dp),
             )
-            if (track != null) {
-                Text(
-                    text = "${track.title} — ${track.artist}",
-                    color = statusColor,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-            }
         }
     }
 }
