@@ -84,6 +84,16 @@ private fun formatEventDate(date: LocalDate): String {
     return "$weekday. ${date.day}. $month. ${date.year}"
 }
 
+/**
+ * "lørdag den 15. august 2026" — the editor's boundary rows and the date picker's headline, where
+ * there is a whole row to spend and an abbreviation would only make the day harder to read back.
+ */
+fun formatLongDate(date: LocalDate): String {
+    val weekday = danishWeekdays[date.dayOfWeek.isoDayNumber - 1].lowercase()
+    val month = danishMonths[date.month.number - 1]
+    return "$weekday den ${date.day}. $month ${date.year}"
+}
+
 /** Minutes from midnight — the agenda's sort key for a timed event. */
 fun minutesOfDay(time: LocalTime): Int = time.hour * 60 + time.minute
 

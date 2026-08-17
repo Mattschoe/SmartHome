@@ -105,7 +105,7 @@ sealed interface ArtistUiState {
  * deliberately a surface beside live lights and audio, not a modal that can afford that.
  */
 sealed interface EventEditorTarget {
-    /** The day the start wheels open on. */
+    /** The day the editor's start row opens on. */
     val date: LocalDate
 
     /** The "+" path — a blank form on [date] (today). */

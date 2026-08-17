@@ -41,6 +41,14 @@ class CalendarFormatTest {
     }
 
     @Test
+    fun longDateSpellsTheDayOutForTheEditorsBoundaryRows() {
+        assertEquals("lørdag den 15. august 2026", formatLongDate(LocalDate(2026, 8, 15)))
+        // Weekday lowercased off the capitalised header list; month already lowercase.
+        assertEquals("mandag den 1. januar 2035", formatLongDate(LocalDate(2035, 1, 1)))
+        assertEquals("søndag den 31. december 2028", formatLongDate(LocalDate(2028, 12, 31)))
+    }
+
+    @Test
     fun minutesOfDayIsTheAgendaSortKey() {
         assertEquals(0, minutesOfDay(LocalTime(0, 0)))
         assertEquals(540, minutesOfDay(LocalTime(9, 0)))

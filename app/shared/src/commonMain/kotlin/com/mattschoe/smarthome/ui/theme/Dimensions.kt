@@ -141,13 +141,6 @@ object Dimensions {
     // header it was opened from rather than floating free.
     val calendarSettingsTopOffset = minTouch
 
-    // Right-card Calendar panel (event editor, EventEditor.kt). The scroll wheels pick date and time
-    // inline rather than through a picker dialog: [wheelVisibleRows] rows of [minTouch] each, so the
-    // row above and below the selected one show what turning the wheel would land on.
-    val wheelRowHeight = minTouch
-    const val wheelVisibleRows = 3
-    val wheelHeight = wheelRowHeight * wheelVisibleRows
-
     // The media kit (ui/controls/media/). The now-playing surface (album art + scrubber + transport +
     // queue + playlists rail) and the idle browse surface (Quick Picks grid + Keep Listening rail)
     // share these tokens, on the tablet card and the phone page alike.
