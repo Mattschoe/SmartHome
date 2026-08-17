@@ -140,6 +140,28 @@ fun Map<Room, RoomState>.audioJoined(a: Room, b: Room): Boolean {
     return leaderA == this[b]?.audio?.syncLeader
 }
 
+/**
+ * The room whose audio session [room] actually plays — itself when it plays alone or leads, the
+ * group's leader when it follows one. **The** address of a group's playback: every intent about
+ * *content* (play, enqueue, skip, transport) goes to this room, and the panel reads it, so the two
+ * members of a group behave as one and neither reads as the source. The speaker itself is still
+ * [room] — volume is never redirected.
+ */
+fun Map<Room, RoomState>.audioSessionRoom(room: Room): Room = this[room]?.audio?.syncLeader ?: room
+
+/**
+ * What [room] is playing: its session's audio ([audioSessionRoom]) carrying [room]'s **own** speaker
+ * volume, since volume is per-speaker even inside a group. `null` on a speaker-less room.
+ *
+ * Identity is preserved for an ungrouped room (it is its own session, and the copy is skipped), so a
+ * consumer comparing snapshots doesn't see a fresh instance on every read.
+ */
+fun Map<Room, RoomState>.audioSessionOf(room: Room): AudioState? {
+    val own = this[room]?.audio ?: return null
+    val session = this[audioSessionRoom(room)]?.audio ?: return own
+    return if (session === own) own else session.copy(volumePct = own.volumePct)
+}
+
 /** Seek within the current track, clamped to `[0, duration]`. */
 fun HomeState.seek(room: Room, sec: Int): HomeState =
     updateAudio(room) { it.copy(positionSec = sec.coerceIn(0, it.nowPlaying?.durationSec ?: 0)) }

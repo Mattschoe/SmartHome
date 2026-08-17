@@ -133,8 +133,10 @@ The hardest phase — brightness dial, warmth, audio (likely split into sub-step
       section (speaker rooms only, `Room.hasSpeaker` → `Room.audioRooms`, with a speaker glyph) drives
       `activeAudioRoom`; the volume slider (`(x−left)/width`, Canvas track + drag/tap, leading glyph
       muted→down→up) binds to that room. The top chips remain lights-only.
-      *Deferred from v1: the "Whole home" speaker chip and dashed "Join the music in {source}" — that's
-      the multi-room grouping feature, not part of the per-room model (see CLAUDE.md CORE RULE).*
+      Pairwise sync ships under the chips as "Spil også i {other}" / "Stop i {other}" — an additive
+      `AudioState.syncLeader` on top of per-room ownership, with content intents and the Media panel
+      addressed to the room's *session* so a group has no user-visible leader (CLAUDE.md CORE RULE).
+      *Still deferred: the "Whole home" chip and "+ Create group", which need an N-room surface.*
 - [x] Slider a11y + arrow-key adjustment on dial and slider. *(Compose has no `Role.Slider`; slider
       semantics are conveyed by `progressBarRangeInfo` + `setProgress`, plus DirectionUp/Down/Left/Right
       key handling that nudges ±5. Applied to both the dial and the volume slider.)*

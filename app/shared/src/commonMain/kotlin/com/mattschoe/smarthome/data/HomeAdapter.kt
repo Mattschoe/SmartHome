@@ -100,6 +100,11 @@ interface HomeAdapter {
      * Make [follower] play along with [leader] — the additive grouping relation on top of per-room
      * ownership (both rooms then report [leader] as their
      * [com.mattschoe.smarthome.data.model.AudioState.syncLeader]).
+     *
+     * Every other intent here is addressed to exactly the room it names: adapters know nothing about
+     * groups beyond reporting the relation back. Sending a group's playback to the room that carries
+     * it — so a room following a group is controlled, and browsed, as that group — is the caller's
+     * job ([com.mattschoe.smarthome.data.audioSessionRoom], applied in `HomepageViewModel`).
      */
     fun joinAudio(leader: Room, follower: Room)
 

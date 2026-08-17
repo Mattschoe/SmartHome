@@ -50,9 +50,9 @@ as the tablet, only rearranged (`layout_guide.md` → Common). Specifically:
   **not** used for them. Taps operate controls only — there is no tap-to-navigate.
 - **Nested swipes** (room-chip row, playlist rail, quick-picks grid) scroll on their own axis inside a
   page **without stealing the page-pager gesture**.
-- **Deferred — grouping.** "Whole home" and "+ Create group" (vertical Page 3 mock) are the multi-room
-  grouping feature deferred from v1 (CLAUDE.md CORE RULE). Render only real speaker rooms; leave the
-  seam, don't wire multi-room sync.
+- **Grouping.** Pairwise sync is wired (the join action in `AudioPopup`, shared with the tablet):
+  render only real speaker rooms. "Whole home" and "+ Create group" (vertical Page 3 mock) still need
+  an N-room surface and remain out of scope (CLAUDE.md CORE RULE).
 - **Icons**: reuse the Material-Symbols glyphs already shipped for the tablet. Each phase **enumerates
   the icons it needs** and flags any genuinely new glyph (e.g. a warmth-row check mark) for the user
   to supply *before* the phase runs. Never silently substitute `Icons.*`.
@@ -237,7 +237,7 @@ cards per vertically-paged screen, and build the one genuinely new surface. Refe
       never fight the page pager.
 - [ ] **Touch targets ≥ 44dp**, page indicators legible, scroll regions contained (page never
       scrolls in an unintended axis).
-- [ ] **Deferred-grouping seam** left clean and documented (no dead multi-room code shipped).
+- [ ] **Grouping** reaches the phone through the shared join action only; no N-room surface shipped.
 - [ ] **Full DoD pass**: both orientations verified on-device against every mockup PNG; tablet still
       matches its reference screenshots; iOS compiles; `./gradlew allTests` green.
 
@@ -245,8 +245,8 @@ cards per vertically-paged screen, and build the one genuinely new surface. Refe
 
 ## Deferred (post-phone-v1)
 
-- **Multi-room audio grouping** — "Whole home" chip + "+ Create group" (vertical Page 3). Reintroduce
-  as an additive relation on top of per-room ownership (CLAUDE.md CORE RULE), shared with the tablet.
+- **N-room audio grouping** — "Whole home" chip + "+ Create group" (vertical Page 3). Pairwise sync
+  already ships; this is the surface (and the model widening past two speaker rooms) it still needs.
 - **Phone-specific persistence** — remembering the last-viewed page per orientation, if desired
   (tablet room-state persistence is tracked separately in `PROJECT_BACKLOG.md` Phase 8).
 - **iOS media session** — the P3 `NowPlayingBridge` is multiplatform, but only Android consumes it.

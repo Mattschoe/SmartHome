@@ -231,25 +231,30 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun joinAction_isOfferedOnlyForARoomThatHasMusicToJoin() = runTest(mainDispatcher) {
+    fun joinAction_isOfferedWheneverEitherRoomHasMusic() = runTest(mainDispatcher) {
         // Seed: the Living Room is playing, the Bedroom idle.
         val vm = HomepageViewModel(RecordingGroupAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
-        // Viewing the playing room, the idle one has nothing to join — no action shows.
+        // From the playing room, the offer is to put its music on in the other one too…
         val fromPlayingRoom = vm.screenState.value as HomeScreenState.Ready
         assertEquals(Room.Bedroom, fromPlayingRoom.otherAudioRoom)
-        assertNull(fromPlayingRoom.joinTarget)
+        assertEquals(Room.Bedroom, fromPlayingRoom.joinTarget)
 
-        // Viewing the idle room, the playing one is exactly what there is to join.
+        // …and from the idle room, to play along with it. Neither side leads.
         vm.selectAudioRoom(Room.Bedroom)
         advanceUntilIdle()
         assertEquals(Room.LivingRoom, (vm.screenState.value as HomeScreenState.Ready).joinTarget)
+
+        // With nothing playing anywhere there is nothing to play together, and no action shows.
+        vm.togglePlay(Room.LivingRoom)
+        advanceUntilIdle()
+        assertNull((vm.screenState.value as HomeScreenState.Ready).joinTarget)
     }
 
     @Test
-    fun toggleAudioJoin_adoptsTheOtherRoomsMusicByFollowingIt() = runTest(mainDispatcher) {
+    fun toggleAudioJoin_takesTheMusicFromWhicheverRoomHasIt() = runTest(mainDispatcher) {
         val adapter = RecordingGroupAdapter()
         val vm = HomepageViewModel(adapter)
         backgroundScope.launch { vm.screenState.collect {} }
@@ -259,22 +264,38 @@ class HomepageViewModelTest {
         vm.toggleAudioJoin()
         advanceUntilIdle()
 
-        // "Join Stue" means playing *its* music, so it leads and the viewed room follows.
+        // The music is in the Living Room, so that is what the pair plays.
         assertEquals(listOf(Room.LivingRoom to Room.Bedroom), adapter.joins)
         val joined = vm.screenState.value as HomeScreenState.Ready
         assertTrue(joined.audioJoined)
-        // The action stays up as "Leave Stue" — a group can always be taken apart again.
+        // The action stays up — a group can always be taken apart again.
         assertEquals(Room.LivingRoom, joined.joinTarget)
     }
 
     @Test
-    fun toggleAudioJoin_dropsAJoinWhenTheOtherRoomHasNothingPlaying() = runTest(mainDispatcher) {
+    fun toggleAudioJoin_fromThePlayingRoomSendsItsMusicToTheOtherOne() = runTest(mainDispatcher) {
         val adapter = RecordingGroupAdapter()
         val vm = HomepageViewModel(adapter)
         backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle() // viewing the Living Room, which is the room that's playing
+
+        vm.toggleAudioJoin()
         advanceUntilIdle()
 
-        // Viewing the playing room: the action isn't offered, and a tap that raced it is dropped.
+        // The music is here, so the other room is the one that comes along.
+        assertEquals(listOf(Room.LivingRoom to Room.Bedroom), adapter.joins)
+        assertTrue((vm.screenState.value as HomeScreenState.Ready).audioJoined)
+    }
+
+    @Test
+    fun toggleAudioJoin_isDroppedWhenNeitherRoomHasMusic() = runTest(mainDispatcher) {
+        val adapter = RecordingGroupAdapter()
+        val vm = HomepageViewModel(adapter)
+        backgroundScope.launch { vm.screenState.collect {} }
+        vm.togglePlay(Room.LivingRoom) // now nothing is playing anywhere
+        advanceUntilIdle()
+
+        // The action isn't offered at all; a tap that raced the music stopping is dropped.
         vm.toggleAudioJoin()
         advanceUntilIdle()
 
@@ -283,7 +304,7 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun toggleAudioJoin_unjoinsTheFollowerWhenTheRoomsAreAlreadyJoined() = runTest(mainDispatcher) {
+    fun toggleAudioJoin_dropsTheOtherRoomWhenTheRoomsAreAlreadyJoined() = runTest(mainDispatcher) {
         val adapter = RecordingGroupAdapter()
         val vm = HomepageViewModel(adapter)
         backgroundScope.launch { vm.screenState.collect {} }
@@ -295,9 +316,66 @@ class HomepageViewModelTest {
         vm.toggleAudioJoin()
         advanceUntilIdle()
 
-        // Leaving drops the follower, so the leader's playback is left alone.
-        assertEquals(listOf(Room.Bedroom), adapter.unjoins)
+        // Leaving is always phrased about the *other* room, so that is the one dropped — the room
+        // being looked at is the one that stays.
+        assertEquals(listOf(Room.LivingRoom), adapter.unjoins)
         assertEquals(false, (vm.screenState.value as HomeScreenState.Ready).audioJoined)
+    }
+
+    @Test
+    fun musicIntents_fromARoomInAGroupAddressTheGroupsSession() = runTest(mainDispatcher) {
+        val adapter = RecordingSessionAdapter()
+        val vm = HomepageViewModel(adapter)
+        backgroundScope.launch { vm.screenState.collect {} }
+        vm.selectAudioRoom(Room.Bedroom)
+        advanceUntilIdle()
+        vm.toggleAudioJoin() // the Bedroom now plays along with the Living Room's music
+        advanceUntilIdle()
+
+        vm.play(BrowseItem("Fokus", subtitle = "Playlist", uri = "library://playlist/1"))
+        advanceUntilIdle()
+        vm.playQueueItem("q7")
+        vm.moveQueueItem("q7", -2)
+        vm.togglePlay(Room.Bedroom)
+        vm.setVolume(Room.Bedroom, 12)
+        advanceUntilIdle()
+
+        // Everything about the music goes to the session the group is playing, so putting a song on
+        // from the Bedroom is the whole group's new song…
+        assertEquals(listOf(Room.LivingRoom to "library://playlist/1"), adapter.plays)
+        assertEquals(listOf(Room.LivingRoom to "q7"), adapter.skips)
+        assertEquals(listOf(Triple(Room.LivingRoom, "q7", -2)), adapter.moved)
+        assertEquals(listOf(Room.LivingRoom), adapter.toggles)
+        // …while volume stays the speaker's own.
+        assertEquals(listOf(Room.Bedroom to 12), adapter.volumes)
+    }
+
+    @Test
+    fun audioPanel_showsTheGroupsMusicInBothRooms() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        vm.selectAudioRoom(Room.Bedroom)
+        advanceUntilIdle()
+        vm.toggleAudioJoin()
+        advanceUntilIdle()
+
+        vm.play(BrowseItem("Fokus", subtitle = "Playlist", uri = "library://playlist/1"))
+        advanceUntilIdle()
+
+        // The Bedroom is looking at the group's music, not at its own idle session…
+        val fromBedroom = vm.screenState.value as HomeScreenState.Ready
+        assertEquals("Fokus", fromBedroom.audioState.nowPlaying?.title)
+        assertEquals(
+            fromBedroom.rooms.getValue(Room.Bedroom).audio?.volumePct,
+            fromBedroom.audioState.volumePct,
+        )
+
+        // …and the room it is grouped with shows exactly the same thing.
+        vm.selectAudioRoom(Room.LivingRoom)
+        advanceUntilIdle()
+        val fromLivingRoom = vm.screenState.value as HomeScreenState.Ready
+        assertEquals(fromBedroom.audioState.nowPlaying, fromLivingRoom.audioState.nowPlaying)
+        assertEquals(fromBedroom.audioState.queue, fromLivingRoom.audioState.queue)
     }
 
     @Test
@@ -344,6 +422,43 @@ class HomepageViewModelTest {
         override fun unjoinAudio(room: Room) {
             unjoins += room
             if (reflect) delegate.unjoinAudio(room)
+        }
+    }
+
+    /**
+     * A [MockAdapter] recording which room every music intent was addressed to — the question a sync
+     * group makes interesting. Grouping itself is applied, so the state the redirect reads is real.
+     */
+    private class RecordingSessionAdapter(
+        private val delegate: MockAdapter = MockAdapter(),
+    ) : HomeAdapter by delegate {
+        val plays = mutableListOf<Pair<Room, String>>()
+        val skips = mutableListOf<Pair<Room, String>>()
+        val moved = mutableListOf<Triple<Room, String, Int>>()
+        val toggles = mutableListOf<Room>()
+        val volumes = mutableListOf<Pair<Room, Int>>()
+
+        override suspend fun play(room: Room, uri: String, radio: Boolean) {
+            plays += room to uri
+            delegate.play(room, uri, radio)
+        }
+
+        override suspend fun playQueueItem(room: Room, queueItemId: String) {
+            skips += room to queueItemId
+        }
+
+        override fun moveQueueItem(room: Room, queueItemId: String, posShift: Int) {
+            moved += Triple(room, queueItemId, posShift)
+        }
+
+        override fun togglePlay(room: Room) {
+            toggles += room
+            delegate.togglePlay(room)
+        }
+
+        override fun setVolume(room: Room, value: Int) {
+            volumes += room to value
+            delegate.setVolume(room, value)
         }
     }
 

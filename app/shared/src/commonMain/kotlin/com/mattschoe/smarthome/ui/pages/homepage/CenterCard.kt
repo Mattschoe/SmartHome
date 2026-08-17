@@ -115,8 +115,8 @@ fun CenterCard(
             Spacer(Modifier.weight(1f))
             if (joinTarget != null) {
                 JoinRoomAction(
-                    text = if (audioJoined) "Leave ${joinTarget.displayName}"
-                    else "Join ${joinTarget.displayName}",
+                    text = if (audioJoined) "Stop i ${joinTarget.displayName}"
+                    else "Spil også i ${joinTarget.displayName}",
                     onClick = onToggleAudioJoin,
                 )
                 Spacer(Modifier.weight(1f))

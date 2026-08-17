@@ -14,6 +14,8 @@ import com.mattschoe.smarthome.data.MediaCommands
 import com.mattschoe.smarthome.data.NowPlayingBridge
 import com.mattschoe.smarthome.data.nowPlayingSnapshot
 import com.mattschoe.smarthome.data.audioJoined
+import com.mattschoe.smarthome.data.audioSessionOf
+import com.mattschoe.smarthome.data.audioSessionRoom
 import com.mattschoe.smarthome.data.minutesOfDay
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
@@ -254,7 +256,9 @@ class HomepageViewModel(
         // nothing else — so it needs only the two flows it combines.
         viewModelScope.launch {
             combine(_activeAudioRoom, adapter.subscribe()) { room, home ->
-                nowPlayingSnapshot(room, home.rooms[room]?.audio)
+                // The session's audio, not the room's own: a room following a sync group mirrors
+                // that group, so the notification shows what the speaker is really playing.
+                nowPlayingSnapshot(room, home.rooms.audioSessionOf(room))
             }.distinctUntilChanged().collect(nowPlaying::publish)
         }
         nowPlaying.commands = object : MediaCommands {
@@ -585,7 +589,7 @@ class HomepageViewModel(
      */
     fun enqueue(item: BrowseItem, mode: QueueMode) {
         val uri = item.uri ?: return
-        val room = _activeAudioRoom.value
+        val room = sessionRoom(_activeAudioRoom.value)
         if (nowPlayingOf(room) == null) return play(item)
         viewModelScope.launch {
             try {
@@ -608,28 +612,32 @@ class HomepageViewModel(
      */
     private fun startPlay(item: BrowseItem, start: suspend (Room) -> Unit) {
         val room = _activeAudioRoom.value
+        // Starting something new goes to the *session* — with a sync group that is the group's
+        // playback, so the new music replaces what every speaker in it is playing. The pending
+        // surface stays keyed on the room being looked at, which is where it has to show.
+        val target = sessionRoom(room)
         _mediaMinimized.value = false
         _searchQuery.value = ""
         closeArtist()
         val pending = PendingPlay(room, item.name, item.subtitle, item.artworkUrl)
         _pendingPlay.value = pending
-        val trackBefore = nowPlayingOf(room)
-        val queueBefore = queueOf(room)
+        val trackBefore = nowPlayingOf(target)
+        val queueBefore = queueOf(target)
         // The rows on hand belong to the track being replaced — the up-next section loads instead of
         // showing them, and keeps loading until a usable new queue arrives (see [awaitQueueChange]).
         _queueRefreshRoom.value = room
         viewModelScope.launch {
             try {
-                start(room)
-                awaitTrackChange(room, trackBefore)
+                start(target)
+                awaitTrackChange(target, trackBefore)
                 // The track is real now — release the full loading surface, but keep the up-next
                 // loader until the queue refresh (which trails the track by ~a second) lands too.
                 _pendingPlay.compareAndSet(pending, null)
-                awaitQueueChange(room, queueBefore)
+                awaitQueueChange(target, queueBefore)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                log("play '${item.name}' on $room failed: ${e.message}")
+                log("play '${item.name}' on $target failed: ${e.message}")
                 showToast(PLAY_FAILED_TOAST)
             } finally {
                 _pendingPlay.compareAndSet(pending, null)
@@ -647,17 +655,18 @@ class HomepageViewModel(
     fun playQueueItem(queueItemId: String) {
         if (_pendingQueueItem.value != null) return
         val room = _activeAudioRoom.value
+        val target = sessionRoom(room)
         val pending = PendingQueueItem(room, queueItemId)
         _pendingQueueItem.value = pending
-        val trackBefore = nowPlayingOf(room)
+        val trackBefore = nowPlayingOf(target)
         viewModelScope.launch {
             try {
-                adapter.playQueueItem(room, queueItemId)
-                awaitTrackChange(room, trackBefore)
+                adapter.playQueueItem(target, queueItemId)
+                awaitTrackChange(target, trackBefore)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                log("skip to $queueItemId on $room failed: ${e.message}")
+                log("skip to $queueItemId on $target failed: ${e.message}")
                 showToast(PLAY_FAILED_TOAST)
             } finally {
                 _pendingQueueItem.compareAndSet(pending, null)
@@ -710,15 +719,29 @@ class HomepageViewModel(
 
     /** Move a queue row [posShift] positions (negative = earlier) in the active audio room's queue. */
     fun moveQueueItem(queueItemId: String, posShift: Int) {
-        adapter.moveQueueItem(_activeAudioRoom.value, queueItemId, posShift)
+        adapter.moveQueueItem(sessionRoom(_activeAudioRoom.value), queueItemId, posShift)
     }
 
     /**
-     * Join the active audio room to the home's other speaker room, or take the two apart again — the
-     * center card's join/leave action. "Join X" means adopting **X's** music, so X leads the group
-     * and the room being viewed follows it; a room with nothing playing is nothing to join, and the
-     * action isn't offered at all (see [HomeScreenState.Ready.joinTarget]). Leaving always drops the
-     * follower, so the leader's playback carries on untouched.
+     * Where [room]'s music intents are addressed: its own session, or the sync group's when it follows
+     * one (see [com.mattschoe.smarthome.data.audioSessionRoom]). A group has no leader as far as the
+     * user is concerned — every speaker in it plays whatever was asked for last, from whichever room
+     * it was asked in — so *content* intents (play, enqueue, skip, transport) all resolve through
+     * here. [setVolume] deliberately does not: volume belongs to the speaker, not to the session.
+     *
+     * This is the single place the redirect happens; the adapters stay plain room-addressed device
+     * intents and know nothing about it.
+     */
+    private fun sessionRoom(room: Room): Room = adapter.subscribe().value.rooms.audioSessionRoom(room)
+
+    /**
+     * Put the home's two speaker rooms on the same music, or take them apart again — the center
+     * card's join/leave action, always phrased about the *other* room since the one being looked at
+     * is the one staying put.
+     *
+     * Neither room leads. Joining plays whatever music the pair already has going in both of them —
+     * the room being viewed if it is playing, the other room otherwise — and leaving drops the other
+     * room, the viewed one playing on.
      *
      * A tap is dropped while a previous one is still in flight: the label only flips when device
      * truth lands (grouping has no optimistic apply — see
@@ -733,13 +756,18 @@ class HomepageViewModel(
         val rooms = adapter.subscribe().value.rooms
         val joinedBefore = rooms.audioJoined(room, other)
         if (joinedBefore) {
-            val follower = if (rooms[room]?.audio?.syncLeader == room) other else room
-            adapter.unjoinAudio(follower)
+            adapter.unjoinAudio(other)
         } else {
-            // Nothing playing there is nothing to join — the action isn't offered, so this only
-            // guards a tap that raced the other room's music stopping.
-            if (rooms[other]?.audio?.isPlaying != true) return
-            adapter.joinAudio(leader = other, follower = room)
+            // Whichever side has music is the one the pair adopts. Neither playing is nothing to
+            // join — the action isn't offered then, so this only guards a tap that raced the music
+            // stopping.
+            when {
+                rooms.audioSessionOf(room)?.isPlaying == true ->
+                    adapter.joinAudio(leader = room, follower = other)
+                rooms[other]?.audio?.isPlaying == true ->
+                    adapter.joinAudio(leader = other, follower = room)
+                else -> return
+            }
         }
         joinJob = viewModelScope.launch {
             withTimeoutOrNull(GROUP_CHANGE_GRACE_MS) {
@@ -748,12 +776,15 @@ class HomepageViewModel(
         }
     }
 
-    fun togglePlay(room: Room) = adapter.togglePlay(room)
-    fun next(room: Room) = adapter.next(room)
-    fun previous(room: Room) = adapter.previous(room)
-    fun seek(room: Room, positionSec: Int) = adapter.seek(room, positionSec)
-    fun setShuffle(room: Room, shuffle: Boolean) = adapter.setShuffle(room, shuffle)
-    fun setRepeat(room: Room, mode: RepeatMode) = adapter.setRepeat(room, mode)
+    // Transport acts on what is playing, so it goes to the session ([sessionRoom]) — pausing from
+    // either room of a group pauses the group. Volume is the exception, further up: it is the
+    // speaker's own.
+    fun togglePlay(room: Room) = adapter.togglePlay(sessionRoom(room))
+    fun next(room: Room) = adapter.next(sessionRoom(room))
+    fun previous(room: Room) = adapter.previous(sessionRoom(room))
+    fun seek(room: Room, positionSec: Int) = adapter.seek(sessionRoom(room), positionSec)
+    fun setShuffle(room: Room, shuffle: Boolean) = adapter.setShuffle(sessionRoom(room), shuffle)
+    fun setRepeat(room: Room, mode: RepeatMode) = adapter.setRepeat(sessionRoom(room), mode)
 
     private companion object {
         /** Long enough that a typed word issues one search, short enough to feel like live results. */

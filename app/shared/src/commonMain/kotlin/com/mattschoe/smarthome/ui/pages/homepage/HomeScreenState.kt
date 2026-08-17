@@ -3,6 +3,7 @@ package com.mattschoe.smarthome.ui.pages.homepage
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.audioJoined
+import com.mattschoe.smarthome.data.audioSessionOf
 import com.mattschoe.smarthome.data.sortTodos
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.CalendarEvent
@@ -198,12 +199,17 @@ sealed interface HomeScreenState {
         val audioRoomState: RoomState get() = rooms.getValue(activeAudioRoom)
 
         /**
-         * Audio session of the active audio room. [activeAudioRoom] is always a speaker room (the VM
-         * seeds it from [Room.audioRooms] and only feeds `selectAudioRoom` speaker rooms), so the
-         * `audio` is never null here — the assertion documents that invariant.
+         * What the active audio room is playing — its **session's** audio (see
+         * [com.mattschoe.smarthome.data.audioSessionOf]), so a room following a sync group shows that
+         * group's track, queue and transport rather than its own idle session. Its own volume is kept:
+         * volume is per-speaker even inside a group.
+         *
+         * [activeAudioRoom] is always a speaker room (the VM seeds it from [Room.audioRooms] and only
+         * feeds `selectAudioRoom` speaker rooms), so this is never null — the assertion documents that
+         * invariant.
          */
         val audioState: AudioState
-            get() = requireNotNull(audioRoomState.audio) {
+            get() = requireNotNull(rooms.audioSessionOf(activeAudioRoom)) {
                 "activeAudioRoom ($activeAudioRoom) must be a speaker room"
             }
 
@@ -220,11 +226,14 @@ sealed interface HomeScreenState {
 
         /**
          * The room the join/leave action names, or `null` when there is nothing to offer and no
-         * action shows. *Joining* a room means adopting **its** music, so it is only offered while
-         * that room is actually playing something; a group that already exists can always be left.
+         * action shows. Neither room leads: joining plays whatever music the two of them have going
+         * in both, so it is offered as soon as **either** side is playing something — and a group
+         * that already exists can always be broken up again.
          */
         val joinTarget: Room?
-            get() = otherAudioRoom?.takeIf { audioJoined || rooms[it]?.audio?.isPlaying == true }
+            get() = otherAudioRoom?.takeIf {
+                audioJoined || rooms[it]?.audio?.isPlaying == true || audioState.isPlaying
+            }
 
         /**
          * The events the view being shown is allowed to draw — everything minus the calendars the

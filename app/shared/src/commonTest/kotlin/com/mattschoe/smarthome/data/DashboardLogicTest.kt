@@ -312,6 +312,36 @@ class DashboardLogicTest {
     }
 
     @Test
+    fun audioSession_ofAFollowerIsTheGroupsWithItsOwnVolume() {
+        val joined = seedHome()
+            .withVolume(Room.Bedroom, 12)
+            .joinAudio(leader = Room.LivingRoom, follower = Room.Bedroom)
+        val leaderAudio = joined.rooms.getValue(Room.LivingRoom).audio!!
+
+        // The follower is addressed as, and plays, the group's session…
+        assertEquals(Room.LivingRoom, joined.rooms.audioSessionRoom(Room.Bedroom))
+        val session = joined.rooms.audioSessionOf(Room.Bedroom)!!
+        assertEquals(leaderAudio.nowPlaying, session.nowPlaying)
+        assertEquals(leaderAudio.queue, session.queue)
+        assertEquals(leaderAudio.isPlaying, session.isPlaying)
+        // …but the volume is the speaker's own, not the leader's.
+        assertEquals(12, session.volumePct)
+    }
+
+    @Test
+    fun audioSession_ofAnUngroupedRoomIsItsOwn() {
+        val home = seedHome()
+        // A room playing alone leads nothing and follows nothing — it is its own session, unchanged.
+        assertEquals(Room.Bedroom, home.rooms.audioSessionRoom(Room.Bedroom))
+        assertEquals(home.rooms.getValue(Room.Bedroom).audio, home.rooms.audioSessionOf(Room.Bedroom))
+        // The leader of a group is likewise its own session.
+        val joined = home.joinAudio(leader = Room.LivingRoom, follower = Room.Bedroom)
+        assertEquals(Room.LivingRoom, joined.rooms.audioSessionRoom(Room.LivingRoom))
+        // A speaker-less room has no session at all.
+        assertNull(home.rooms.audioSessionOf(Room.Kitchen))
+    }
+
+    @Test
     fun audioJoined_isFalseForUngroupedRooms() {
         // Two rooms playing alone (null leaders) are not joined — null must not match null.
         assertFalse(seedHome().rooms.audioJoined(Room.LivingRoom, Room.Bedroom))

@@ -112,7 +112,7 @@ The design intent lives in two places in `app/docs/`: the **rendered screenshots
 - **Brightness dial** — SVG-style half-arc (260×160 viewBox, center (130,140), radius 116), drag the knob to set 0–100%. Value = `round((1 − deg/180) × 100)`. Tapping the center bulb toggles the light on/off; dragging forces it on. In Compose: draw with `Canvas`/`drawArc`, handle drag with `pointerInput { detectDragGestures }`, and reproduce the pointer-angle math. The arc/knob take the current **warmth** color.
 - **Warmth swatches** — five color-temp circles (Candle→Warm→Soft→Neutral→Cool); selecting one recolors the dial and turns the light on.
 - **Volume slider** — horizontal drag; fraction = `(x − left) / width` clamped 0–1. Sets the **active audio room's** volume.
-- **Room chips** — pill toggles; active = filled accent, idle = white with sage border. **Light and audio have separate selectors** (as in the reference PNGs): the top chip row picks the **light room** (dial + warmth); a second chip row in the AUDIO section picks the **audio room** (volume slider, and later the Media panel). The two are independent — one does **not** drive the other. The audio row lists only **speaker rooms** (`Room.audioRooms`, gated by `Room.hasSpeaker`), each with a speaker glyph. *(The "Whole home" speaker chip and the dashed "Join the music in {source}" affordance are **deferred from v1** — they're the multi-room grouping feature; v1 audio is strictly per-room. See the State Model CORE RULE.)*
+- **Room chips** — pill toggles; active = filled accent, idle = white with sage border. **Light and audio have separate selectors** (as in the reference PNGs): the top chip row picks the **light room** (dial + warmth); a second chip row in the AUDIO section picks the **audio room** (volume slider, and later the Media panel). The two are independent — one does **not** drive the other. The audio row lists only **speaker rooms** (`Room.audioRooms`, gated by `Room.hasSpeaker`), each with a speaker glyph. Under the chips sits the join action ("Spil også i {other}" / "Stop i {other}"), which puts the home's two speaker rooms on the same music — see the State Model CORE RULE for how a group is addressed. *(The "Whole home" speaker chip and "+ Create group" from the mocks are still out of scope — they need an N-room grouping surface.)*
 - **Media / Calendar tabs** — pill segmented control; Media (search, now-playing + scrubber, transport, queue, horizontal playlist rail) and Calendar (month grid, agenda, to-do). The search field is live: typing runs a debounced Music Assistant `music/search` and replaces the browse shelves with a flat 3-per-row grid of playable results; tapping one plays it on the active audio room and clears the query. The Media panel binds to the **active audio room's** audio; its empty state is simply *that room has nothing playing*.
 
 **Design tokens** (centralize in `Color.kt` / `Type.kt` — the prototype hardcodes hex; don't):
@@ -169,9 +169,16 @@ sealed interface HomeScreenState {
 > the adapter or `HomeState`; the device-data layer must never define them. Selecting a light room
 > shows *that room's* lights; selecting an audio room shows *that room's* audio. Playlists are a
 > shared library, not per-room. The audio selector lists only speaker rooms (`Room.hasSpeaker`).
-> Multi-room sync ("Whole home" chip / "Join the music in {source}") is a **deferred grouping
-> feature**, not part of the v1 model — reintroduce it later as an additive relation (e.g. a
-> `groupId`) *on top of* per-room ownership. (Earlier drafts put a global audio session, then a
+> Multi-room sync is implemented as exactly the additive relation this rule allows: a nullable
+> `AudioState.syncLeader` *on top of* per-room ownership, for **two** speaker rooms (the join action
+> reads `Room.audioRooms.singleOrNull { it != active }`, so a third speaker room needs a list-based
+> surface before it works). **No speaker leads, as far as the user is concerned — the latest request
+> wins.** Every intent about *content* (play, enqueue, skip, transport) and everything the Media panel
+> shows address the room's **session** — `audioSessionRoom`/`audioSessionOf` in `DashboardLogic.kt`,
+> applied in `HomepageViewModel` — so putting a song on in either room of a group makes it the whole
+> group's song, and both rooms show the same playback. Volume is never redirected: it belongs to the
+> speaker. Adapters stay plainly room-addressed and know nothing about any of this. ("Whole home" /
+> "+ Create group" from the mocks are still out of scope.) (Earlier drafts put a global audio session, then a
 > single `activeRoom`, into the shared state; both were wrong and were removed — do not collapse the
 > two selectors back into one.)
 
