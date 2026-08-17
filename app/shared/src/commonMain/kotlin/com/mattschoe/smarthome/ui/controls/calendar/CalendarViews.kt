@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.ui.controls.calendar
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +46,7 @@ import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
 import com.mattschoe.smarthome.ui.theme.CardBorder
+import com.mattschoe.smarthome.ui.theme.ChipIdle
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
 import com.mattschoe.smarthome.ui.theme.Ink
@@ -52,6 +54,7 @@ import com.mattschoe.smarthome.ui.theme.InsetFill
 import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.OnForest
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.number
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
@@ -106,6 +109,7 @@ internal fun CalendarViews(
     onEditTodo: (String, String) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onOpenEventDetail: (CalendarEvent) -> Unit,
+    onNewEventAt: (LocalDate, LocalTime) -> Unit,
     onWeekHourHeight: (Float) -> Unit,
     headerTrailing: @Composable RowScope.() -> Unit,
     modifier: Modifier = Modifier,
@@ -169,6 +173,7 @@ internal fun CalendarViews(
                         onSelectDay = onSelectDay,
                         onShowWeek = onShowWeek,
                         onOpenEvent = onOpenEventDetail,
+                        onNewEventAt = onNewEventAt,
                         onHourHeight = onWeekHourHeight,
                         onChrome = { chrome = it },
                         modifier = Modifier.height(gridHeight),
@@ -317,6 +322,44 @@ fun CalendarSettingsButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
             tint = Ink,
             modifier = Modifier.size(20.dp),
         )
+    }
+}
+
+/**
+ * The jump-to-today button: today's date in a rounded square, the add button's outlined sibling and
+ * placed immediately before it. Both grids page absolutely off the ViewModel's selection, so this is
+ * the one control that gets a reader who has swiped weeks or months out back to where they live.
+ *
+ * A square rather than a disc, and outlined rather than filled Forest, so a date sitting beside the "+"
+ * reads as *where you are going* rather than as a second action. The outline is the crisp Forest ring
+ * both grids already draw around the selected day, and it carries no shadow: a soft edge blurred the
+ * line into the "+"'s drop beside it, where this wants to read as drawn rather than raised.
+ */
+@Composable
+fun TodayButton(today: LocalDate, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(Dimensions.todayButtonRadius)
+    Box(
+        modifier = modifier
+            .size(Dimensions.minTouch)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "Gå til i dag" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(Dimensions.sourceBadgeSize)
+                .clip(shape)
+                .background(ChipIdle)
+                .border(Dimensions.todayButtonBorder, Forest, shape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = today.day.toString(),
+                color = Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

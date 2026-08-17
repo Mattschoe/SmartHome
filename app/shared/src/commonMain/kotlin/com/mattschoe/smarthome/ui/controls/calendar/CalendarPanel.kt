@@ -19,6 +19,7 @@ import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
 import com.mattschoe.smarthome.ui.pages.homepage.EventEditorTarget
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalTime
 
 /**
  * The calendar kit's entry point — the surface swap, built like the media kit's `MediaPanel`: the
@@ -61,6 +62,8 @@ fun CalendarPanel(
     onEditTodo: (String, String) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onOpenEventDetail: (CalendarEvent) -> Unit,
+    /** An empty week-grid slot was tapped: open a blank form on that day, at that time. */
+    onNewEventAt: (LocalDate, LocalTime) -> Unit,
     onWeekHourHeight: (Float) -> Unit,
     onSaveEvent: (String, CalendarEventDraft) -> Unit,
     onDeleteEvent: () -> Unit,
@@ -115,6 +118,7 @@ fun CalendarPanel(
                 onEditTodo = onEditTodo,
                 onOpenEvent = onOpenEvent,
                 onOpenEventDetail = onOpenEventDetail,
+                onNewEventAt = onNewEventAt,
                 onWeekHourHeight = onWeekHourHeight,
                 headerTrailing = headerTrailing,
                 modifier = Modifier.fillMaxSize(),

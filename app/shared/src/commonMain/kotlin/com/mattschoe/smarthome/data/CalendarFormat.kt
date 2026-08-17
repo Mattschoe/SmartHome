@@ -46,6 +46,15 @@ fun formatTimeOfDay(time: LocalTime): String =
     "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
 
 /**
+ * A minute-from-midnight as `HH:mm` — the week grid's block boundaries, which are stored as minutes
+ * rather than times. A day the event runs past ends at [MinutesPerDay], which reads as the "24:00" no
+ * [LocalTime] can hold.
+ */
+fun formatMinuteOfDay(minute: Int): String =
+    if (minute >= MinutesPerDay) "24:00"
+    else formatTimeOfDay(LocalTime(minute / 60, minute % 60))
+
+/**
  * The detail popup's when-line — "ons. 19. aug. 2026, 10:00 – 18:00" for a timed event, the day (or
  * the run of days) alone for an all-day one, and the two dates spelled out for anything crossing
  * midnight.

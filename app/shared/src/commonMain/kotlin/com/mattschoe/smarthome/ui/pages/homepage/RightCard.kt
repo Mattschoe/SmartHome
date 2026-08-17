@@ -58,6 +58,7 @@ import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarViewToggle
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
+import com.mattschoe.smarthome.ui.controls.calendar.TodayButton
 import com.mattschoe.smarthome.ui.controls.media.MediaPanel
 import com.mattschoe.smarthome.ui.controls.media.MiniPlayerBar
 import com.mattschoe.smarthome.ui.controls.media.MinimizeHandle
@@ -68,6 +69,7 @@ import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.InsetFill
 import com.mattschoe.smarthome.ui.theme.OnForest
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalTime
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
@@ -158,8 +160,10 @@ fun RightCard(
     onToggleTodo: (String) -> Unit,
     onEditTodo: (String, String) -> Unit,
     onAddEvent: () -> Unit,
+    onShowToday: () -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onOpenEventDetail: (CalendarEvent) -> Unit,
+    onNewEventAt: (LocalDate, LocalTime) -> Unit,
     onWeekHourHeight: (Float) -> Unit,
     onEditEventDetail: () -> Unit,
     onDeleteEventDetail: () -> Unit,
@@ -178,9 +182,10 @@ fun RightCard(
     ) {
         Column(Modifier.fillMaxSize()) {
             // The tabs are wrap-content, so the trailing edge beside them is free for the control the
-            // showing panel needs there: the source badge over Media, the add-event button over the
-            // Calendar. Both animate, to keep the row from jumping as the tab changes. The "+" stands
-            // down while the editor is open — re-opening a blank form would discard what is typed.
+            // showing panel needs there: the source badge over Media, the today-and-add pair over the
+            // Calendar. Both animate, to keep the row from jumping as the tab changes. The pair stands
+            // down while the editor is open — re-opening a blank form would discard what is typed, and
+            // paging the grid underneath the editor moves nothing anybody can see.
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 PanelTabs(panel = panel, onSelectPanel = onSelectPanel)
                 Spacer(Modifier.weight(1f))
@@ -192,7 +197,10 @@ fun RightCard(
                     enter = fadeIn(),
                     exit = fadeOut(),
                 ) {
-                    AddEventButton(onClick = onAddEvent)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TodayButton(today = today, onClick = onShowToday)
+                        AddEventButton(onClick = onAddEvent)
+                    }
                 }
             }
             Spacer(Modifier.height(Dimensions.mediaSectionGap))
@@ -270,6 +278,7 @@ fun RightCard(
                         onEditTodo = onEditTodo,
                         onOpenEvent = onOpenEvent,
                         onOpenEventDetail = onOpenEventDetail,
+                        onNewEventAt = onNewEventAt,
                         onWeekHourHeight = onWeekHourHeight,
                         onSaveEvent = onSaveEvent,
                         onDeleteEvent = onDeleteEvent,

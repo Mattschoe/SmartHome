@@ -23,6 +23,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,6 +69,7 @@ import com.mattschoe.smarthome.data.HoursPerDay
 import com.mattschoe.smarthome.data.MinutesPerDay
 import com.mattschoe.smarthome.data.WeekHourHeightRange
 import com.mattschoe.smarthome.data.danishMonths
+import com.mattschoe.smarthome.data.formatMinuteOfDay
 import com.mattschoe.smarthome.data.formatTimeOfDay
 import com.mattschoe.smarthome.data.layoutDayEvents
 import com.mattschoe.smarthome.data.weekAtPage
@@ -126,6 +129,7 @@ internal fun WeekPager(
     onSelectDay: (LocalDate) -> Unit,
     onShowWeek: (LocalDate) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
+    onNewEventAt: (LocalDate, LocalTime) -> Unit,
     onHourHeight: (Float) -> Unit,
     onChrome: (Dp) -> Unit,
     modifier: Modifier = Modifier,
@@ -214,6 +218,7 @@ internal fun WeekPager(
                 hourHeight = hourHeight,
                 onHourHeight = onHourHeight,
                 onOpenEvent = onOpenEvent,
+                onNewEventAt = onNewEventAt,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -410,6 +415,23 @@ private const val WeekOpenLeadMinutes = 60
  */
 private fun minuteOffset(minute: Int, hourHeight: Dp): Dp = hourHeight * (minute / 60f)
 
+/**
+ * How coarsely a tapped slot is rounded. Half an hour is forgiving on a touch screen and always lands
+ * on a time somebody would have picked anyway — and at the pinched-in end of the zoom a single dp is
+ * ten minutes, so anything finer would be pointing at a time nobody can aim for.
+ */
+private const val SlotSnapMinutes = 30
+
+/**
+ * Where a tap in the grid landed, as a time of day: [minuteOffset]'s inverse, snapped down to
+ * [SlotSnapMinutes] and held short of midnight so the slot it names is always inside the day.
+ */
+private fun Density.slotTimeAt(y: Float, hourHeight: Dp): LocalTime {
+    val minute = ((y / hourHeight.toPx()) * 60f).toInt().coerceIn(0, MinutesPerDay - SlotSnapMinutes)
+    val snapped = minute - minute % SlotSnapMinutes
+    return LocalTime(snapped / 60, snapped % 60)
+}
+
 /** The strides [hourStride] may pick between, finest first. Each divides 24 evenly. */
 private val HourStrides = intArrayOf(1, 2, 3, 4, 6, 12)
 
@@ -473,6 +495,7 @@ private fun WeekGrid(
     hourHeight: Dp,
     onHourHeight: (Float) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
+    onNewEventAt: (LocalDate, LocalTime) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -542,10 +565,12 @@ private fun WeekGrid(
                 Row(Modifier.matchParentSize()) {
                     days.forEach { date ->
                         DayColumn(
+                            date = date,
                             events = eventsByDay[date].orEmpty(),
                             sources = sources,
                             hourHeight = hourHeight,
                             onOpenEvent = onOpenEvent,
+                            onNewEventAt = onNewEventAt,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                     }
@@ -632,29 +657,59 @@ private fun HourRules(hourHeight: Dp, stride: Int, modifier: Modifier = Modifier
  * The floor a short block is held to scales with the zoom, so a pinched grid stays *true to time*:
  * blocks shrink with the day rather than a half-hour meeting standing as tall as the two hours below
  * it. At full expansion the floor is exactly [Dimensions.weekMinBlockHeight].
+ *
+ * **Tapping the empty space between blocks opens a new event there** ([onNewEventAt]), on this column's
+ * [date] at the half-hour under the finger. The blocks are this box's children, so a tap on one reaches
+ * *it* first and still opens the detail popup; only what nothing catches lands here. The tap is safe
+ * beside the three drag gestures wrapped around this column — the hour scroll, the week pager and the
+ * grid's pinch — because each of those consumes movement, which cancels a tap rather than firing it.
  */
 @Composable
 private fun DayColumn(
+    date: LocalDate,
     events: List<CalendarEvent>,
     sources: List<CalendarSource>,
     hourHeight: Dp,
     onOpenEvent: (CalendarEvent) -> Unit,
+    onNewEventAt: (LocalDate, LocalTime) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val positioned = remember(events) { layoutDayEvents(events) }
     val floor = (Dimensions.weekMinBlockHeight * (hourHeight / Dimensions.weekHourHeightMax))
         .coerceAtLeast(MinBlockHeightFloor)
-    BoxWithConstraints(modifier) {
+    // The detector is keyed on the column's day, not on the scale, and reaches the current scale and
+    // callback through rememberUpdatedState — a pinch changes the scale every frame, and restarting the
+    // gesture that often would drop the tap that produced it.
+    val currentNewEventAt by rememberUpdatedState(onNewEventAt)
+    val currentHourHeight by rememberUpdatedState(hourHeight)
+    // The two line boxes the block's text is fitted to, in dp, so the font scale is honoured.
+    val density = LocalDensity.current
+    val titleLine = with(density) { WeekBlockTitleLineHeight.toDp() }
+    val timeLine = with(density) { WeekBlockTimeLineHeight.toDp() }
+    BoxWithConstraints(
+        modifier.pointerInput(date) {
+            detectTapGestures { offset ->
+                currentNewEventAt(date, slotTimeAt(offset.y, currentHourHeight))
+            }
+        },
+    ) {
         val columnWidth = maxWidth
         positioned.forEach { placed ->
             val laneWidth = columnWidth / placed.laneCount
             val blockHeight = minuteOffset(placed.endMinute - placed.startMinute, hourHeight)
                 .coerceAtLeast(floor)
+            // The **event's** own bounds, not the placed ones: [layoutDayEvents] floors a short span to
+            // [MinEventSpanMinutes] so the block can be hit, and printing that as its end time would be
+            // a lie. Its start it copies through, so that one is the event's either way.
+            val endLabel = placed.event.endMinute
+                ?.takeIf { it != placed.startMinute }
+                ?.let(::formatMinuteOfDay)
             EventBlock(
                 event = placed.event,
                 color = calendarDotColor(placed.event.sourceId, sources),
-                showTitle = blockHeight >= Dimensions.weekBlockTitleMinHeight,
-                showTime = blockHeight >= Dimensions.weekBlockTimeMinHeight,
+                startLabel = formatMinuteOfDay(placed.startMinute),
+                endLabel = endLabel,
+                text = blockText(blockHeight, titleLine, timeLine, if (endLabel == null) 1 else 2),
                 onOpen = onOpenEvent,
                 modifier = Modifier
                     .offset(x = laneWidth * placed.lane, y = minuteOffset(placed.startMinute, hourHeight))
@@ -668,11 +723,39 @@ private fun DayColumn(
 /** Below this a block would be a hairline: the one height the scaled floor never goes under. */
 private val MinBlockHeightFloor = 3.dp
 
+/** The block's two line boxes. Stated once, so [blockText]'s budget and the `Text`s can't drift apart. */
+private val WeekBlockTitleLineHeight = 13.sp
+private val WeekBlockTimeLineHeight = 11.sp
+
+/** How a block spends its height: how many of its boundary times fit, and how many title lines. */
+private data class BlockText(val timeLines: Int, val titleMaxLines: Int)
+
+/**
+ * The block's text budget — **the title comes first**. The times are printed only where the block has
+ * room for them *and* a line of title, so a block too short for both spends every dp it has on the
+ * title before that ellipses; a block too short even for one line is its colour alone, which still says
+ * *when* and *whose* where no word would fit.
+ *
+ * Whatever is left after the times goes to the title as whole lines, which is what lets a tall block
+ * print a long title in full instead of clipping it at an arbitrary two.
+ *
+ * [timeLines] is what the event *has* to show — two ends normally, one where the backend gave no
+ * distinct end. Both-or-neither is about this budget, so a known start is never dropped merely because
+ * the end is missing.
+ */
+private fun blockText(blockHeight: Dp, titleLine: Dp, timeLine: Dp, timeLines: Int): BlockText {
+    val inner = blockHeight - Dimensions.weekBlockVerticalPadding * 2
+    if (inner < titleLine) return BlockText(timeLines = 0, titleMaxLines = 0)
+    val withTimes = inner - timeLine * timeLines
+    return if (withTimes >= titleLine) BlockText(timeLines, (withTimes / titleLine).toInt())
+    else BlockText(0, (inner / titleLine).toInt())
+}
+
 /**
  * One event in the grid: its calendar's color at low alpha, with a bar of the full color on the
- * leading edge. Only a block with room for it prints the title ([showTitle]), and only a taller one
- * the start time under it ([showTime]) — squeezed below the first, a block is its colour alone, which
- * still says *when* and *whose* even where no word would fit.
+ * leading edge. Inside, the shape every calendar uses — **start time on the top edge, end time on the
+ * bottom edge, and the title spending everything between them** — as far as the block's height allows
+ * ([blockText] decides; a squeezed block drops the times to keep the title, then the title too).
  *
  * Tapping it opens the detail popup rather than the editor: at [Dimensions.weekMinBlockHeight] and a
  * seventh of the card wide, a block is often too small to say what it even is — and a text-less one
@@ -682,8 +765,9 @@ private val MinBlockHeightFloor = 3.dp
 private fun EventBlock(
     event: CalendarEvent,
     color: Color,
-    showTitle: Boolean,
-    showTime: Boolean,
+    startLabel: String,
+    endLabel: String?,
+    text: BlockText,
     onOpen: (CalendarEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -695,27 +779,45 @@ private fun EventBlock(
             .semantics { contentDescription = "Åbn ${event.title}" },
     ) {
         Box(Modifier.width(Dimensions.weekBlockBarWidth).fillMaxHeight().background(color))
-        if (showTitle) {
-            Column(Modifier.padding(horizontal = Dimensions.weekBlockPadding, vertical = 2.dp)) {
+        if (text.titleMaxLines > 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(
+                        horizontal = Dimensions.weekBlockPadding,
+                        vertical = Dimensions.weekBlockVerticalPadding,
+                    ),
+            ) {
+                if (text.timeLines > 0) BlockTime(startLabel)
                 Text(
                     text = event.title,
                     color = Ink,
                     fontSize = 11.sp,
-                    lineHeight = 13.sp,
+                    lineHeight = WeekBlockTitleLineHeight,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 2,
+                    maxLines = text.titleMaxLines,
                     overflow = TextOverflow.Ellipsis,
+                    // The title takes everything the times leave, which is what pins the end time to
+                    // the bottom edge — and caps the title's own box, so a line box measuring a hair
+                    // taller than [blockText] budgeted clips inside the block rather than pushing
+                    // that time out of it.
+                    modifier = Modifier.weight(1f),
                 )
-                if (showTime) {
-                    Text(
-                        text = event.time,
-                        color = InkSoft,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                if (text.timeLines > 1 && endLabel != null) BlockTime(endLabel)
             }
         }
     }
+}
+
+/** One boundary time. Its line box is [WeekBlockTimeLineHeight] — the one [blockText] budgeted for it. */
+@Composable
+private fun BlockTime(label: String) {
+    Text(
+        text = label,
+        color = InkSoft,
+        fontSize = 10.sp,
+        lineHeight = WeekBlockTimeLineHeight,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }

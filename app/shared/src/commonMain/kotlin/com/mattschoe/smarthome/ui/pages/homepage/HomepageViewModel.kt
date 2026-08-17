@@ -54,6 +54,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.minus
@@ -461,11 +462,30 @@ class HomepageViewModel(
         showWeek(weekStartOf(_selectedDay.value).plus(days, DateTimeUnit.DAY))
 
     /**
-     * Open a blank event form. Always on **today**, not on the selected day: the "+" is reached from
-     * wherever the grid happens to be parked, and an event landing on a month somebody merely browsed
-     * past is a worse surprise than re-picking the date on the wheel.
+     * Back to today, in whichever view is showing — the header's date button. Both grids are pagers
+     * driven off this state, so moving the selected day and the displayed month is the whole of it:
+     * each pager animates itself there, and the week is the one the selected day falls in.
+     */
+    fun showToday() {
+        val day = today.value
+        _selectedDay.value = day
+        showMonth(day)
+    }
+
+    /**
+     * Open a blank event form from the "+". Always on **today**, not on the selected day: the button is
+     * reached from wherever the grid happens to be parked, and an event landing on a month somebody
+     * merely browsed past is a worse surprise than re-picking the date in the editor.
      */
     fun openNewEvent() { _eventEditor.value = EventEditorTarget.New(today.value) }
+
+    /**
+     * Open a blank event form on the empty week-grid slot that was tapped. [openNewEvent]'s reason to
+     * ignore where the grid is parked doesn't apply here: the day and time *are* what was pointed at.
+     */
+    fun openNewEventAt(date: LocalDate, time: LocalTime) {
+        _eventEditor.value = EventEditorTarget.New(date, time)
+    }
 
     /**
      * Open an agenda row. An event on a read-only calendar — or one the backend gave no uid, which no

@@ -538,10 +538,11 @@ private const val ConfirmWindowMs = 4_000L
 private const val NewEventDurationMinutes = 60
 
 /**
- * What the boundary rows open on: an existing event's own bounds, or — for a new one — the next whole
- * hour on [EventEditorTarget.date] running [NewEventDurationMinutes]. An all-day event's stored end is
- * *exclusive*, so it is pulled back to the last day it actually covers for display; [buildEventDraft]
- * puts the day back on save.
+ * What the boundary rows open on: an existing event's own bounds, or — for a new one — the slot tapped
+ * in the week grid ([EventEditorTarget.New.time]), falling back to the next whole hour on
+ * [EventEditorTarget.date]; either way running [NewEventDurationMinutes]. An all-day event's stored end
+ * is *exclusive*, so it is pulled back to the last day it actually covers for display;
+ * [buildEventDraft] puts the day back on save.
  */
 private fun seedEventBounds(target: EventEditorTarget): Pair<LocalDateTime, LocalDateTime> {
     val existing = (target as? EventEditorTarget.Existing)?.event
@@ -557,9 +558,10 @@ private fun seedEventBounds(target: EventEditorTarget): Pair<LocalDateTime, Loca
         return start to shown
     }
     // No stored bounds: a brand-new event, or a cached row from before they were carried. Either way
-    // the day is known and the time is a sensible round default.
+    // the day is known and the time is either the one tapped or a sensible round default.
+    val tapped = (target as? EventEditorTarget.New)?.time
     val hour = ((currentTimeOfDay().hour + 1) % 24).coerceAtLeast(0)
-    start = LocalDateTime(target.date, LocalTime(hour, 0))
+    start = LocalDateTime(target.date, tapped ?: LocalTime(hour, 0))
     return start to start.plusMinutes(NewEventDurationMinutes)
 }
 

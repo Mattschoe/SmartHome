@@ -105,15 +105,14 @@ object Dimensions {
     val weekTimeGutter = 34.dp
     val weekHourLabelHeight = 14.dp
     // An event block: its floor height *at full expansion* (it scales down with the zoom, so a block
-    // stays true to its minutes), the leading bar in the calendar's full color, and the heights below
-    // which the start time, then the title itself, are dropped rather than clipped.
+    // stays true to its minutes), the leading bar in the calendar's full color, and the padding its
+    // text sits inside — which is also the budget the block's own line-fitting spends from.
     val weekMinBlockHeight = 14.dp
-    val weekBlockTitleMinHeight = 18.dp
     val weekBlockRadius = 6.dp
     val weekBlockBarWidth = 3.dp
     val weekBlockGap = 2.dp
     val weekBlockPadding = 4.dp
-    val weekBlockTimeMinHeight = 40.dp
+    val weekBlockVerticalPadding = 2.dp
     val weekAllDayChipHeight = 20.dp
     // The caret in the gutter that expands the all-day strip past its collapsed single row.
     val weekChevronSize = 18.dp
@@ -203,6 +202,12 @@ object Dimensions {
     // The browse-source badge beside the panel tabs (SourceToggle in RightCard.kt): the drawn disc,
     // inside a full [minTouch] target.
     val sourceBadgeSize = 32.dp
+    // The jump-to-today button beside the add-event "+" (TodayButton in CalendarViews.kt): the same
+    // [sourceBadgeSize] footprint, rounded as a square rather than a disc so it reads as a date and
+    // not as a second action button. Its outline is drawn at the weight the calendar grids ring the
+    // selected day with, so the two read as the same line.
+    val todayButtonRadius = 10.dp
+    val todayButtonBorder = 1.5.dp
 
     // Artist drill-in surface (ArtistSurface.kt): the header portrait and the back arrow
     // that leaves the surface, which is a plain full touch target rather than a drawn control.

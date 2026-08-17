@@ -22,6 +22,7 @@ import com.mattschoe.smarthome.data.weekStart as weekStartOf
 import com.mattschoe.smarthome.data.calendarWindow as calendarWindowOf
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.number
 import kotlinx.datetime.plus
 
@@ -108,8 +109,11 @@ sealed interface EventEditorTarget {
     /** The day the editor's start row opens on. */
     val date: LocalDate
 
-    /** The "+" path — a blank form on [date] (today). */
-    data class New(override val date: LocalDate) : EventEditorTarget
+    /**
+     * The create path — a blank form on [date]: today from the "+", or the day and [time] of an empty
+     * slot tapped in the week grid. A null [time] leaves the boundary rows on their own default.
+     */
+    data class New(override val date: LocalDate, val time: LocalTime? = null) : EventEditorTarget
 
     /**
      * An existing event opened from the agenda. [canWrite] is false for an event on a read-only

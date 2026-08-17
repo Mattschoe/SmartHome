@@ -19,6 +19,7 @@ import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
+import com.mattschoe.smarthome.ui.controls.calendar.TodayButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
@@ -115,15 +116,19 @@ fun LandscapeCalendarPage(
                     onEditTodo = viewModel::editTodo,
                     onOpenEvent = viewModel::openEvent,
                     onOpenEventDetail = viewModel::openEventDetail,
+                    onNewEventAt = viewModel::openNewEventAt,
                     onWeekHourHeight = viewModel::setWeekHourHeight,
                     onSaveEvent = viewModel::saveEvent,
                     onDeleteEvent = viewModel::deleteEvent,
                     onCloseEventEditor = viewModel::closeEventEditor,
-                    // The "+" stands down while the editor is open, as on the tablet — re-opening a
-                    // blank form would discard what is typed.
+                    // The today button and the "+" stand down while the editor is open, as on the
+                    // tablet — re-opening a blank form would discard what is typed.
                     headerTrailing = {
                         CalendarSettingsButton(viewModel::openCalendarSettings)
-                        if (eventEditor == null) AddEventButton(viewModel::openNewEvent)
+                        if (eventEditor == null) {
+                            TodayButton(today, viewModel::showToday)
+                            AddEventButton(viewModel::openNewEvent)
+                        }
                     },
                     modifier = Modifier.fillMaxSize(),
                 )

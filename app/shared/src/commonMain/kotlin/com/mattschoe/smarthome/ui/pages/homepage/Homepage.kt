@@ -179,8 +179,10 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
                 // The editor's writes resolve which event (and which calendar) they address inside the
                 // ViewModel, so like the queue intents they need no capture here.
                 onAddEvent = viewModel::openNewEvent,
+                onShowToday = viewModel::showToday,
                 onOpenEvent = viewModel::openEvent,
                 onOpenEventDetail = viewModel::openEventDetail,
+                onNewEventAt = viewModel::openNewEventAt,
                 onWeekHourHeight = viewModel::setWeekHourHeight,
                 onEditEventDetail = viewModel::editEventDetail,
                 onDeleteEventDetail = viewModel::deleteEventDetail,
