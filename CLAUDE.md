@@ -35,6 +35,13 @@ The full design + UX spec lives in `app/docs/` and is the source of truth for wh
 ./gradlew clean
 ```
 
+**Claude Code must not run the test suite.** Any test task (`allTests`, `check`, `:shared:desktopTest`,
+`:shared:androidHostTest`, …) hangs when run from an agent session — it stalls for 20+ minutes rather
+than failing, so the session is stuck with nothing to show for it. Compiling is fine and is the check
+to run instead (`./gradlew :shared:compileKotlinDesktop`, or `:shared:build` / `:androidApp:assembleDebug`
+for a fuller one). Leave the tests to Matthias: finish the change, say which test tasks are worth
+running, and let him run them.
+
 iOS is built from Xcode via `app/iosApp/iosApp.xcodeproj` (it consumes the `Shared.framework` produced by the `:shared` module).
 
 ## Architecture

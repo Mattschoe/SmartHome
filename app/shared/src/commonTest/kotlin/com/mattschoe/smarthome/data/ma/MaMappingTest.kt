@@ -4,6 +4,7 @@ import com.mattschoe.smarthome.data.model.BrowseKind
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.Room
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -186,6 +187,67 @@ class MaMappingTest {
             )
         )
         assertEquals(listOf("Mix"), shelves.mixedForYou.map { it.name })
+    }
+
+    @Test
+    fun shelves_drop_the_other_accounts_items_from_a_provider_mixing_folder() {
+        // "Recently played" is library-level: MA returns one folder holding both accounts' history.
+        val folders = listOf(
+            folder(
+                "Recently played",
+                key = "recently_played",
+                items = listOf(
+                    track("Nightdrive", uri = "ytmusic--zas2oSHz://track/2"),
+                    track("positions", uri = "spotify--TkfLc2DT://track/35mvY5S1H3J2QZyna3TFe0"),
+                ),
+            ),
+            folder("Mixed for you", items = listOf(track("Spotify Mix", uri = "spotify--TkfLc2DT://playlist/9", type = "playlist"))),
+        )
+
+        val yt = mapRecommendations(folders, domain = "ytmusic")
+        assertEquals(listOf("Nightdrive"), yt.quickPicks.map { it.name })
+        assertTrue(yt.mixedForYou.isEmpty())
+
+        assertEquals(listOf("positions"), mapRecommendations(folders, domain = "spotify").quickPicks.map { it.name })
+    }
+
+    @Test
+    fun a_shelf_takes_every_folder_of_that_name_not_just_the_first() {
+        // Two providers each offering "Listen again": taking only the first would leave ytmusic empty.
+        val folders = listOf(
+            folder("Listen again", items = listOf(track("Chart Hit", uri = "spotify--TkfLc2DT://track/1"))),
+            folder("Listen again", items = listOf(track("Deep Cut", uri = "ytmusic--zas2oSHz://track/2"))),
+        )
+
+        assertEquals(listOf("Deep Cut"), mapRecommendations(folders, domain = "ytmusic").quickPicks.map { it.name })
+    }
+
+    @Test
+    fun a_library_row_belongs_to_whichever_providers_can_source_it() {
+        // Both uri and provider read "library"; only the mappings name the real sources.
+        val shared = MaMediaItem(
+            name = "Positions",
+            uri = "library://album/95",
+            media_type = "album",
+            is_playable = true,
+            provider = "library",
+            provider_mappings = listOf(
+                MaProviderMapping(provider_domain = "ytmusic"),
+                MaProviderMapping(provider_domain = "spotify"),
+            ),
+        )
+        val spotifyOnly = shared.copy(
+            name = "C Only",
+            uri = "library://album/96",
+            provider_mappings = listOf(MaProviderMapping(provider_domain = "spotify")),
+        )
+        val folders = listOf(folder("Listen again", items = listOf(shared, spotifyOnly)))
+
+        assertEquals(listOf("Positions"), mapRecommendations(folders, domain = "ytmusic").quickPicks.map { it.name })
+        assertEquals(
+            listOf("Positions", "C Only"),
+            mapRecommendations(folders, domain = "spotify").quickPicks.map { it.name },
+        )
     }
 
     @Test
@@ -710,5 +772,40 @@ class MaMappingTest {
         val plan = planEnqueue(queue, queue, tailId = "u1", mode = QueueMode.Last)
         assertEquals(emptyList(), plan.moves)
         assertEquals("u1", plan.tailId)
+    }
+
+    // --- Wire decoding ---
+
+    private val wireJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    @Test
+    fun aFractionalDuration_decodesAsWholeSeconds() {
+        // Observed live: one such track made the whole `player_queues/items` reply unreadable, which
+        // left every room without an up-next list.
+        val item = wireJson.decodeFromString<MaQueueItem>(
+            """{"queue_item_id":"q1","name":"Orbit","duration":157.71}"""
+        )
+        assertEquals(158, item.duration)
+    }
+
+    @Test
+    fun aWholeAndAnAbsentDuration_bothStillDecode() {
+        val whole = wireJson.decodeFromString<MaMediaItem>("""{"name":"Song","duration":184}""")
+        assertEquals(184, whole.duration)
+        assertNull(wireJson.decodeFromString<MaMediaItem>("""{"name":"Song"}""").duration)
+    }
+
+    @Test
+    fun anItemNoProviderCanSource_isNotOfferedAsATile() {
+        val unavailable = track("Positions", type = "album", uri = "library://album/95").copy(
+            provider_mappings = listOf(MaProviderMapping("ytmusic", "ytmusic--zas2oSHz", available = false)),
+        )
+        assertNull(unavailable.toBrowseItemOrNull())
+        // One live binding is enough to keep it.
+        val mixed = unavailable.copy(
+            provider_mappings = unavailable.provider_mappings +
+                MaProviderMapping("spotify", "spotify--TkfLc2DT", available = true),
+        )
+        assertEquals("Positions", mixed.toBrowseItemOrNull()?.name)
     }
 }

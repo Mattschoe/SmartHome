@@ -1,6 +1,13 @@
 package com.mattschoe.smarthome.data.ma
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlin.math.roundToInt
 
 /**
  * Wire (JSON) models for the **Music Assistant** server WebSocket API (`:8095/ws`), kept separate
@@ -10,6 +17,19 @@ import kotlinx.serialization.Serializable
  *
  * Shapes verified live against MA v2.9.9 / schema 31 (see memory `ma-direct-api-capabilities`).
  */
+
+/**
+ * A duration in seconds, as Music Assistant actually reports it: usually a whole number, but a
+ * provider that knows a stream's real length sends a float (`157.71`). Decoding that straight into
+ * `Int` throws, and one such track anywhere in a reply takes the **whole** reply down with it — which
+ * is how a single song could blank every room's queue. The number is read as a double and rounded;
+ * nothing on screen shows sub-second precision.
+ */
+internal object MaSecondsSerializer : KSerializer<Int> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("MaSeconds", PrimitiveKind.INT)
+    override fun deserialize(decoder: Decoder): Int = decoder.decodeDouble().roundToInt()
+    override fun serialize(encoder: Encoder, value: Int) = encoder.encodeInt(value)
+}
 
 /** An image reference. [path] is a full https URL for remotely-accessible art (ytmusic), else a
  *  provider-relative path resolved through the MA image proxy. [type] is MA's image role — `"thumb"`
@@ -36,11 +56,15 @@ data class MaNamedRef(
 
 /** One provider's binding for a media item. [provider_domain] is the provider *kind*
  *  (`ytmusic`, `builtin`) — the stable discriminator; [provider_instance] is the configured
- *  instance (`ytmusic--zas2oSHz`). A `library://` item carries a mapping per backing provider. */
+ *  instance (`ytmusic--zas2oSHz`). A `library://` item carries a mapping per backing provider.
+ *  [available] is that binding's own playability: a library item every provider has marked
+ *  unavailable is one MA will refuse to start ("No playable item found to start playback").
+ *  Defaulted `true`, so an item that reports no mappings at all is left alone. */
 @Serializable
 data class MaProviderMapping(
     val provider_domain: String? = null,
     val provider_instance: String? = null,
+    val available: Boolean = true,
 )
 
 /**
@@ -56,7 +80,7 @@ data class MaMediaItem(
     val is_playable: Boolean = false,
     val provider: String? = null,
     val provider_mappings: List<MaProviderMapping> = emptyList(),
-    val duration: Int? = null,
+    @Serializable(with = MaSecondsSerializer::class) val duration: Int? = null,
     val subtitle: String? = null,
     val owner: String? = null,
     val artists: List<MaNamedRef> = emptyList(),
@@ -114,7 +138,7 @@ data class MaQueue(
 data class MaQueueItem(
     val queue_item_id: String,
     val name: String = "",
-    val duration: Int? = null,
+    @Serializable(with = MaSecondsSerializer::class) val duration: Int? = null,
     val image: MaImageRef? = null,
     val media_item: MaMediaItem? = null,
 )

@@ -47,28 +47,34 @@ private val MIXED_FOR_YOU_NAMES = setOf("mixed for you")
 private val QUICK_PICKS_TYPES = setOf("track", "album")
 
 /**
- * Select the [BrowseShelves] from MA's `music/recommendations` folders. Quick Picks round-robins the
- * [QUICK_PICKS_SOURCE_NAMES] folders so each one reaches the first page, keeping only
- * [QUICK_PICKS_TYPES] items, de-duplicated and capped at [QUICK_PICKS_POOL_LIMIT]; [rotation] then
- * picks which [QUICK_PICKS_WINDOW]-wide slice of that pool is the visible grid, so a dashboard left
- * running turns its tiles over instead of showing one fixed set. Mixed For You is the "Mixed for you"
- * folder of supermixes.
+ * Select the [BrowseShelves] from MA's `music/recommendations` folders, keeping only [domain]'s items.
+ * Quick Picks round-robins the [QUICK_PICKS_SOURCE_NAMES] folders so each one reaches the first page,
+ * keeping only [QUICK_PICKS_TYPES] items, de-duplicated and capped at [QUICK_PICKS_POOL_LIMIT];
+ * [rotation] then picks which [QUICK_PICKS_WINDOW]-wide slice of that pool is the visible grid, so a
+ * dashboard left running turns its tiles over instead of showing one fixed set. Mixed For You is the
+ * "Mixed for you" folder of supermixes.
+ *
+ * `music/recommendations` is **library-wide**: it returns every configured provider's folders, and the
+ * library-level ones (`recently played` above all) mix providers within a single folder. Unfiltered,
+ * one account's shelves serve the other account's songs — so every item is gated on [isFrom].
  */
-fun mapRecommendations(folders: List<MaRecommendationFolder>, rotation: Int = 0): BrowseShelves {
-    val quickSources = QUICK_PICKS_SOURCE_NAMES.mapNotNull { name -> folders.pickShelf(setOf(name)) }
+fun mapRecommendations(
+    folders: List<MaRecommendationFolder>,
+    rotation: Int = 0,
+    domain: String = MusicSource.YtMusic.providerDomain,
+): BrowseShelves {
     // Filtered per folder before interleaving so a folder of dropped podcasts contributes no slots.
-    val quickRaw = quickSources
-        .map { folder -> folder.items.filter { it.media_type in QUICK_PICKS_TYPES } }
+    val quickRaw = QUICK_PICKS_SOURCE_NAMES
+        .map { name -> folders.shelfItems(setOf(name), domain).filter { it.media_type in QUICK_PICKS_TYPES } }
         .roundRobin()
     val pool = quickRaw.toBrowseItems().distinctBy { it.uri }.take(QUICK_PICKS_POOL_LIMIT)
     val start = if (pool.size <= QUICK_PICKS_WINDOW) 0 else (rotation * QUICK_PICKS_WINDOW).mod(pool.size)
     val quickPicks = pool.windowFrom(start, QUICK_PICKS_WINDOW)
 
-    val mixed = folders.pickShelf(MIXED_FOR_YOU_NAMES)
-
     return BrowseShelves(
         quickPicks = quickPicks,
-        mixedForYou = mixed?.items.orEmpty().toBrowseItems().distinctBy { it.uri }.take(MIXED_FOR_YOU_LIMIT),
+        mixedForYou = folders.shelfItems(MIXED_FOR_YOU_NAMES, domain)
+            .toBrowseItems().distinctBy { it.uri }.take(MIXED_FOR_YOU_LIMIT),
     )
 }
 
@@ -119,18 +125,29 @@ fun mapSpotifyPlaylists(items: List<MaMediaItem>): List<BrowseItem> =
     }.toBrowseItems()
 
 /**
- * The [domain]-provided items of MA's "recently played" folder. That folder is library-level and
- * mixes every provider's history, so items are kept by their own [MaMediaItem.provider] — an instance
- * id (`spotify--TkfLc2DT`) prefixed by the domain.
+ * The [domain]-provided items of MA's "recently played" folder. That folder is library-level and mixes
+ * every provider's history, so items are kept by [isFrom].
  */
 fun mapRecentlyPlayed(folders: List<MaRecommendationFolder>, domain: String): List<BrowseItem> {
     val folder = folders.firstOrNull { it.translation_key == RECENTLY_PLAYED_KEY } ?: return emptyList()
     return folder.items
-        .filter { it.provider?.startsWith(domain) == true }
+        .filter { it.isFrom(domain) }
         .toBrowseItems()
         .distinctBy { it.uri }
         .take(RECENTLY_PLAYED_LIMIT)
 }
+
+/**
+ * Does this item come from the provider [domain] (`ytmusic`, `spotify`)? MA names an item's source in
+ * up to three places and no one of them is always present: the uri's provider prefix
+ * (`spotify--TkfLc2DT://track/…`), the [MaMediaItem.provider] instance id, and — for a `library://`
+ * row, where both of those read `library` — the [MaMediaItem.provider_mappings]. An item counts as
+ * this domain's if any of them says so, since a row both accounts can source belongs on both shelves.
+ */
+internal fun MaMediaItem.isFrom(domain: String): Boolean =
+    uri?.substringBefore("://", missingDelimiterValue = "")?.startsWith(domain) == true ||
+        provider?.startsWith(domain) == true ||
+        provider_mappings.any { it.provider_domain == domain }
 
 /**
  * Flatten a `music/search` reply into one tile list. The grid shows no type sections, so the four
@@ -144,8 +161,13 @@ fun mapSearchResults(results: MaSearchResults): List<BrowseItem> {
         .distinctBy { it.uri }
 }
 
-private fun List<MaRecommendationFolder>.pickShelf(names: Set<String>): MaRecommendationFolder? =
-    firstOrNull { folder -> folder.matches(names) && folder.items.isNotEmpty() }
+/**
+ * [domain]'s items from every folder matching [names]. **Every** match contributes, not just the
+ * first: two providers can each offer a folder of the same name, and taking only the first would hand
+ * a shelf to whichever provider MA happened to list first — and then the domain filter would empty it.
+ */
+private fun List<MaRecommendationFolder>.shelfItems(names: Set<String>, domain: String): List<MaMediaItem> =
+    filter { it.matches(names) }.flatMap { folder -> folder.items.filter { it.isFrom(domain) } }
 
 private fun MaRecommendationFolder.matches(names: Set<String>): Boolean {
     val lower = name.lowercase()
@@ -200,11 +222,19 @@ private fun browseKindOf(mediaType: String?, uri: String): BrowseKind {
  * A usable MA item -> browse tile, or `null` when it has no uri / isn't playable. **Artists are
  * exempt from the playability guard**: an artist tile is a navigation target (it opens the artist
  * surface), not a play target, and MA marks plenty of artist hits non-playable.
+ *
+ * `is_playable` is about the *kind* of item, not about whether it can be sourced right now, so an
+ * item whose every provider binding is unavailable passes it and then fails at the tap with "No
+ * playable item found to start playback". Those are dropped here instead: a tile that cannot play is
+ * worse than no tile.
  */
 fun MaMediaItem.toBrowseItemOrNull(): BrowseItem? {
     val itemUri = uri ?: return null
     val kind = browseKindOf(media_type, itemUri)
     if (!is_playable && kind != BrowseKind.Artist) return null
+    if (kind != BrowseKind.Artist && provider_mappings.isNotEmpty() && provider_mappings.none { it.available }) {
+        return null
+    }
     return BrowseItem(
         name = name,
         subtitle = browseSubtitle(),

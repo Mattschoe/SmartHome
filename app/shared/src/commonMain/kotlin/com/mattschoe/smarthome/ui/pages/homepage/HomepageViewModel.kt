@@ -153,6 +153,7 @@ class HomepageViewModel(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
+                        log("search '$query' failed: ${e.message}")
                         SearchState.Failed
                     }
                     emit(result)
@@ -322,6 +323,7 @@ class HomepageViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                log("artist '${item.name}' failed: ${e.message}")
                 ArtistUiState.Failed(item)
             }
             _artist.value = next
@@ -498,6 +500,7 @@ class HomepageViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                log("saving '${draft.summary}' failed: ${e.message}")
                 showToast(SAVE_FAILED_TOAST)
             } finally {
                 _savingEvent.value = false
@@ -527,6 +530,7 @@ class HomepageViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                log("deleting '${event.title}' failed: ${e.message}")
                 showToast(DELETE_FAILED_TOAST)
             } finally {
                 _savingEvent.value = false
@@ -590,6 +594,7 @@ class HomepageViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                log("enqueue '${item.name}' ($mode) on $room failed: ${e.message}")
                 showToast(ENQUEUE_FAILED_TOAST)
             }
         }
@@ -624,6 +629,7 @@ class HomepageViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                log("play '${item.name}' on $room failed: ${e.message}")
                 showToast(PLAY_FAILED_TOAST)
             } finally {
                 _pendingPlay.compareAndSet(pending, null)
@@ -651,6 +657,7 @@ class HomepageViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                log("skip to $queueItemId on $room failed: ${e.message}")
                 showToast(PLAY_FAILED_TOAST)
             } finally {
                 _pendingQueueItem.compareAndSet(pending, null)
@@ -691,6 +698,12 @@ class HomepageViewModel(
     }
 
     private fun showToast(text: String) { _toast.value = ToastMessage(++toastCounter, text) }
+
+    /**
+     * Every failure toast is deliberately vague on screen — the wall tablet is not a console — so the
+     * reason behind it is logged instead, next to the adapter's own line for the same call.
+     */
+    private fun log(message: String) = println("HomepageViewModel: $message")
 
     /** Clears the current toast; the UI calls this after its display window. */
     fun dismissToast() { _toast.value = null }

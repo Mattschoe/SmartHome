@@ -35,7 +35,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -47,6 +50,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.concurrent.Volatile
 import kotlin.time.TimeSource
@@ -137,11 +141,13 @@ class MusicAssistantAdapter(private val config: MaConfig) {
                 }
             } catch (e: MaAuthException) {
                 // A bad token will never succeed on retry — stop reconnecting.
+                log("authentication failed: ${e.message}")
                 return
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // Any other drop is retried on the backoff below.
+                log("connection lost (${e.message}); reconnecting in ${reconnectDelay}ms")
             }
             delay(reconnectDelay)
             reconnectDelay = (reconnectDelay * 2).coerceAtMost(MAX_RECONNECT_MS)
@@ -158,8 +164,14 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         val reader = launch { readLoop() }
         authenticate()
         reconnectDelay = INITIAL_RECONNECT_MS // healthy connection — reset backoff
+        log("connected to $baseUrl (schema ${hello["schema_version"]?.jsonPrimitive?.contentOrNull})")
         onConnected()
         reader.join() // returns when `incoming` closes; lets the webSocket block end and reconnect
+        // [onConnected]'s loops run until cancelled, and this `coroutineScope` waits for every child:
+        // without this the session would never end, so a dropped socket would never be reconnected
+        // and every later command would be sent into a dead session.
+        log("read loop ended; closing session")
+        coroutineContext.cancelChildren()
     }
 
     private suspend fun DefaultClientWebSocketSession.readLoop() {
@@ -191,6 +203,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
     private suspend fun queueRefreshConsumer() {
         for (unit in queueRefreshTrigger) {
             runCatching { refreshQueues() }
+                .onFailure { log("queue refresh failed: ${it.message}") }
             delay(QUEUE_DEBOUNCE_MS)
         }
     }
@@ -206,6 +219,10 @@ class MusicAssistantAdapter(private val config: MaConfig) {
     private suspend fun refreshQueues() {
         val queues: List<MaQueue> = json.decodeFromJsonElement(command("player_queues/all"))
         val idByRoom = matchQueuesToRooms(queues)
+        if (idByRoom.keys != queueIdByRoom.keys) {
+            log("matched queues: ${idByRoom.entries.joinToString { "${it.key}=${it.value}" }.ifBlank { "none" }} " +
+                "(of ${queues.size} MA queues: ${queues.joinToString { it.display_name.orEmpty() }})")
+        }
         queueIdByRoom = idByRoom
         // Always-on auto-suggestions: keep "Don't Stop the Music" enabled on every room speaker queue so
         // the queue self-refills with YouTube-Music continuations. Idempotent — only touch queues that
@@ -214,13 +231,28 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         queues.filter { it.queue_id in roomQueueIds && !it.dont_stop_the_music_enabled }
             .forEach { enableDontStopTheMusic(it.queue_id) }
         val queueById = queues.associateBy { it.queue_id }
+        // Per room, so one room's unreadable page can't cost every *other* room its queue: the rooms
+        // are fetched in one pass and published together, and a single throw partway through would
+        // abandon the whole update. A room that fails keeps the rows it already had.
+        val previous = _music.value.queuesByRoom
         val queuesByRoom = idByRoom.mapValues { (room, queueId) ->
             val queue = queueById[queueId]
             val offset = upNextOffset(queue?.current_index)
-            fetchQueueItems(queueId, offset)
-                .withoutQueueItem(queue?.current_item?.queue_item_id)
-                .also { tracks ->
+            runCatching {
+                fetchQueueItems(queueId, offset).withoutQueueItem(queue?.current_item?.queue_item_id)
+            }
+                .onSuccess { tracks ->
+                    // The one line that answers "why is there no up next here?": how many entries MA
+                    // says the queue holds, where playback sits in it, whether the continuation
+                    // feature is on, and how many rows the UI is therefore given.
+                    log(
+                        "queue $room: items=${queue?.items} index=${queue?.current_index} " +
+                            "dstm=${queue?.dont_stop_the_music_enabled} playing=${queue?.current_item?.name} " +
+                            "-> upNext=${tracks.size}"
+                    )
                 }
+                .onFailure { log("queue $room: could not read items at offset $offset: ${it.message}") }
+                .getOrElse { previous[room].orEmpty() }
         }
         // The playing entry, kept beside the queue: it carries MA's own art/uri, which the composite
         // adapter overlays onto HA's (lower-resolution) now-playing.
@@ -240,6 +272,10 @@ class MusicAssistantAdapter(private val config: MaConfig) {
                 put("dont_stop_the_music_enabled", true)
             })
         }
+            .onSuccess { log("enabled Don't Stop the Music on $queueId") }
+            // Silently losing this is how a queue ends up with no continuations at all, so it is
+            // reported rather than swallowed.
+            .onFailure { log("could not enable Don't Stop the Music on $queueId: ${it.message}") }
     }
 
     /**
@@ -261,6 +297,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
     private suspend fun refreshBrowseLoop() {
         while (true) {
             runCatching { refreshBrowse() }
+                .onFailure { log("browse refresh failed: ${it.message}") }
             delay(BROWSE_REFRESH_MS)
         }
     }
@@ -274,11 +311,18 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         // Read on the browse tick rather than from a timer of its own, so the window advances on the
         // first refresh after each ROTATION_MS boundary — at most one BROWSE_REFRESH_MS late.
         val rotation = (sinceStart.elapsedNow().inWholeMilliseconds / ROTATION_MS).toInt()
-        val shelves = mapRecommendations(folders, rotation)
+        // Scoped to ytmusic: `music/recommendations` is library-wide, so an unscoped mapping would put
+        // the Spotify account's songs on the YouTube-Music shelves (and vice versa).
+        val shelves = mapRecommendations(folders, rotation, MusicSource.YtMusic.providerDomain)
         val playlists = mapPlaylists(playlistRows)
         // The Spotify side is derived from these same two replies — it needs no calls of its own.
         val spotifyPlaylists = mapSpotifyPlaylists(playlistRows)
         val spotifyRecentlyPlayed = mapRecentlyPlayed(folders, MusicSource.Spotify.providerDomain)
+        log(
+            "browse: ${folders.size} folders -> quickPicks=${shelves.quickPicks.size} " +
+                "mixed=${shelves.mixedForYou.size} playlists=${playlists.size} " +
+                "spotify=${spotifyPlaylists.size}/${spotifyRecentlyPlayed.size}"
+        )
         _music.update {
             it.copy(
                 quickPicks = shelves.quickPicks,
@@ -315,7 +359,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
      * caller's pending-play UI waits on. Throws when the room has no matched MA queue or MA rejects
      * the command. The queue view refreshes right after.
      */
-    suspend fun play(room: Room, uri: String, radio: Boolean) {
+    suspend fun play(room: Room, uri: String, radio: Boolean): Unit = intent("play $uri on $room") {
         val queueId = queueIdByRoom[room]
             ?: throw MaCommandException("player_queues/play_media", null,
                 "no MA queue matched for $room (known: ${queueIdByRoom.keys.joinToString().ifBlank { "none" }})")
@@ -349,7 +393,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
      * failing the whole gesture over — so it stops the sequence quietly and keeps the old marker
      * rather than recording a bottom the queue doesn't have.
      */
-    suspend fun enqueue(room: Room, uri: String, mode: QueueMode) {
+    suspend fun enqueue(room: Room, uri: String, mode: QueueMode): Unit = intent("enqueue $mode $uri on $room") {
         val queueId = queueIdByRoom[room]
             ?: throw MaCommandException("player_queues/play_media", null,
                 "no MA queue matched for $room (known: ${queueIdByRoom.keys.joinToString().ifBlank { "none" }})")
@@ -370,7 +414,9 @@ class MusicAssistantAdapter(private val config: MaConfig) {
                         put("queue_item_id", move.queueItemId)
                         put("pos_shift", move.posShift)
                     })
-                }.isSuccess
+                }
+                    .onFailure { log("enqueue reorder stopped at ${move.queueItemId}: ${it.message}") }
+                    .isSuccess
             }
             if (landed) plan.tailId?.let { userBlockTailByRoom = userBlockTailByRoom + (room to it) }
             queueRefreshTrigger.trySend(Unit)
@@ -401,9 +447,10 @@ class MusicAssistantAdapter(private val config: MaConfig) {
      * like [play] — building a multi-item queue resolves streams, so it gets its own longer
      * [PLAY_ALL_TIMEOUT_MS].
      */
-    suspend fun playAll(room: Room, uris: List<String>) {
+    suspend fun playAll(room: Room, uris: List<String>): Unit = intent("playAll ${uris.size} items on $room") {
         if (uris.isEmpty()) {
-            return
+            log("playAll on $room: nothing playable in the block")
+            return@intent
         }
         val queueId = queueIdByRoom[room]
             ?: throw MaCommandException("player_queues/play_media", null,
@@ -431,13 +478,11 @@ class MusicAssistantAdapter(private val config: MaConfig) {
      * answer from cache in ms (`top_tracks` measured 1.9 s cold). Like [search], failure propagates —
      * a user is watching a spinner.
      */
-    suspend fun artistDetail(uri: String): ArtistDetail {
-        if (session == null) {
-            return ArtistDetail.EMPTY
-        }
+    suspend fun artistDetail(uri: String): ArtistDetail = intent("artistDetail $uri") {
         val ref = parseMaUri(uri)
         if (ref == null) {
-            return ArtistDetail.EMPTY
+            log("artistDetail: '$uri' is not an MA uri")
+            return@intent ArtistDetail.EMPTY
         }
         val args = buildJsonObject {
             put("item_id", ref.itemId)
@@ -449,8 +494,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         val albums: List<MaMediaItem> = json.decodeFromJsonElement(
             command("music/artists/artist_albums", args, timeoutMs = ARTIST_TIMEOUT_MS)
         )
-        val detail = ArtistDetail(mapArtistTracks(tracks), mapArtistAlbums(albums))
-        return detail
+        ArtistDetail(mapArtistTracks(tracks), mapArtistAlbums(albums))
     }
 
     /**
@@ -459,7 +503,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
      * survives the queue shifting under us between refreshes. Suspends/throws like [play] — the reply
      * arrives when the new track's stream is resolved.
      */
-    suspend fun playQueueItem(room: Room, queueItemId: String) {
+    suspend fun playQueueItem(room: Room, queueItemId: String): Unit = intent("skip to $queueItemId on $room") {
         val queueId = queueIdByRoom[room]
             ?: throw MaCommandException("player_queues/play_index", null,
                 "no MA queue matched for $room (known: ${queueIdByRoom.keys.joinToString().ifBlank { "none" }})")
@@ -478,6 +522,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
      */
     fun moveQueueItem(room: Room, queueItemId: String, posShift: Int) {
         val queueId = queueIdByRoom[room] ?: run {
+            log("move on $room ignored: no MA queue matched")
             return
         }
         scope.launch {
@@ -489,19 +534,17 @@ class MusicAssistantAdapter(private val config: MaConfig) {
                 })
                 queueRefreshTrigger.trySend(Unit)
             }
+                .onFailure { log("move $queueItemId by $posShift on $room failed: ${it.message}") }
         }
     }
 
     /**
      * Search the configured music providers for [query]. Unlike the fire-and-forget playback intents
-     * this one is `suspend` and lets failure through — the caller is a user waiting on a spinner, so a
-     * short [SEARCH_TIMEOUT_MS] fails fast rather than hanging on the default 20 s, and a query issued
-     * before the socket is up returns empty instead of burning that timeout.
+     * this one is `suspend` and lets failure through — the caller is a user waiting on a spinner, so
+     * "the search failed" is the honest answer to a dead socket or a timeout, where an empty list
+     * would read on screen as "this music does not exist".
      */
-    suspend fun search(query: String): List<BrowseItem> {
-        if (session == null) {
-            return emptyList()
-        }
+    suspend fun search(query: String): List<BrowseItem> = intent("search '$query'") {
         val results: MaSearchResults = json.decodeFromJsonElement(
             command(
                 "music/search",
@@ -514,7 +557,10 @@ class MusicAssistantAdapter(private val config: MaConfig) {
                 timeoutMs = SEARCH_TIMEOUT_MS,
             )
         )
-        return mapSearchResults(results)
+        mapSearchResults(results).also {
+            log("search '$query' -> ${results.tracks.size}t/${results.albums.size}al/" +
+                "${results.artists.size}ar/${results.playlists.size}p -> ${it.size} tiles")
+        }
     }
 
     // --- Auth + request/response ---
@@ -533,6 +579,12 @@ class MusicAssistantAdapter(private val config: MaConfig) {
      * Send an MA command and await its reply, correlated by `message_id`. Returns the reply's
      * `result` element (or [JsonNull]); throws [MaCommandException] on an `error_code` reply and on
      * timeout. Safe to call concurrently — the read loop fans replies back to the right awaiter.
+     *
+     * A timeout is deliberately **re-thrown as an ordinary exception**: [withTimeout] reports one as a
+     * [TimeoutCancellationException], and every caller here is inside a flow or a `viewModelScope`
+     * job that treats a `CancellationException` as "this work was superseded" — so a slow server would
+     * silently tear the collector down (taking the search pipeline, and with it the screen state, with
+     * it) instead of surfacing as the failure it is.
      */
     private suspend fun command(
         command: String,
@@ -554,10 +606,12 @@ class MusicAssistantAdapter(private val config: MaConfig) {
                 throw MaCommandException(command, code, details)
             }
             return reply["result"] ?: JsonNull
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            throw e
+        } catch (e: TimeoutCancellationException) {
+            throw MaCommandException(command, null, "no reply within ${timeoutMs}ms")
         } finally {
-            pendingMutex.withLock { pending.remove(id) }
+            // NonCancellable so the entry is still dropped when the caller is cancelled mid-flight
+            // (a superseded search), rather than left in `pending` for the life of the session.
+            withContext(NonCancellable) { pendingMutex.withLock { pending.remove(id) } }
         }
     }
 
@@ -576,9 +630,34 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         }
     }
 
+    /**
+     * Fails rather than dropping the frame when there is no session: a silently unsent command has
+     * nobody to reply to it, so the caller would sit through its whole timeout to learn what is
+     * already known here.
+     */
     private suspend fun sendText(text: String) {
-        session?.send(Frame.Text(text))
+        val live = session ?: throw MaCommandException("send", null, "not connected to Music Assistant")
+        live.send(Frame.Text(text))
     }
+
+    /**
+     * Run one user-facing intent with a log line either side. These are the calls a user watches a
+     * spinner for, so when one fails the toast they get is backed by a logged reason — [command]
+     * reports the server's own error code and details in it.
+     */
+    private suspend fun <T> intent(what: String, block: suspend () -> T): T {
+        val start = TimeSource.Monotonic.markNow()
+        try {
+            return block().also { log("$what: ok in ${start.elapsedNow().inWholeMilliseconds}ms") }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("$what: FAILED after ${start.elapsedNow().inWholeMilliseconds}ms: ${e.message}")
+            throw e
+        }
+    }
+
+    private fun log(message: String) = println("MusicAssistantAdapter: $message")
 
     /** Fallback MA base URL if the hello omits `base_url`: swap the ws scheme/path for http. */
     private fun deriveBaseUrl(): String =
@@ -609,8 +688,10 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         val PLAYLIST_LIMIT = 100
         // Per media type — four types × 24 is far more than the grid ever scrolls to.
         val SEARCH_LIMIT = 24
-        // Measured ~1.4s cold / ~10ms cached; a user is watching the spinner, so don't wait 20s.
-        val SEARCH_TIMEOUT_MS = 8_000L
+        // Measured ~1.4s cold / ~10ms cached against ytmusic alone; a search now fans out to Spotify
+        // too, and each provider is a live API call, so the headroom is for the slowest of them
+        // answering — a dead socket doesn't wait it out (see [sendText]).
+        val SEARCH_TIMEOUT_MS = 15_000L
         // `top_tracks` is one provider "songs" fetch, cached for 7 days — measured 1.9s cold. The
         // headroom is for a cold provider round-trip, not for the catalogue walk this used to do.
         val ARTIST_TIMEOUT_MS = 15_000L

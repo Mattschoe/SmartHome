@@ -54,6 +54,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -572,6 +574,10 @@ class HomeAssistantAdapter(
         onConnected()
 
         reader.join() // returns when `incoming` closes; lets the webSocket block end and reconnect
+        // [onConnected]'s loops run until cancelled, and this `coroutineScope` waits for every child:
+        // without this the session would never end, so a socket that closed cleanly would never be
+        // reconnected.
+        coroutineContext.cancelChildren()
     }
 
     /**
@@ -779,6 +785,10 @@ class HomeAssistantAdapter(
      * makes it a **subscription**: the handler stays registered for the life of the session and
      * receives every `event` frame HA pushes under the same id. Throws [HaCommandException] on an
      * unsuccessful reply, on timeout, and when the socket is down.
+     *
+     * A timeout becomes an ordinary [HaCommandException] rather than the [withTimeout] cancellation
+     * it arrives as: callers sit in flows and `viewModelScope` jobs that read a `CancellationException`
+     * as "superseded" and drop it silently, so a slow reply would vanish instead of failing.
      */
     private suspend fun request(
         type: String,
@@ -810,6 +820,8 @@ class HomeAssistantAdapter(
             }
             failed = false
             return reply["result"] ?: JsonNull
+        } catch (e: TimeoutCancellationException) {
+            throw HaCommandException(type, null, "no reply within ${REQUEST_TIMEOUT_MS}ms")
         } finally {
             // A subscription that never got its acknowledgement is not subscribed — drop its handler
             // so a later id reuse (after a reconnect) can't inherit it.
