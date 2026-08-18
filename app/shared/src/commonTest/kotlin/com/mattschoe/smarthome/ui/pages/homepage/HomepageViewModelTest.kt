@@ -3,6 +3,7 @@ package com.mattschoe.smarthome.ui.pages.homepage
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
 import com.mattschoe.smarthome.data.MockAdapter
+import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.buildEventDraft
 import com.mattschoe.smarthome.data.todoPage
@@ -1144,6 +1145,57 @@ class HomepageViewModelTest {
     }
 
     @Test
+    fun saveEvent_scopeDecidesWhichOccurrencesTheWriteAddresses() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val occurrence = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+
+        vm.openEvent(occurrence)
+        vm.saveEvent(occurrence.sourceId, draftOn(occurrence.date, "Fredagshygge"), scope = EventEditScope.ThisEvent)
+        advanceUntilIdle()
+        assertEquals(occurrence.recurrenceId to RecurrenceRange.ThisEvent, recorder.lastUpdate)
+
+        vm.openEvent(occurrence)
+        vm.saveEvent(occurrence.sourceId, draftOn(occurrence.date, "Fredagshygge"), scope = EventEditScope.ThisAndFuture)
+        advanceUntilIdle()
+        assertEquals(occurrence.recurrenceId to RecurrenceRange.ThisAndFuture, recorder.lastUpdate)
+
+        // "Alle begivenheder" drops the occurrence id entirely — that is how the series itself is named.
+        vm.openEvent(occurrence)
+        vm.saveEvent(occurrence.sourceId, draftOn(occurrence.date, "Fredagshygge"), scope = EventEditScope.AllEvents)
+        advanceUntilIdle()
+        assertEquals(null to RecurrenceRange.ThisEvent, recorder.lastUpdate)
+    }
+
+    @Test
+    fun deleteEvent_scopeDecidesWhichOccurrencesAreRemoved() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val occurrence = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+
+        vm.openEvent(occurrence)
+        vm.deleteEvent(EventEditScope.ThisAndFuture)
+        advanceUntilIdle()
+        assertEquals(occurrence.recurrenceId to RecurrenceRange.ThisAndFuture, recorder.lastDelete)
+
+        // The detail popup's trash has no scope to offer, so it stays on the single occurrence.
+        val next = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+        vm.openEventDetail(next)
+        vm.deleteEventDetail()
+        advanceUntilIdle()
+        assertEquals(next.recurrenceId to RecurrenceRange.ThisEvent, recorder.lastDelete)
+    }
+
+    @Test
     fun deleteEvent_removesItAndClosesTheSurface() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
@@ -1362,6 +1414,35 @@ class HomepageViewModelTest {
         allDay = false,
         location = null,
     )
+
+    /** Records how a scoped write was addressed, while still performing it against the mock store. */
+    private class RecordingCalendarAdapter(
+        private val delegate: HomeAdapter = MockAdapter(),
+    ) : HomeAdapter by delegate {
+        var lastUpdate: Pair<String?, RecurrenceRange>? = null
+        var lastDelete: Pair<String?, RecurrenceRange>? = null
+
+        override suspend fun updateEvent(
+            sourceId: String,
+            uid: String,
+            draft: CalendarEventDraft,
+            recurrenceId: String?,
+            range: RecurrenceRange,
+        ) {
+            lastUpdate = recurrenceId to range
+            delegate.updateEvent(sourceId, uid, draft, recurrenceId, range)
+        }
+
+        override suspend fun deleteEvent(
+            sourceId: String,
+            uid: String,
+            recurrenceId: String?,
+            range: RecurrenceRange,
+        ) {
+            lastDelete = recurrenceId to range
+            delegate.deleteEvent(sourceId, uid, recurrenceId, range)
+        }
+    }
 
     /** Writes that fail the way a Home Assistant round trip does when the connection is down. */
     private class FailingCalendarWriteAdapter(

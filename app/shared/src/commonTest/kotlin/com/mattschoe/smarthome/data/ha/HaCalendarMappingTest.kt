@@ -33,6 +33,32 @@ class HaCalendarMappingTest {
         )
 
     @Test
+    fun aSeriesCarriesItsRuleOntoEveryRowItIsExpandedTo() {
+        val dto = HaCalendarEventDto(
+            summary = "Fredagshygge",
+            uid = "u-series",
+            recurrence_id = "20260807T170000",
+            rrule = "FREQ=WEEKLY;BYDAY=FR",
+            start = HaCalendarDateDto(dateTime = "2026-08-07T17:00:00+02:00"),
+            // Runs past midnight, so it is expanded to two days — both of which have to carry it.
+            end = HaCalendarDateDto(dateTime = "2026-08-08T01:00:00+02:00"),
+        )
+
+        val events = mapCalendarEvents(SOURCE, listOf(dto), CPH)
+
+        assertEquals(2, events.size)
+        assertTrue(events.all { it.rrule == "FREQ=WEEKLY;BYDAY=FR" })
+        assertTrue(events.all { it.recurrenceId == "20260807T170000" })
+    }
+
+    @Test
+    fun aOneOffCarriesNoRule() {
+        val events = mapCalendarEvents(SOURCE, listOf(timed("2026-08-04T09:00:00+02:00", "2026-08-04T10:00:00+02:00")), CPH)
+
+        assertNull(events.single().rrule)
+    }
+
+    @Test
     fun timedEventBecomesOneRowOnItsOwnDay() {
         val events = mapCalendarEvents(SOURCE, listOf(timed("2026-08-04T09:00:00+02:00", "2026-08-04T10:00:00+02:00")), CPH)
 

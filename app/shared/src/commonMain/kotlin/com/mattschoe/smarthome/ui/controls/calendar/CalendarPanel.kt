@@ -15,6 +15,7 @@ import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
@@ -65,8 +66,8 @@ fun CalendarPanel(
     reminders: ReminderRules,
     /** Set the reminder on the event the editor is open on (existing events only; see the editor). */
     onSetEventReminder: (ReminderRule?) -> Unit,
-    onSaveEvent: (String, CalendarEventDraft, ReminderRule?) -> Unit,
-    onDeleteEvent: () -> Unit,
+    onSaveEvent: (String, CalendarEventDraft, ReminderRule?, EventEditScope) -> Unit,
+    onDeleteEvent: (EventEditScope) -> Unit,
     onCloseEventEditor: () -> Unit,
     modifier: Modifier = Modifier,
     headerTrailing: @Composable RowScope.() -> Unit = {},

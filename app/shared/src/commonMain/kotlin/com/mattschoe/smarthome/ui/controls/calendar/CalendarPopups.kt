@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.formatEventWhen
+import com.mattschoe.smarthome.data.formatRecurrence
+import com.mattschoe.smarthome.data.parseRrule
 import com.mattschoe.smarthome.data.formatReminderOffset
 import com.mattschoe.smarthome.data.offsetFor
 import com.mattschoe.smarthome.data.remindsByCalendarDefault
@@ -162,6 +164,11 @@ fun BoxScope.EventDetailPopup(
             }
             Spacer(Modifier.height(12.dp))
             Text(formatEventWhen(event), color = InkSoft, fontSize = 15.sp)
+            // Only a series says anything here — a one-off would only be told it does not repeat.
+            parseRrule(event.rrule)?.let { rule ->
+                Spacer(Modifier.height(4.dp))
+                Text(formatRecurrence(rule), color = InkSoft, fontSize = 15.sp)
+            }
             event.location?.takeIf { it.isNotBlank() }?.let { location ->
                 Spacer(Modifier.height(8.dp))
                 Text(location, color = InkSoft, fontSize = 15.sp)

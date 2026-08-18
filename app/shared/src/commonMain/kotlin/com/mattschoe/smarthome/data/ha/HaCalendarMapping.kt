@@ -35,6 +35,7 @@ fun mapCalendarEvents(
         uid = dto.uid,
         recurrenceId = dto.recurrence_id,
         location = dto.location,
+        rrule = dto.rrule,
     )
 }
 

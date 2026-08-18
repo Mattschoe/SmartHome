@@ -122,6 +122,16 @@ object Dimensions {
     // long one scrolls instead of outgrowing the card it floats in.
     val eventDetailMaxWidth = 340.dp
     val eventDetailMaxHeight = 420.dp
+    // The custom-frequency sheet (RecurrencePickerPopup) is the one popup that outgrows the detail
+    // card's ceiling: an interval field, four units, seven weekday circles and three end rows. It is
+    // still bounded — a short right card scrolls the sheet rather than letting it run off the edge.
+    val recurrenceSheetMaxHeight = 560.dp
+    // The weekday circles in that sheet: a full touch target, sized rather than padded so the seven
+    // of them stay a row of equal circles at any width.
+    val recurrenceDaySize = minTouch
+    // The occurrence-count field on the sheet's "efter … gange" row: sized rather than stretched, so
+    // the word after it stays beside the number instead of being pushed off the row.
+    val recurrenceCountWidth = 88.dp
     // The detail card's leading bar in the event's calendar colour — the week block's bar, scaled to
     // a 20sp title rather than an 11sp one — and the glyphs in a popup's action row.
     val eventDetailBarWidth = 4.dp

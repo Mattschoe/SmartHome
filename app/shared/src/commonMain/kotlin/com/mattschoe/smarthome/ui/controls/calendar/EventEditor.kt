@@ -46,7 +46,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.MinutesPerDay
+import com.mattschoe.smarthome.data.RecurrenceUnknownLabel
 import com.mattschoe.smarthome.data.buildEventDraft
+import com.mattschoe.smarthome.data.buildRrule
+import com.mattschoe.smarthome.data.formatRecurrence
+import com.mattschoe.smarthome.data.parseRrule
 import com.mattschoe.smarthome.data.formatLongDate
 import com.mattschoe.smarthome.data.formatTimeOfDay
 import com.mattschoe.smarthome.data.formatReminderRule
@@ -54,6 +58,7 @@ import com.mattschoe.smarthome.data.minutesOfDay
 import com.mattschoe.smarthome.data.ruleFor
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
+import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.ui.components.InsetSurface
@@ -83,6 +88,7 @@ import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
 import smarthome.shared.generated.resources.arrow_back_filled
 import smarthome.shared.generated.resources.notifications_filled
+import smarthome.shared.generated.resources.repeat_filled
 import kotlin.time.Clock
 
 /**
@@ -122,9 +128,14 @@ fun EventEditorSurface(
      * only ever non-null on the create path: an existing event's reminder was already committed by
      * [onSetEventReminder]. `null` means there is nothing to attach — the event inherits its
      * calendar's default, which is what a fresh form opens on.
+     *
+     * The fourth is which occurrences of a recurring series the save reaches. It is asked for by
+     * [EventScopePopup] before the write, and is [EventEditScope.ThisEvent] — the only thing it can
+     * mean — for anything that does not repeat.
      */
-    onSave: (String, CalendarEventDraft, ReminderRule?) -> Unit,
-    onDelete: () -> Unit,
+    onSave: (String, CalendarEventDraft, ReminderRule?, EventEditScope) -> Unit,
+    /** Delete, scoped exactly as [onSave] is. */
+    onDelete: (EventEditScope) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -146,6 +157,23 @@ fun EventEditorSurface(
     var reminder by remember(target) {
         mutableStateOf(existing?.let { ruleFor(it, reminders) })
     }
+    // The repetition rule, read out of the event and written back as a fresh RRULE on save. A rule we
+    // cannot read back ([parseRrule] returns null for anything richer than this surface can draw) is
+    // held as its original string and the row goes inert: showing a series is worth doing, silently
+    // replacing one somebody wrote elsewhere with "no recurrence" is not.
+    val storedRule = remember(target) { parseRrule(existing?.rrule) }
+    val ruleIsForeign = existing?.rrule != null && storedRule == null
+    var recurrence by remember(target) { mutableStateOf(storedRule) }
+    val isSeries = existing?.recurrenceId != null || existing?.rrule != null
+    // Rebuilt rather than round-tripped as a string, so a rule keeps matching the event when "Hele
+    // dagen" is toggled — UNTIL carries the same value type as the event's own start or Home
+    // Assistant's iCal layer rejects it.
+    val rrule =
+        if (ruleIsForeign) existing.rrule
+        else recurrence?.let { buildRrule(it, allDay, TimeZone.currentSystemDefault()) }
+    // One occurrence cannot carry its own repetition rule, so a changed frequency has to reach at
+    // least the rest of the series — which is what takes "Denne begivenhed" off the scope popup.
+    val ruleChanged = recurrence != storedRule
 
     val writable = remember(sources) { sources.filter { it.canWrite } }
     // The edit path is locked to the event's own calendar: a Home Assistant write addresses one
@@ -164,6 +192,17 @@ fun EventEditorSurface(
         endAt = moved.plusMinutes(span)
     }
 
+    /** The one write this surface performs, in whatever scope it was told to reach. */
+    val save = { scope: EventEditScope ->
+        onSave(
+            sourceId,
+            buildEventDraft(title, startAt, endAt, allDay, location, rrule),
+            // Only the create path carries it out; an existing event's rule is already written.
+            reminder.takeIf { existing == null },
+            scope,
+        )
+    }
+
     // The scroll is on the form alone, not on the Box — a picker floats over the whole panel and must
     // not slide with the field that opened it.
     val scroll = rememberScrollState()
@@ -174,14 +213,9 @@ fun EventEditorSurface(
                 showSave = editable,
                 saveEnabled = title.isNotBlank() && sourceId.isNotEmpty() && !saving,
                 saving = saving,
-                onSave = {
-                    onSave(
-                        sourceId,
-                        buildEventDraft(title, startAt, endAt, allDay, location),
-                        // Only the create path carries it out; an existing event's rule is already written.
-                        reminder.takeIf { existing == null },
-                    )
-                },
+                // A series has to be told what it is being saved *to* before anything is written; a
+                // plain event has only one answer and is never asked.
+                onSave = { if (isSeries) picking = PickTarget.SaveScope else save(EventEditScope.ThisEvent) },
             )
             Spacer(Modifier.height(16.dp))
 
@@ -247,6 +281,15 @@ fun EventEditorSurface(
                 onPickDate = { picking = PickTarget.EndDate },
                 onPickTime = { picking = PickTarget.EndTime },
             )
+            BoundsDivider()
+            FrekvensRow(
+                label = if (ruleIsForeign) RecurrenceUnknownLabel else formatRecurrence(recurrence),
+                // Unlike the reminder row, this one follows [editable]: a repetition rule is part of
+                // the event itself, so it cannot be set on a calendar nothing can be written to. A
+                // rule this surface cannot draw is shown but not opened.
+                enabled = editable && !ruleIsForeign,
+                onClick = { picking = PickTarget.Recurrence },
+            )
             Spacer(Modifier.height(Dimensions.mediaSectionGap))
 
             EditorTextField(
@@ -264,7 +307,15 @@ fun EventEditorSurface(
 
             if (editable && existing != null) {
                 Spacer(Modifier.height(Dimensions.mediaSectionGap))
-                DeleteAction(enabled = !saving, onDelete = onDelete)
+                DeleteAction(
+                    enabled = !saving,
+                    // A series asks which occurrences to remove, and that question *is* the
+                    // confirmation — the two-tap arming is what a plain event gets instead.
+                    confirmInPlace = !isSeries,
+                    onDelete = {
+                        if (isSeries) picking = PickTarget.DeleteScope else onDelete(EventEditScope.ThisEvent)
+                    },
+                )
             }
         }
 
@@ -290,6 +341,31 @@ fun EventEditorSurface(
                 onPick = { endAt = LocalDateTime(endAt.date, it); picking = null },
                 onDismiss = dismiss,
             )
+            PickTarget.Recurrence -> RecurrencePickerPopup(
+                selected = recurrence,
+                onPick = { recurrence = it; picking = null },
+                onCustom = { picking = PickTarget.CustomRecurrence },
+                onDismiss = dismiss,
+            )
+            PickTarget.CustomRecurrence -> CustomRecurrencePopup(
+                initial = recurrence,
+                startDay = startAt.date.dayOfWeek,
+                defaultEndDate = startAt.date.plus(1, DateTimeUnit.MONTH),
+                onConfirm = { recurrence = it; picking = null },
+                onDismiss = dismiss,
+            )
+            PickTarget.SaveScope -> EventScopePopup(
+                title = "Gem gentagelse",
+                allowThisEvent = !ruleChanged,
+                onPick = { scope -> picking = null; save(scope) },
+                onDismiss = dismiss,
+            )
+            PickTarget.DeleteScope -> EventScopePopup(
+                title = "Slet gentagelse",
+                allowThisEvent = true,
+                onPick = { scope -> picking = null; onDelete(scope) },
+                onDismiss = dismiss,
+            )
             PickTarget.Reminder -> ReminderPickerPopup(
                 selected = reminder,
                 calendarDefault = reminders.byCalendar[sourceId],
@@ -310,7 +386,9 @@ fun EventEditorSurface(
 }
 
 /** Which half of which boundary row opened a picker — the surface shows at most one at a time. */
-private enum class PickTarget { StartDate, StartTime, EndDate, EndTime, Reminder }
+private enum class PickTarget {
+    StartDate, StartTime, EndDate, EndTime, Reminder, Recurrence, CustomRecurrence, SaveScope, DeleteScope,
+}
 
 /**
  * "Påmindelse", and what it is set to, as one tappable row. Bare like the boundary rows rather than
@@ -339,6 +417,41 @@ private fun ReminderRow(label: String, onClick: () -> Unit) {
         )
         Text("Påmindelse", color = InkSoft, fontSize = 16.sp, modifier = Modifier.weight(1f))
         Text(label, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/**
+ * "Frekvens", and how often the event repeats, as one tappable row — the reminder row's shape, since
+ * both are a value being read back rather than something typed.
+ *
+ * Disabled it still reads its value: a read-only calendar's series, and a rule written somewhere
+ * richer than this surface can draw, are both worth showing even though neither can be changed here.
+ */
+@Composable
+private fun FrekvensRow(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Dimensions.minTouch)
+            .clip(RoundedCornerShape(Dimensions.insetRadius))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            painter = painterResource(Res.drawable.repeat_filled),
+            contentDescription = null,
+            tint = InkSoft,
+            modifier = Modifier.size(18.dp),
+        )
+        Text("Frekvens", color = InkSoft, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Text(
+            text = label,
+            color = if (enabled) Ink else InkSoft,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -484,9 +597,12 @@ private fun EventBoundsRow(
     }
 }
 
-/** The hairline between the two boundary rows — what keeps them one control rather than two lines. */
+/**
+ * The hairline between the two boundary rows — what keeps them one control rather than two lines.
+ * Shared with the custom-frequency sheet, which separates its three sections the same way.
+ */
 @Composable
-private fun BoundsDivider() {
+internal fun BoundsDivider() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(CardBorder))
 }
 
@@ -563,29 +679,40 @@ private fun SaveAction(enabled: Boolean, saving: Boolean, onClick: () -> Unit) {
  * exactly the blocking modal this whole surface exists to avoid.
  */
 @Composable
-private fun DeleteAction(enabled: Boolean, onDelete: () -> Unit) {
-    TwoTapConfirm(enabled = enabled, onConfirm = onDelete) { armed, onTap ->
-        val shape = RoundedCornerShape(percent = 50)
-        Box(
-            modifier = Modifier
-                .heightIn(min = Dimensions.minTouch)
-                .shadow(Dimensions.pillElevation, shape)
-                .clip(shape)
-                .then(
-                    if (armed) Modifier.background(Rose, shape)
-                    else Modifier.background(ChipIdle, shape).border(1.dp, CardBorder, shape),
-                )
-                .clickable(enabled = enabled, onClick = onTap)
-                .padding(horizontal = 24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = if (armed) "Bekræft" else "Slet",
-                color = if (armed) Ink else Rose,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Medium,
-            )
+private fun DeleteAction(enabled: Boolean, confirmInPlace: Boolean, onDelete: () -> Unit) {
+    if (confirmInPlace) {
+        TwoTapConfirm(enabled = enabled, onConfirm = onDelete) { armed, onTap ->
+            DeleteButton(enabled = enabled, armed = armed, onTap = onTap)
         }
+    } else {
+        // The scope popup this opens is itself the confirmation, and arming in front of it would put
+        // two confirmations in a row for the more careful of the two deletes.
+        DeleteButton(enabled = enabled, armed = false, onTap = { if (enabled) onDelete() })
+    }
+}
+
+@Composable
+private fun DeleteButton(enabled: Boolean, armed: Boolean, onTap: () -> Unit) {
+    val shape = RoundedCornerShape(percent = 50)
+    Box(
+        modifier = Modifier
+            .heightIn(min = Dimensions.minTouch)
+            .shadow(Dimensions.pillElevation, shape)
+            .clip(shape)
+            .then(
+                if (armed) Modifier.background(Rose, shape)
+                else Modifier.background(ChipIdle, shape).border(1.dp, CardBorder, shape),
+            )
+            .clickable(enabled = enabled, onClick = onTap)
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (armed) "Bekræft" else "Slet",
+            color = if (armed) Ink else Rose,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 

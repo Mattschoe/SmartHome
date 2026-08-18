@@ -30,6 +30,9 @@ import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
 import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.number
 import kotlinx.datetime.todayIn
 import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
@@ -144,7 +147,16 @@ class MockAdapter(
     ) {
         requireWritable(sourceId)
         _state.update { home ->
-            home.withEvents(home.calendar.events.filterNot { it.uid == uid } + draft.expand(sourceId, uid))
+            val kept = home.calendar.events.filterNot { it.uid == uid && it.isScopedBy(recurrenceId, range) }
+            // Editing one occurrence leaves a plain event behind — the rest of the series keeps its own
+            // rows — while editing the series (or its tail) re-expands the rule from the draft.
+            val written =
+                if (recurrenceId != null && range == RecurrenceRange.ThisEvent) {
+                    draft.expandOnce(sourceId, uid, draft.start, draft.end, recurrenceId)
+                } else {
+                    draft.expand(sourceId, uid)
+                }
+            home.withEvents(kept + written)
         }
     }
 
@@ -155,7 +167,21 @@ class MockAdapter(
         range: RecurrenceRange,
     ) {
         requireWritable(sourceId)
-        _state.update { home -> home.withEvents(home.calendar.events.filterNot { it.uid == uid }) }
+        _state.update { home ->
+            home.withEvents(home.calendar.events.filterNot { it.uid == uid && it.isScopedBy(recurrenceId, range) })
+        }
+    }
+
+    /**
+     * Whether this row is one of the occurrences a write addressing [recurrenceId] with [range]
+     * reaches. No recurrence id at all means the series itself, so every row of it. The ids sort as
+     * they read (`20260818T100000`), which is what makes "this and future" a plain comparison.
+     */
+    private fun CalendarEvent.isScopedBy(recurrenceId: String?, range: RecurrenceRange): Boolean = when {
+        recurrenceId == null -> true
+        this.recurrenceId == null -> true
+        range == RecurrenceRange.ThisAndFuture -> this.recurrenceId >= recurrenceId
+        else -> this.recurrenceId == recurrenceId
     }
 
     // Reminder rules live in the same in-memory store, so the picker, the detail popup and the gear's
@@ -194,7 +220,31 @@ class MockAdapter(
         require(source.canWrite) { "calendar '${source.displayName}' is read-only" }
     }
 
-    private fun CalendarEventDraft.expand(sourceId: String, uid: String): List<CalendarEvent> =
+    /**
+     * The rows one draft becomes. A one-off is simply expanded across the days it covers; a recurring
+     * one is expanded again per occurrence, since Home Assistant does that server-side and the mock
+     * store is what the desktop build reads. The window is a year from the start — enough for the
+     * month and week views to be scrolled through, and bounded so an endless rule stays finite.
+     */
+    private fun CalendarEventDraft.expand(sourceId: String, uid: String): List<CalendarEvent> {
+        val rule = parseRrule(rrule) ?: return expandOnce(sourceId, uid, start, end, null)
+        val spanDays = start.date.daysUntil(end.date)
+        val window = start.date.plus(MockRecurrenceWindowDays, DateTimeUnit.DAY)
+        return expandRecurrence(start.date, rule, start.date, window).flatMap { day ->
+            val occurrenceStart = LocalDateTime(day, start.time)
+            val occurrenceEnd = LocalDateTime(day.plus(spanDays, DateTimeUnit.DAY), end.time)
+            expandOnce(sourceId, uid, occurrenceStart, occurrenceEnd, recurrenceIdOf(occurrenceStart, allDay))
+        }
+    }
+
+    /** One occurrence, across whatever days it covers. */
+    private fun CalendarEventDraft.expandOnce(
+        sourceId: String,
+        uid: String,
+        start: LocalDateTime,
+        end: LocalDateTime,
+        recurrenceId: String?,
+    ): List<CalendarEvent> =
         expandCalendarEvent(
             sourceId = sourceId,
             title = summary,
@@ -202,11 +252,27 @@ class MockAdapter(
             end = end,
             allDay = allDay,
             uid = uid,
+            recurrenceId = recurrenceId,
             location = location,
+            rrule = rrule,
         )
 
     private fun HomeState.withEvents(events: List<CalendarEvent>): HomeState =
         copy(calendar = calendar.copy(events = sortCalendarEvents(events)))
+}
+
+/** How far ahead the mock store expands a recurring event — see [MockAdapter.expand]. */
+private const val MockRecurrenceWindowDays = 365
+
+/**
+ * How Home Assistant names one occurrence of a series: the occurrence's own start, as a date for an
+ * all-day event and as a local timestamp for a timed one.
+ */
+private fun recurrenceIdOf(start: LocalDateTime, allDay: Boolean): String {
+    fun Int.pad(width: Int) = toString().padStart(width, '0')
+    val day = "${start.year.pad(4)}${start.month.number.pad(2)}${start.day.pad(2)}"
+    return if (allDay) day
+    else "${day}T${start.hour.pad(2)}${start.minute.pad(2)}${start.second.pad(2)}"
 }
 
 //TODO Delete
@@ -334,6 +400,16 @@ internal fun seedHome(): HomeState {
                 end = LocalDateTime(today.plus(7, DateTimeUnit.DAY), LocalTime(0, 0)),
                 allDay = true,
                 uid = "seed-5",
+            ) + seedSeries(
+                sourceId = "calendar.papkassehuset",
+                title = "Fredagshygge",
+                // Anchored on the coming Friday, so the desktop preview always has a series to open
+                // the Frekvens row on — and one whose occurrences the scope popup can be tried against.
+                first = today.plus(((5 - today.dayOfWeek.isoDayNumber) + 7) % 7, DateTimeUnit.DAY),
+                from = LocalTime(17, 0),
+                to = LocalTime(19, 0),
+                uid = "seed-6",
+                rrule = "FREQ=WEEKLY",
             )
         ),
         // One standing rule, on the calendar that most needs it: the read-only work roster, where a
@@ -371,6 +447,35 @@ private fun seedEvent(
     end = LocalDateTime(day, to),
     uid = uid,
 )
+
+/**
+ * A recurring seed event, expanded the same way a saved one is — through [parseRrule] and
+ * [expandRecurrence] — so the fixture and the create path produce identical rows.
+ */
+private fun seedSeries(
+    sourceId: String,
+    title: String,
+    first: LocalDate,
+    from: LocalTime,
+    to: LocalTime,
+    uid: String,
+    rrule: String,
+): List<CalendarEvent> {
+    val rule = parseRrule(rrule) ?: return emptyList()
+    return expandRecurrence(first, rule, first, first.plus(MockRecurrenceWindowDays, DateTimeUnit.DAY))
+        .flatMap { day ->
+            val start = LocalDateTime(day, from)
+            expandCalendarEvent(
+                sourceId = sourceId,
+                title = title,
+                start = start,
+                end = LocalDateTime(day, to),
+                uid = uid,
+                recurrenceId = recurrenceIdOf(start, allDay = false),
+                rrule = rrule,
+            )
+        }
+}
 
 /**
  * Build a browse shelf from `name to subtitle` pairs, minting a mock uri per tile so the mock tiles

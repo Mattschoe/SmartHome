@@ -145,6 +145,9 @@ const val MinutesPerDay: Int = HoursPerDay * 60
  *
  * The summary is trimmed but a blank one is passed through untouched: it is the save button's job to
  * refuse it, not this function's to invent a title.
+ *
+ * [rrule] rides through untouched — it is built (or carried over unchanged) by the Frekvens surface,
+ * which is the only place that knows whether the rule was edited at all.
  */
 fun buildEventDraft(
     summary: String,
@@ -152,6 +155,7 @@ fun buildEventDraft(
     end: LocalDateTime,
     allDay: Boolean,
     location: String?,
+    rrule: String? = null,
 ): CalendarEventDraft {
     val startAt: LocalDateTime
     val endAt: LocalDateTime
@@ -171,5 +175,6 @@ fun buildEventDraft(
         end = endAt,
         allDay = allDay,
         location = location?.trim()?.ifBlank { null },
+        rrule = rrule?.trim()?.ifBlank { null },
     )
 }

@@ -203,6 +203,35 @@ class CalendarFormatTest {
     }
 
     @Test
+    fun draftCarriesItsRepetitionRule() {
+        val at = LocalDateTime(LocalDate(2026, 8, 3), LocalTime(9, 0))
+        val timed = buildEventDraft(
+            summary = "Løbetur",
+            start = at,
+            end = LocalDateTime(at.date, LocalTime(10, 0)),
+            allDay = false,
+            location = null,
+            rrule = "FREQ=WEEKLY;BYDAY=MO",
+        )
+        assertEquals("FREQ=WEEKLY;BYDAY=MO", timed.rrule)
+
+        // Also on the all-day path, where the boundaries are rewritten around it.
+        val allDay = buildEventDraft(
+            summary = "Ferie",
+            start = at,
+            end = at,
+            allDay = true,
+            location = null,
+            rrule = "FREQ=YEARLY",
+        )
+        assertEquals("FREQ=YEARLY", allDay.rrule)
+
+        // A one-off says so with a null rather than an empty string nobody downstream would read.
+        assertNull(buildEventDraft("Møde", at, at, allDay = false, location = null).rrule)
+        assertNull(buildEventDraft("Møde", at, at, allDay = false, location = null, rrule = "  ").rrule)
+    }
+
+    @Test
     fun todoDueReadsTheThreeNeighbouringDaysAsWords() {
         val today = LocalDate(2026, 8, 17)
         assertEquals("i dag", formatTodoDue(today, today))

@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
@@ -151,6 +152,67 @@ class MockAdapterTest {
         adapter.deleteEvent("calendar.papkassehuset", uid)
 
         assertTrue(adapter.subscribe().value.calendar.events.none { it.uid == uid })
+    }
+
+    @Test
+    fun createEvent_withARuleExpandsIntoASeries() = runTest {
+        val adapter = MockAdapter()
+        val start = LocalDate(2026, 8, 5)
+
+        adapter.createEvent(
+            "calendar.papkassehuset",
+            CalendarEventDraft(
+                summary = "Løbetur",
+                start = LocalDateTime(start, LocalTime(7, 0)),
+                end = LocalDateTime(start, LocalTime(8, 0)),
+                rrule = "FREQ=WEEKLY;COUNT=3",
+            ),
+        )
+
+        val series = adapter.subscribe().value.calendar.events.filter { it.title == "Løbetur" }
+        assertEquals(
+            listOf(start, LocalDate(2026, 8, 12), LocalDate(2026, 8, 19)),
+            series.map { it.date },
+        )
+        // Every occurrence carries the rule, so the editor opens on it whichever one was tapped, and
+        // its own recurrence id, which is what a scoped write addresses.
+        assertTrue(series.all { it.rrule == "FREQ=WEEKLY;COUNT=3" })
+        assertEquals("20260805T070000", series.first().recurrenceId)
+    }
+
+    @Test
+    fun deleteEvent_scopedToOneOccurrenceLeavesTheRestOfTheSeries() = runTest {
+        val adapter = MockAdapter()
+        val series = adapter.subscribe().value.calendar.events.filter { it.uid == "seed-6" }
+        val second = series[1]
+
+        adapter.deleteEvent("calendar.papkassehuset", "seed-6", second.recurrenceId)
+
+        val left = adapter.subscribe().value.calendar.events.filter { it.uid == "seed-6" }
+        assertEquals(series.size - 1, left.size)
+        assertTrue(left.none { it.recurrenceId == second.recurrenceId })
+    }
+
+    @Test
+    fun deleteEvent_thisAndFutureStopsTheSeriesAtThatOccurrence() = runTest {
+        val adapter = MockAdapter()
+        val series = adapter.subscribe().value.calendar.events.filter { it.uid == "seed-6" }
+        val third = series[2]
+
+        adapter.deleteEvent("calendar.papkassehuset", "seed-6", third.recurrenceId, RecurrenceRange.ThisAndFuture)
+
+        val left = adapter.subscribe().value.calendar.events.filter { it.uid == "seed-6" }
+        assertEquals(2, left.size)
+        assertTrue(left.all { it.date < third.date })
+    }
+
+    @Test
+    fun deleteEvent_addressingNoOccurrenceRemovesTheWholeSeries() = runTest {
+        val adapter = MockAdapter()
+
+        adapter.deleteEvent("calendar.papkassehuset", "seed-6")
+
+        assertTrue(adapter.subscribe().value.calendar.events.none { it.uid == "seed-6" })
     }
 
     @Test

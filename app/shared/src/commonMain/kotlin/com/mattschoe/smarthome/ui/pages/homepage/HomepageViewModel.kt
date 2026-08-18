@@ -21,10 +21,12 @@ import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.QueueMode
+import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
@@ -517,8 +519,20 @@ class HomepageViewModel(
      * edit path (where the calendar is the event's own; moving between calendars is a delete plus a
      * create, which this surface does not offer). Same shape as [startPlay]: the button spins until
      * the adapter replies, and a **failure leaves the surface open** so nothing typed is lost.
+     *
+     * [scope] is the editor's answer for a recurring event, resolved to Home Assistant's own pair by
+     * [recurrenceIdFor]/[rangeFor]. Note what [EventEditScope.AllEvents] means for the boundaries:
+     * the series is rewritten from the occurrence that happened to be open, so editing the time of
+     * any one of them moves the whole series' anchor to that day. Home Assistant's own frontend
+     * behaves the same way, and the alternative — guessing which parts of the draft were meant to
+     * carry — would be worse than the surprise.
      */
-    fun saveEvent(sourceId: String, draft: CalendarEventDraft, reminder: ReminderRule? = null) {
+    fun saveEvent(
+        sourceId: String,
+        draft: CalendarEventDraft,
+        reminder: ReminderRule? = null,
+        scope: EventEditScope = EventEditScope.ThisEvent,
+    ) {
         val target = _eventEditor.value ?: return
         if (_savingEvent.value) return
         val existing = (target as? EventEditorTarget.Existing)?.event
@@ -527,8 +541,13 @@ class HomepageViewModel(
             try {
                 val uid = existing?.uid
                 if (existing != null && uid != null) {
-                    // No recurrence UI, so an occurrence of a series is edited as just that occurrence.
-                    adapter.updateEvent(existing.sourceId, uid, draft, existing.recurrenceId)
+                    adapter.updateEvent(
+                        existing.sourceId,
+                        uid,
+                        draft,
+                        recurrenceIdFor(existing, scope),
+                        rangeFor(scope),
+                    )
                 } else {
                     adapter.createEvent(sourceId, draft)
                     // A reminder is keyed on the event's uid, and a create doesn't return one — Home
@@ -569,6 +588,17 @@ class HomepageViewModel(
         }
         adapter.setEventReminder(sourceId, uid, created.recurrenceId, reminder)
     }
+
+    /**
+     * How the editor's [EventEditScope] is addressed on the wire. "Alle begivenheder" drops the
+     * recurrence id entirely, which is how both Home Assistant and iCal say "the series itself"; the
+     * other two name the occurrence and differ only in how far forward they reach.
+     */
+    private fun recurrenceIdFor(event: CalendarEvent, scope: EventEditScope): String? =
+        if (scope == EventEditScope.AllEvents) null else event.recurrenceId
+
+    private fun rangeFor(scope: EventEditScope): RecurrenceRange =
+        if (scope == EventEditScope.ThisAndFuture) RecurrenceRange.ThisAndFuture else RecurrenceRange.ThisEvent
 
     private fun CalendarEvent.matches(sourceId: String, draft: CalendarEventDraft): Boolean =
         uid != null && this.sourceId == sourceId && title == draft.summary && start == draft.start
@@ -611,10 +641,10 @@ class HomepageViewModel(
         }
     }
 
-    /** Delete the event the editor is open on. Scoped like [saveEvent]: one occurrence of a series. */
-    fun deleteEvent() {
+    /** Delete the event the editor is open on, over the occurrences [scope] names. */
+    fun deleteEvent(scope: EventEditScope = EventEditScope.ThisEvent) {
         val existing = (_eventEditor.value as? EventEditorTarget.Existing)?.event ?: return
-        deleteEvent(existing) { _eventEditor.value = null }
+        deleteEvent(existing, scope) { _eventEditor.value = null }
     }
 
     /**
@@ -622,13 +652,17 @@ class HomepageViewModel(
      * write, and closing only the surface the delete came from ([onDone]) once it lands. An event the
      * backend gave no uid can't be addressed at all, so it is simply left alone.
      */
-    private fun deleteEvent(event: CalendarEvent, onDone: () -> Unit) {
+    private fun deleteEvent(
+        event: CalendarEvent,
+        scope: EventEditScope = EventEditScope.ThisEvent,
+        onDone: () -> Unit,
+    ) {
         val uid = event.uid ?: return
         if (_savingEvent.value) return
         _savingEvent.value = true
         viewModelScope.launch {
             try {
-                adapter.deleteEvent(event.sourceId, uid, event.recurrenceId)
+                adapter.deleteEvent(event.sourceId, uid, recurrenceIdFor(event, scope), rangeFor(scope))
                 onDone()
             } catch (e: CancellationException) {
                 throw e

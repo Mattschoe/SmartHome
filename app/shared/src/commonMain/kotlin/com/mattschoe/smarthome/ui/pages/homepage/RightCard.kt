@@ -44,6 +44,7 @@ import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.data.model.CalendarSource
@@ -185,8 +186,8 @@ fun RightCard(
     onSetEventReminder: (ReminderRule?) -> Unit,
     /** Set or clear a calendar's standing reminder — the gear popup's per-calendar row. */
     onSetCalendarReminderDefault: (String, Int?) -> Unit,
-    onSaveEvent: (String, CalendarEventDraft, ReminderRule?) -> Unit,
-    onDeleteEvent: () -> Unit,
+    onSaveEvent: (String, CalendarEventDraft, ReminderRule?, EventEditScope) -> Unit,
+    onDeleteEvent: (EventEditScope) -> Unit,
     onCloseEventEditor: () -> Unit,
     modifier: Modifier = Modifier,
 ) {

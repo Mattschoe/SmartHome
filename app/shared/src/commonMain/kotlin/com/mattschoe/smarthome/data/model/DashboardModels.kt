@@ -228,6 +228,11 @@ data class CalendarSource(
  * The per-day fields above are display truth and can't be reversed into them ("til 02:00" says
  * nothing about which day it started), so the edit surface reads these instead of parsing its own
  * rows back. Nullable: an entry read from a cache written before they existed simply has none.
+ *
+ * [rrule] is the series' repetition rule, repeated on **every** occurrence exactly as Home Assistant
+ * sends it, so the editor can open on the rule whichever occurrence was tapped. `null` on a one-off —
+ * and also on a series whose backend does not report one, which is why [recurrenceId] rather than
+ * this is what says an event repeats at all.
  */
 @Immutable
 @Serializable
@@ -244,6 +249,7 @@ data class CalendarEvent(
     val allDay: Boolean = false,
     val start: LocalDateTime? = null,
     val end: LocalDateTime? = null,
+    val rrule: String? = null,
 )
 
 /**
@@ -252,6 +258,17 @@ data class CalendarEvent(
  * that occurrence and applies to it and everything after.
  */
 enum class RecurrenceRange { ThisEvent, ThisAndFuture }
+
+/**
+ * What a save or a delete on a recurring event was meant to reach — the question the editor asks
+ * before writing, in the words it asks it in.
+ *
+ * This is the *surface's* vocabulary, not the wire's: the ViewModel turns it into the pair Home
+ * Assistant understands, addressing the occurrence for [ThisEvent] and [ThisAndFuture] and the
+ * series itself (no recurrence id at all) for [AllEvents]. Kept here beside [RecurrenceRange] so the
+ * two are read together rather than one being mistaken for the other.
+ */
+enum class EventEditScope { ThisEvent, ThisAndFuture, AllEvents }
 
 /**
  * An event to create or to replace an existing one with — what a create/edit surface fills in and

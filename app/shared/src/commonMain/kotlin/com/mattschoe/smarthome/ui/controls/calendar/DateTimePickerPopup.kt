@@ -170,18 +170,23 @@ fun BoxScope.TimePickerPopup(
 }
 
 /**
- * Annuller / OK, in the editor's own weight rather than a Material `TextButton` — this popup is the
- * only place in the app that would pull one in, and it would arrive carrying its own type scale.
+ * Annuller / OK, in the editor's own weight rather than a Material `TextButton` — the calendar's
+ * popups are the only place in the app that would pull one in, and it would arrive carrying its own
+ * type scale. Shared with the custom-frequency sheet, so every popup that commits, commits alike.
  */
 @Composable
-private fun PickerActions(onCancel: () -> Unit, onConfirm: () -> Unit) {
+internal fun PickerActions(
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+    confirmText: String = "OK",
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PickerAction("Annuller", onCancel)
-        PickerAction("OK", onConfirm)
+        PickerAction(confirmText, onConfirm)
     }
 }
 

@@ -491,6 +491,7 @@ fun expandCalendarEvent(
     uid: String? = null,
     recurrenceId: String? = null,
     location: String? = null,
+    rrule: String? = null,
 ): List<CalendarEvent> {
     val firstDay = start.date
     val endsExclusively = allDay || end.time == LocalTime(0, 0)
@@ -535,6 +536,7 @@ fun expandCalendarEvent(
             // was tapped and still has to show — and re-save — the event's real start and end.
             start = start,
             end = end,
+            rrule = rrule,
         )
     }
 }
