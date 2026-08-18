@@ -23,6 +23,7 @@ import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
+import com.mattschoe.smarthome.ui.controls.calendar.EventScopePopup
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import kotlinx.datetime.LocalDate
 
@@ -57,6 +58,7 @@ fun LandscapeCalendarPage(
     dayMarks: Map<LocalDate, DayMarks>,
     weekHourHeight: Float,
     eventDetail: CalendarEvent?,
+    eventMove: PendingEventMove?,
     calendarSettingsOpen: Boolean,
     calendarFilters: CalendarFilters,
     viewModel: HomepageViewModel,
@@ -110,6 +112,7 @@ fun LandscapeCalendarPage(
                     onOpenEvent = viewModel::openEvent,
                     onOpenEventDetail = viewModel::openEventDetail,
                     onNewEventAt = viewModel::openNewEventAt,
+                    onMoveEvent = viewModel::moveEvent,
                     onWeekHourHeight = viewModel::setWeekHourHeight,
                     reminders = calendar.reminders,
                     onSetEventReminder = viewModel::setEventReminder,
@@ -143,6 +146,17 @@ fun LandscapeCalendarPage(
                 onDelete = viewModel::deleteEventDetail,
                 onClose = viewModel::closeEventDetail,
                 modifier = Modifier.offset(x = (cardWidth + Dimensions.phoneCardGap) / 2),
+            )
+        }
+        // A dropped occurrence of a recurring series: the same card the editor asks its save and
+        // delete with, since a drag has no way of asking the question itself. The block stays at the
+        // slot it was dropped on behind it — the pending move is applied to what the panel draws.
+        if (eventMove?.awaitingScope == true) {
+            EventScopePopup(
+                title = "FLYT",
+                allowThisEvent = true,
+                onPick = viewModel::pickEventMoveScope,
+                onDismiss = viewModel::cancelEventMove,
             )
         }
         if (calendarSettingsOpen) {

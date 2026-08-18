@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
@@ -61,6 +62,7 @@ import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarViewToggle
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
+import com.mattschoe.smarthome.ui.controls.calendar.EventScopePopup
 import com.mattschoe.smarthome.ui.controls.calendar.TodayButton
 import com.mattschoe.smarthome.ui.controls.calendar.TodoPanel
 import com.mattschoe.smarthome.ui.controls.media.MediaPanel
@@ -138,6 +140,7 @@ fun RightCard(
     eventEditor: EventEditorTarget?,
     /** The event the week view's detail popup is open on, or `null` when none is. */
     eventDetail: CalendarEvent?,
+    eventMove: PendingEventMove?,
     /** Which calendars each view draws — what the header's gear popup edits. */
     calendarFilters: CalendarFilters,
     /** Whether the gear's popup is showing. */
@@ -175,6 +178,9 @@ fun RightCard(
     onOpenEvent: (CalendarEvent) -> Unit,
     onOpenEventDetail: (CalendarEvent) -> Unit,
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
+    onMoveEvent: (EventMove) -> Unit,
+    onPickEventMoveScope: (EventEditScope) -> Unit,
+    onCancelEventMove: () -> Unit,
     onWeekHourHeight: (Float) -> Unit,
     onEditEventDetail: () -> Unit,
     onDeleteEventDetail: () -> Unit,
@@ -299,6 +305,7 @@ fun RightCard(
                         onOpenEvent = onOpenEvent,
                         onOpenEventDetail = onOpenEventDetail,
                         onNewEventAt = onNewEventAt,
+                        onMoveEvent = onMoveEvent,
                         onWeekHourHeight = onWeekHourHeight,
                         reminders = calendarReminders,
                         onSetEventReminder = onSetEventReminder,
@@ -385,6 +392,18 @@ fun RightCard(
                     onEdit = onEditEventDetail,
                     onDelete = onDeleteEventDetail,
                     onClose = onCloseEventDetail,
+                )
+            }
+            // A dropped occurrence of a recurring series: the same card the editor asks its save
+            // and delete with, since a drag has no way of asking the question itself. The block
+            // stays at the slot it was dropped on behind it — the pending move is applied to what
+            // the panel draws.
+            if (eventMove?.awaitingScope == true) {
+                EventScopePopup(
+                    title = "FLYT",
+                    allowThisEvent = true,
+                    onPick = onPickEventMoveScope,
+                    onDismiss = onCancelEventMove,
                 )
             }
             if (calendarSettingsOpen) {

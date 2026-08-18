@@ -3,6 +3,8 @@ package com.mattschoe.smarthome.data
 import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.QueueMode
@@ -464,6 +466,154 @@ fun layoutDayEvents(events: List<CalendarEvent>): List<PositionedEvent> {
     }
     flush()
     return placed
+}
+
+/**
+ * How coarsely a dragged block's drop is rounded. Finer than [SlotSnapMinutes]' half hour, because a
+ * *move* is aimed at the events around it rather than at a slot picked from nothing: quarter past is
+ * a time somebody would put a meeting at, and the finger is already holding the block's own edge to
+ * line up with. Squeezed towards the zoom's floor a quarter hour is a few dp, at which point the
+ * pointer can no longer resolve it anyway and the snap coarsens on its own.
+ */
+const val EventDragSnapMinutes = 15
+
+/** Where a dragged block was let go: the event it carries, and the day and minute it landed on. */
+data class EventMove(val event: CalendarEvent, val date: LocalDate, val startMinute: Int)
+
+/**
+ * Whether this row is the *whole* of its event rather than one day of a longer one — the same day
+ * count [expandCalendarEvent] arrived at, read back off the bounds it stamped on every row.
+ *
+ * A multi-day row cannot be dragged: it draws the part of the event falling on its own day (a day
+ * merely spanned reads 00:00–24:00), so there is no one start for a drop to move.
+ */
+fun CalendarEvent.spansOneDay(): Boolean {
+    val start = start ?: return false
+    val end = end ?: return false
+    if (start.date != date) return false
+    val endsExclusively = allDay || end.time == LocalTime(0, 0)
+    val lastDay = end.date
+        .let { if (endsExclusively && it > start.date) it.plus(-1, DateTimeUnit.DAY) else it }
+        .coerceAtLeast(start.date)
+    return lastDay == start.date
+}
+
+/**
+ * Whether the week grid may pick [event] up and move it. Everything excluded here is excluded
+ * because no write could land: an all-day entry lives in the strip and has no minute to drop on, an
+ * event the backend gave no `uid` cannot be addressed at all, a read-only calendar refuses the write
+ * ([CalendarSource.canWrite]), and a multi-day row has no single start ([spansOneDay]).
+ */
+fun canDragEvent(event: CalendarEvent, sources: List<CalendarSource>): Boolean =
+    event.startMinute != null &&
+        !event.allDay &&
+        event.uid != null &&
+        event.spansOneDay() &&
+        sources.firstOrNull { it.id == event.sourceId }?.canWrite == true
+
+/**
+ * Where a drag of [dayDelta] columns and [minuteDelta] minutes from [originDayIndex] puts [event],
+ * or `null` if that is where it already is — a long press that wobbled must not write.
+ *
+ * **This is the week lock**: the column is clamped into [weekDays], so dragging past Monday or
+ * Sunday pins the block to that edge instead of paging to the neighbouring week. The minute snaps to
+ * [EventDragSnapMinutes] and is held inside the day exactly as `slotTimeAt` holds a tapped one; an
+ * event long enough to run past midnight from there simply does, which is the same reading the
+ * editor gives a 20:00–02:00 pair.
+ */
+fun droppedEventSlot(
+    event: CalendarEvent,
+    weekDays: List<LocalDate>,
+    originDayIndex: Int,
+    dayDelta: Int,
+    minuteDelta: Int,
+): EventMove? {
+    val from = event.startMinute ?: return null
+    if (weekDays.isEmpty()) return null
+    val date = weekDays[(originDayIndex + dayDelta).coerceIn(0, weekDays.lastIndex)]
+    val raw = from + minuteDelta
+    val snapped = ((raw.toFloat() / EventDragSnapMinutes).roundToInt() * EventDragSnapMinutes)
+        .coerceIn(0, MinutesPerDay - EventDragSnapMinutes)
+    return if (date == event.date && snapped == from) null else EventMove(event, date, snapped)
+}
+
+/**
+ * The event [move] rewrites [event] into: the dropped day and minute, **keeping its duration** and
+ * everything else about it. A drag says *when*, and nothing else.
+ *
+ * The duration comes off the event's real bounds rather than the row's minutes, since those are what
+ * [expandCalendarEvent] stamps with the whole event; an event carried past midnight by its own
+ * length rolls onto the next day here rather than being cut off at it.
+ *
+ * Note what is *not* carried: `description`, which [CalendarEvent] does not hold — the editor's own
+ * save drops it for the same reason.
+ */
+fun movedEventDraft(event: CalendarEvent, move: EventMove): CalendarEventDraft {
+    val total = move.startMinute + event.durationMinutes()
+    return buildEventDraft(
+        // A blank-titled event reads as [UntitledEventTitle] in the panel; writing that placeholder
+        // back as its summary would make the stand-in the event's actual name.
+        summary = event.title.takeIf { it != UntitledEventTitle }.orEmpty(),
+        start = LocalDateTime(move.date, LocalTime(move.startMinute / 60, move.startMinute % 60)),
+        end = LocalDateTime(
+            move.date.plus(total.floorDiv(MinutesPerDay), DateTimeUnit.DAY),
+            LocalTime(total.mod(MinutesPerDay) / 60, total.mod(MinutesPerDay) % 60),
+        ),
+        allDay = false,
+        location = event.location,
+        rrule = event.rrule,
+    )
+}
+
+/**
+ * [events] with the one [move] addresses shown at its new slot — the optimistic hold the week grid
+ * needs so a dropped block does not snap back to where it was for the length of the round trip (and
+ * does not sit in its old place *behind* the scope popup while that is being answered).
+ *
+ * The row is re-expanded rather than patched, so an event carried past midnight by the drop splits
+ * into the two rows it now really is. Matched on what addresses the occurrence — calendar, `uid`,
+ * recurrence id — which survives the refetch, making a second application a no-op rather than a
+ * double move. A scope covering more than the dropped occurrence moves only that one here; the rest
+ * arrive with the refetch.
+ */
+fun applyEventMove(events: List<CalendarEvent>, move: EventMove): List<CalendarEvent> {
+    val target = move.event
+    val uid = target.uid ?: return events
+    val draft = movedEventDraft(target, move)
+    val moved = events.flatMap { event ->
+        if (event.uid == uid &&
+            event.sourceId == target.sourceId &&
+            event.recurrenceId == target.recurrenceId
+        ) {
+            expandCalendarEvent(
+                sourceId = event.sourceId,
+                title = draft.summary,
+                start = draft.start,
+                end = draft.end,
+                uid = event.uid,
+                recurrenceId = event.recurrenceId,
+                location = draft.location,
+                rrule = draft.rrule,
+            )
+        } else {
+            listOf(event)
+        }
+    }
+    // The panel reads these already sorted (the adapter sorts upstream) and `groupBy` keeps list
+    // order, so a row landing on a new time has to be put back in place or it draws out of order.
+    return sortCalendarEvents(moved)
+}
+
+/** How long the event runs, in minutes — off its real bounds, falling back to the row's own. */
+private fun CalendarEvent.durationMinutes(): Int {
+    val start = start
+    val end = end
+    if (start != null && end != null) {
+        return (start.date.daysUntil(end.date) * MinutesPerDay +
+            minutesOfDay(end.time) - minutesOfDay(start.time)).coerceAtLeast(0)
+    }
+    val from = startMinute ?: return 0
+    return ((endMinute ?: from) - from).coerceAtLeast(0)
 }
 
 /**

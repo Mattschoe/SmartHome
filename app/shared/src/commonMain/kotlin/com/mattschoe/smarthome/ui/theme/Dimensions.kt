@@ -115,6 +115,12 @@ object Dimensions {
     // The caret in the gutter that expands the all-day strip past its collapsed single row.
     val weekChevronSize = 18.dp
     val weekNowLineHeight = 2.dp
+    // A block picked up by a long press and dragged to a new slot (WeekView.kt). It rides on a
+    // shadowed plate like the up-next row does, and the hours scroll on their own once it comes
+    // within this much of the grid's top or bottom edge — a band wide enough to reach with the
+    // finger still on the block, since the block itself is under it.
+    val weekDragElevation = 8.dp
+    val weekDragAutoScrollEdge = 44.dp
 
     // Right-card Calendar popups (CalendarPopups.kt): the week view's event detail card and the
     // header gear's calendar-filter card, both floated inside the right card rather than over the

@@ -1,11 +1,13 @@
 package com.mattschoe.smarthome.ui.pages.homepage
 
+import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.RecurrenceRange
 import com.mattschoe.smarthome.data.buildEventDraft
+import com.mattschoe.smarthome.data.canDragEvent
 import com.mattschoe.smarthome.data.todoPage
 import com.mattschoe.smarthome.data.weekStart
 import com.mattschoe.smarthome.data.model.ArtistDetail
@@ -1196,6 +1198,97 @@ class HomepageViewModelTest {
     }
 
     @Test
+    fun moveEvent_writesTheDroppedSlotAndKeepsTheDuration() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val before = (vm.screenState.value as HomeScreenState.Ready).let { ready ->
+            ready.calendar.events.first { canDragEvent(it, ready.calendar.sources) && it.rrule == null }
+        }
+        val span = before.endMinute!! - before.startMinute!!
+        val onto = before.date.plus(1, DateTimeUnit.DAY)
+
+        vm.moveEvent(EventMove(before, onto, 9 * 60))
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        val after = ready.calendar.events.single { it.uid == before.uid }
+        assertEquals(onto, after.date)
+        assertEquals(9 * 60, after.startMinute)
+        assertEquals(9 * 60 + span, after.endMinute)
+        // A one-off is written without asking anything, and the hold is let go once it has landed.
+        assertNull(ready.eventMove)
+    }
+
+    @Test
+    fun moveEvent_onARecurringOccurrenceAsksBeforeWriting() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val occurrence = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+        val onto = occurrence.date.plus(1, DateTimeUnit.DAY)
+
+        vm.moveEvent(EventMove(occurrence, onto, 9 * 60))
+        advanceUntilIdle()
+
+        // Nothing is written until the scope card is answered — but the block is already drawn where
+        // it was dropped, so it does not sit in its old slot behind the popup.
+        assertNull(recorder.lastUpdate)
+        val asking = vm.screenState.value as HomeScreenState.Ready
+        assertTrue(asking.eventMove?.awaitingScope == true)
+        assertTrue(asking.eventsByDay[onto].orEmpty().any { it.uid == "seed-6" && it.startMinute == 9 * 60 })
+
+        vm.pickEventMoveScope(EventEditScope.ThisAndFuture)
+        advanceUntilIdle()
+        assertEquals(occurrence.recurrenceId to RecurrenceRange.ThisAndFuture, recorder.lastUpdate)
+        assertNull((vm.screenState.value as HomeScreenState.Ready).eventMove)
+    }
+
+    @Test
+    fun cancelEventMove_putsTheBlockBackAndWritesNothing() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val occurrence = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+
+        vm.moveEvent(EventMove(occurrence, occurrence.date.plus(1, DateTimeUnit.DAY), 9 * 60))
+        advanceUntilIdle()
+        vm.cancelEventMove()
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventMove)
+        assertNull(recorder.lastUpdate)
+        assertTrue(ready.eventsByDay[occurrence.date].orEmpty().any { it.uid == "seed-6" })
+    }
+
+    @Test
+    fun moveEvent_failure_leavesTheEventWhereItWasAndSaysSo() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(FailingCalendarUpdateAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val before = (vm.screenState.value as HomeScreenState.Ready).let { ready ->
+            ready.calendar.events.first { canDragEvent(it, ready.calendar.sources) && it.rrule == null }
+        }
+        vm.moveEvent(EventMove(before, before.date.plus(1, DateTimeUnit.DAY), 9 * 60))
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        // The hold is dropped, so the block goes back to the slot the backend still holds it at.
+        assertNull(ready.eventMove)
+        assertEquals(before, ready.calendar.events.single { it.uid == before.uid })
+        assertEquals("Kunne ikke gemme", ready.toast?.text)
+    }
+
+    @Test
     fun deleteEvent_removesItAndClosesTheSurface() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
@@ -1450,6 +1543,19 @@ class HomepageViewModelTest {
     ) : HomeAdapter by delegate {
         override suspend fun createEvent(sourceId: String, draft: CalendarEventDraft): Unit =
             throw IllegalStateException("no Home Assistant connection")
+    }
+
+    /** The same, for the update path — what a dropped block runs into offline. */
+    private class FailingCalendarUpdateAdapter(
+        delegate: HomeAdapter = MockAdapter(),
+    ) : HomeAdapter by delegate {
+        override suspend fun updateEvent(
+            sourceId: String,
+            uid: String,
+            draft: CalendarEventDraft,
+            recurrenceId: String?,
+            range: RecurrenceRange,
+        ): Unit = throw IllegalStateException("no Home Assistant connection")
     }
 
     /** The same, for the delete path — what the detail popup's trash runs into offline. */

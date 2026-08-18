@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.CalendarEvent
+import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.TodoItem
@@ -10,12 +11,14 @@ import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.plus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -511,6 +514,159 @@ class DashboardLogicTest {
         val allDay = CalendarEvent(LocalDate(2026, 7, 29), "Ferie", AllDayLabel)
         assertTrue(layoutDayEvents(listOf(allDay)).isEmpty())
         assertEquals("Møde", layoutDayEvents(listOf(allDay, timedEvent("Møde", 540, 600))).single().event.title)
+    }
+
+    // --- Dragging a week block to a new slot ---
+
+    /** Monday–Sunday of the week the drag fixtures live in (29 Jul 2026 is a Wednesday). */
+    private val dragWeek = List(DaysPerWeek) { LocalDate(2026, 7, 27).plus(it, DateTimeUnit.DAY) }
+    private val writable = listOf(CalendarSource("cal.home", "Hjem", canWrite = true))
+
+    /** A movable 10:00–11:00 event on Wednesday, on a writable calendar. */
+    private fun movable(
+        uid: String? = "e1",
+        sourceId: String = "cal.home",
+        date: LocalDate = LocalDate(2026, 7, 29),
+        start: LocalTime = LocalTime(10, 0),
+        end: LocalDateTime = LocalDateTime(LocalDate(2026, 7, 29), LocalTime(11, 0)),
+    ) = CalendarEvent(
+        date = date,
+        title = "Møde",
+        time = "10:00",
+        sourceId = sourceId,
+        startMinute = minutesOfDay(start),
+        endMinute = minutesOfDay(end.time),
+        uid = uid,
+        start = LocalDateTime(date, start),
+        end = end,
+    )
+
+    @Test
+    fun canDragEvent_acceptsAWritableSingleDayTimedEvent() {
+        assertTrue(canDragEvent(movable(), writable))
+    }
+
+    @Test
+    fun canDragEvent_refusesWhatNoWriteCouldAddress() {
+        // No uid to name it by.
+        assertFalse(canDragEvent(movable(uid = null), writable))
+        // A read-only calendar.
+        assertFalse(
+            canDragEvent(movable(), listOf(CalendarSource("cal.home", "Arbejde", canWrite = false))),
+        )
+        // A calendar that isn't there at all.
+        assertFalse(canDragEvent(movable(sourceId = "cal.other"), writable))
+        // An all-day entry: it lives in the strip and has no minute to drop on.
+        assertFalse(
+            canDragEvent(
+                CalendarEvent(LocalDate(2026, 7, 29), "Ferie", AllDayLabel, "cal.home", uid = "e2"),
+                writable,
+            ),
+        )
+    }
+
+    @Test
+    fun canDragEvent_refusesOneDayOfAMultiDayEvent() {
+        // A Wed 10:00 → Fri 11:00 event, as its three rows come out of the expansion.
+        val rows = expandCalendarEvent(
+            sourceId = "cal.home",
+            title = "Konference",
+            start = LocalDateTime(LocalDate(2026, 7, 29), LocalTime(10, 0)),
+            end = LocalDateTime(LocalDate(2026, 7, 31), LocalTime(11, 0)),
+            uid = "e3",
+        )
+        assertEquals(3, rows.size)
+        assertTrue(rows.none { canDragEvent(it, writable) })
+
+        // The same event confined to one day is movable again — including one ending exactly at
+        // midnight, which iCal reads as closing the day it started on.
+        val toMidnight = expandCalendarEvent(
+            sourceId = "cal.home",
+            title = "Aften",
+            start = LocalDateTime(LocalDate(2026, 7, 29), LocalTime(20, 0)),
+            end = LocalDateTime(LocalDate(2026, 7, 30), LocalTime(0, 0)),
+            uid = "e4",
+        ).single()
+        assertTrue(canDragEvent(toMidnight, writable))
+    }
+
+    @Test
+    fun droppedEventSlot_movesTheDayAndSnapsTheMinute() {
+        // Two columns right, and 40 minutes down — which snaps to the nearest quarter hour.
+        val move = assertNotNull(droppedEventSlot(movable(), dragWeek, originDayIndex = 2, 2, 40))
+        assertEquals(LocalDate(2026, 7, 31), move.date)   // Friday
+        assertEquals(minutesOfDay(LocalTime(10, 45)), move.startMinute)
+    }
+
+    @Test
+    fun droppedEventSlot_isLockedToTheWeekOnScreen() {
+        // Dragged far past Sunday, and far past Monday: each pins to that column, never to the week
+        // beyond it.
+        assertEquals(dragWeek.last(), droppedEventSlot(movable(), dragWeek, 2, 12, 0)?.date)
+        assertEquals(dragWeek.first(), droppedEventSlot(movable(), dragWeek, 2, -9, 0)?.date)
+    }
+
+    @Test
+    fun droppedEventSlot_holdsTheStartInsideTheDay() {
+        assertEquals(0, droppedEventSlot(movable(), dragWeek, 2, 0, -10_000)?.startMinute)
+        assertEquals(
+            MinutesPerDay - EventDragSnapMinutes,
+            droppedEventSlot(movable(), dragWeek, 2, 0, 10_000)?.startMinute,
+        )
+    }
+
+    @Test
+    fun droppedEventSlot_isNullWhereNothingMoved() {
+        // A long press that wobbled: same column, and a nudge too small to reach the next quarter.
+        assertNull(droppedEventSlot(movable(), dragWeek, 2, 0, 0))
+        assertNull(droppedEventSlot(movable(), dragWeek, 2, 0, 7))
+    }
+
+    @Test
+    fun movedEventDraft_keepsTheDurationAndEverythingButTheTime() {
+        val event = movable().copy(location = "Køkkenet", rrule = "FREQ=WEEKLY;BYDAY=WE")
+        val draft = movedEventDraft(event, EventMove(event, LocalDate(2026, 7, 31), 14 * 60 + 30))
+        assertEquals(LocalDateTime(LocalDate(2026, 7, 31), LocalTime(14, 30)), draft.start)
+        assertEquals(LocalDateTime(LocalDate(2026, 7, 31), LocalTime(15, 30)), draft.end)
+        assertEquals("Møde", draft.summary)
+        assertEquals("Køkkenet", draft.location)
+        assertEquals("FREQ=WEEKLY;BYDAY=WE", draft.rrule)
+        assertFalse(draft.allDay)
+    }
+
+    @Test
+    fun movedEventDraft_carriesAnEventPastMidnightRatherThanCuttingIt() {
+        val event = movable(
+            start = LocalTime(20, 0),
+            end = LocalDateTime(LocalDate(2026, 7, 29), LocalTime(23, 0)),
+        )
+        val draft = movedEventDraft(event, EventMove(event, LocalDate(2026, 7, 29), 22 * 60))
+        assertEquals(LocalDateTime(LocalDate(2026, 7, 29), LocalTime(22, 0)), draft.start)
+        assertEquals(LocalDateTime(LocalDate(2026, 7, 30), LocalTime(1, 0)), draft.end)
+    }
+
+    @Test
+    fun applyEventMove_showsOnlyTheAddressedOccurrenceAtItsNewSlot() {
+        val moved = movable()
+        val other = movable(uid = "e9").copy(title = "Andet")
+        val result = applyEventMove(
+            listOf(moved, other),
+            EventMove(moved, LocalDate(2026, 7, 30), 9 * 60),
+        )
+        val landed = result.single { it.uid == "e1" }
+        assertEquals(LocalDate(2026, 7, 30), landed.date)
+        assertEquals(9 * 60, landed.startMinute)
+        assertEquals(10 * 60, landed.endMinute)
+        // Everything else is left exactly as it was.
+        assertEquals(other, result.single { it.uid == "e9" })
+    }
+
+    @Test
+    fun applyEventMove_isIdempotentSoTheRefetchCanOverlapTheHold() {
+        val moved = movable()
+        val move = EventMove(moved, LocalDate(2026, 7, 30), 9 * 60)
+        val once = applyEventMove(listOf(moved), move)
+        assertEquals(once, applyEventMove(once, move))
     }
 
     // --- Per-day event bounds ---

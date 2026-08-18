@@ -23,7 +23,9 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -35,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,14 +47,18 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -65,12 +72,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.DaysPerWeek
+import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.HoursPerDay
 import com.mattschoe.smarthome.data.MinutesPerDay
+import com.mattschoe.smarthome.data.PositionedEvent
 import com.mattschoe.smarthome.data.WeekHourHeightRange
+import com.mattschoe.smarthome.data.canDragEvent
 import com.mattschoe.smarthome.data.danishMonths
+import com.mattschoe.smarthome.data.droppedEventSlot
 import com.mattschoe.smarthome.data.formatMinuteOfDay
 import com.mattschoe.smarthome.data.formatTimeOfDay
+import com.mattschoe.smarthome.data.MinEventSpanMinutes
 import com.mattschoe.smarthome.data.layoutDayEvents
 import com.mattschoe.smarthome.data.weekAtPage
 import com.mattschoe.smarthome.data.weekIndexOf
@@ -130,6 +142,10 @@ internal fun WeekPager(
     onShowWeek: (LocalDate) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
+    /** A block was long-pressed and dropped on a new slot of the same week. */
+    onMoveEvent: (EventMove) -> Unit,
+    /** Whether blocks may be picked up at all — false while a write is already in flight. */
+    dragEnabled: Boolean,
     onHourHeight: (Float) -> Unit,
     onChrome: (Dp) -> Unit,
     modifier: Modifier = Modifier,
@@ -219,6 +235,10 @@ internal fun WeekPager(
                 onHourHeight = onHourHeight,
                 onOpenEvent = onOpenEvent,
                 onNewEventAt = onNewEventAt,
+                onMoveEvent = onMoveEvent,
+                // Only the page on screen may be dragged: the pager composes its neighbours, and a
+                // drag started on one of those would resolve against a week nobody is looking at.
+                dragEnabled = dragEnabled && page == pagerState.currentPage,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -496,6 +516,8 @@ private fun WeekGrid(
     onHourHeight: (Float) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
+    onMoveEvent: (EventMove) -> Unit,
+    dragEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -507,6 +529,69 @@ private fun WeekGrid(
     // Null on every page but the one being pinched — which is what makes the re-aim below safe in a
     // pager that composes its neighbours too.
     var anchor by remember { mutableStateOf<ZoomAnchor?>(null) }
+
+    // The drag is held **here**, not in the day column that started it: the block has to draw across
+    // the column boundaries it is carried over (a column's siblings would paint over it), and only
+    // this level knows how wide a column is — which is what a sideways delta has to be measured in.
+    var drag by remember { mutableStateOf<WeekDrag?>(null) }
+    var gridWidthPx by remember { mutableIntStateOf(0) }
+    var viewportHeightPx by remember { mutableIntStateOf(0) }
+
+    // Where the held block currently points, resolved every frame it moves. `null` while it still
+    // covers its own slot, which is also what makes a wobbled long press write nothing.
+    val target: EventMove? = drag?.let { held ->
+        val columnPx = gridWidthPx.toFloat() / DaysPerWeek
+        if (columnPx <= 0f) return@let null
+        droppedEventSlot(
+            event = held.placed.event,
+            weekDays = days,
+            originDayIndex = held.originDayIndex,
+            dayDelta = (held.offset.x / columnPx).roundToInt(),
+            // The scroll travelled since the pickup counts as travel: the block is being carried
+            // over the grid, and the grid moves under it when the edges auto-scroll.
+            minuteDelta = (
+                (held.offset.y + (scroll.value - held.scrollAtPickup)) /
+                    with(density) { hourHeight.toPx() } * 60f
+                ).roundToInt(),
+        )
+    }
+    val slot = drag?.let { held -> target ?: held.origin }
+
+    // The three read from inside the drag callbacks, which are captured once by a `pointerInput`
+    // keyed on the block rather than on this state — so they have to be reached through a holder.
+    val currentTarget by rememberUpdatedState(target)
+    val currentOnMoveEvent by rememberUpdatedState(onMoveEvent)
+    val dragging by rememberUpdatedState(drag != null)
+
+    // Auto-scroll: a slot off the top or bottom of the card is unreachable otherwise, since the hour
+    // scroll under this drag is locked out for the whole gesture. Runs per frame while a block is
+    // held; the scroll it applies feeds straight back into [target] above, so the block keeps
+    // pointing where the finger is rather than sliding away with the hours.
+    LaunchedEffect(dragEnabled, viewportHeightPx, density) {
+        snapshotFlow { drag != null }.collect { held ->
+            if (!held || viewportHeightPx <= 0) return@collect
+            val edge = with(density) { Dimensions.weekDragAutoScrollEdge.toPx() }
+            val rate = with(density) { WeekDragAutoScrollRate.toPx() }
+            while (drag != null) {
+                withFrameNanos {}
+                val current = drag ?: break
+                val where = currentTarget ?: current.origin
+                val top = with(density) {
+                    minuteOffset(where.startMinute, currentHourHeight).toPx()
+                } - scroll.value
+                val bottom = top + with(density) {
+                    blockHeight(current.spanMinutes, currentHourHeight).toPx()
+                }
+                val step = when {
+                    top < edge -> -((edge - top) / edge).coerceIn(0f, 1f) * rate
+                    bottom > viewportHeightPx - edge ->
+                        ((bottom - (viewportHeightPx - edge)) / edge).coerceIn(0f, 1f) * rate
+                    else -> 0f
+                }
+                if (step != 0f) scroll.scrollBy(step)
+            }
+        }
+    }
 
     LaunchedEffect(scroll, density) {
         // Collected rather than keyed on the height: a pinch changes it every frame, and an effect
@@ -525,6 +610,7 @@ private fun WeekGrid(
     Column(
         modifier
             .fillMaxWidth()
+            .onSizeChanged { viewportHeightPx = it.height }
             .pointerInput(Unit) {
                 awaitEachGesture {
                     // Two fingers only: one still belongs to the hour scroll under this modifier, to
@@ -535,7 +621,9 @@ private fun WeekGrid(
                     var zooming = false
                     do {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.changes.count { it.pressed } >= 2) {
+                        // A held block outranks the pinch, or a second finger landing anywhere while
+                        // one carries an event would rescale the grid out from under it.
+                        if (!dragging && event.changes.count { it.pressed } >= 2) {
                             if (!zooming) {
                                 zooming = true
                                 val centroid = event.calculateCentroid(useCurrent = true)
@@ -560,17 +648,46 @@ private fun WeekGrid(
         val stride = hourStride(hourHeight)
         Row(Modifier.fillMaxWidth().height(minuteOffset(MinutesPerDay, hourHeight))) {
             HourGutter(hourHeight, stride)
-            Box(Modifier.weight(1f).fillMaxHeight()) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .onSizeChanged { gridWidthPx = it.width },
+            ) {
                 HourRules(hourHeight, stride, Modifier.matchParentSize())
                 Row(Modifier.matchParentSize()) {
-                    days.forEach { date ->
+                    days.forEachIndexed { index, date ->
                         DayColumn(
                             date = date,
+                            dayIndex = index,
                             events = eventsByDay[date].orEmpty(),
                             sources = sources,
                             hourHeight = hourHeight,
+                            // Deliberately not gated on a drag being in progress: the detector is
+                            // *inside* this flag, so dropping it the moment a block is picked up
+                            // would tear down the very gesture that picked it up. A second block
+                            // taken at the same time is turned away below instead.
+                            dragEnabled = dragEnabled,
+                            draggedEvent = drag?.placed?.event,
                             onOpenEvent = onOpenEvent,
                             onNewEventAt = onNewEventAt,
+                            onDragStart = { placed, dayIndex ->
+                                if (drag == null) {
+                                    drag = WeekDrag(placed, dayIndex, Offset.Zero, scroll.value)
+                                }
+                            },
+                            onDragDelta = { amount ->
+                                drag = drag?.let { it.copy(offset = it.offset + amount) }
+                            },
+                            onDragEnd = { placed, cancelled ->
+                                // Only the block actually in hand may end the drag — a second finger
+                                // that long-pressed elsewhere was turned away, and letting *it* go
+                                // must not drop what the first one is still carrying.
+                                if (drag?.placed?.event == placed.event) {
+                                    if (!cancelled) currentTarget?.let(currentOnMoveEvent)
+                                    drag = null
+                                }
+                            },
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                     }
@@ -584,10 +701,110 @@ private fun WeekGrid(
                             .background(Rose),
                     )
                 }
+                // The held block, drawn last so it rides over every column it is carried across —
+                // the whole reason the drag lives up here. It takes a column outright rather than
+                // its origin's lane: it is being placed, not laid out beside anything yet.
+                if (drag != null && slot != null) {
+                    HeldBlock(
+                        drag = drag!!,
+                        slot = slot,
+                        days = days,
+                        columnWidth = with(density) { (gridWidthPx.toFloat() / DaysPerWeek).toDp() },
+                        sources = sources,
+                        hourHeight = hourHeight,
+                    )
+                }
             }
         }
     }
 }
+
+/** How fast the hours run past under a block held against the grid's edge, per frame at full depth. */
+private val WeekDragAutoScrollRate = 14.dp
+
+/** How far a held block's own slot is dropped back, so what is under it stays readable. */
+private const val HeldBlockAlpha = 0.28f
+
+/**
+ * A block picked up by a long press: what was taken, from which column, and how far it has been
+ * carried. [offset] is raw pointer travel — the hours scrolling underneath is added at the point of
+ * resolution, since it is travel over the grid too.
+ */
+private data class WeekDrag(
+    val placed: PositionedEvent,
+    val originDayIndex: Int,
+    val offset: Offset,
+    val scrollAtPickup: Int,
+) {
+    /** Where it was taken from — what it reads as while it still covers its own slot. */
+    val origin: EventMove get() = EventMove(placed.event, placed.event.date, placed.startMinute)
+
+    /** Its drawn length, which a move keeps: a drag says *when*, never *how long*. */
+    val spanMinutes: Int get() = placed.endMinute - placed.startMinute
+
+    /**
+     * The **event's** own length, for printing an end time by — `null` where the backend gave no
+     * distinct end. [layoutDayEvents] floors a short span to [MinEventSpanMinutes] so the block can
+     * be grabbed at all, and labelling the held block with that would be a lie about the event.
+     */
+    val labelSpanMinutes: Int? get() {
+        val start = placed.event.startMinute ?: return null
+        return placed.event.endMinute?.takeIf { it != start }?.minus(start)
+    }
+}
+
+/**
+ * The dragged block itself, floated over the columns on a shadowed plate. It prints the times of the
+ * slot it is **pointing at**, not the ones it came from, so the drop is read off the block rather
+ * than off the gutter behind it.
+ */
+@Composable
+private fun HeldBlock(
+    drag: WeekDrag,
+    slot: EventMove,
+    days: List<LocalDate>,
+    columnWidth: Dp,
+    sources: List<CalendarSource>,
+    hourHeight: Dp,
+) {
+    val density = LocalDensity.current
+    val height = blockHeight(drag.spanMinutes, hourHeight)
+    val endLabel = drag.labelSpanMinutes?.let { formatMinuteOfDay(slot.startMinute + it) }
+    EventBlock(
+        event = drag.placed.event,
+        color = calendarDotColor(drag.placed.event.sourceId, sources),
+        startLabel = formatMinuteOfDay(slot.startMinute),
+        endLabel = endLabel,
+        text = blockText(
+            blockHeight = height,
+            titleLine = with(density) { WeekBlockTitleLineHeight.toDp() },
+            timeLine = with(density) { WeekBlockTimeLineHeight.toDp() },
+            timeLines = if (endLabel == null) 1 else 2,
+        ),
+        // A block in hand is not a tap target; the finger holding it is the gesture.
+        onOpen = null,
+        modifier = Modifier
+            .offset(
+                x = columnWidth * days.indexOf(slot.date).coerceAtLeast(0),
+                y = minuteOffset(slot.startMinute, hourHeight),
+            )
+            .width(columnWidth - Dimensions.weekBlockGap)
+            .height(height)
+            .shadow(Dimensions.weekDragElevation, RoundedCornerShape(Dimensions.weekBlockRadius)),
+    )
+}
+
+/**
+ * How tall a block of [spanMinutes] draws. The floor it is held to scales with the zoom, so a
+ * pinched grid stays *true to time*: blocks shrink with the day rather than a half-hour meeting
+ * standing as tall as the two hours below it. At full expansion the floor is exactly
+ * [Dimensions.weekMinBlockHeight].
+ */
+private fun blockHeight(spanMinutes: Int, hourHeight: Dp): Dp =
+    minuteOffset(spanMinutes, hourHeight).coerceAtLeast(
+        (Dimensions.weekMinBlockHeight * (hourHeight / Dimensions.weekHourHeightMax))
+            .coerceAtLeast(MinBlockHeightFloor),
+    )
 
 /**
  * The gutter label's line box, trimmed to the glyphs. Newsreader's default line box carries more
@@ -653,35 +870,52 @@ private fun HourRules(hourHeight: Dp, stride: Int, modifier: Modifier = Modifier
 /**
  * One day's blocks, placed by their minute bounds. Overlapping events split the column into lanes
  * ([layoutDayEvents]) and each block is inset to its own, so two things at once read side by side.
- *
- * The floor a short block is held to scales with the zoom, so a pinched grid stays *true to time*:
- * blocks shrink with the day rather than a half-hour meeting standing as tall as the two hours below
- * it. At full expansion the floor is exactly [Dimensions.weekMinBlockHeight].
+ * Their height is [blockHeight]'s, which scales its floor with the zoom.
  *
  * **Tapping the empty space between blocks opens a new event there** ([onNewEventAt]), on this column's
  * [date] at the half-hour under the finger. The blocks are this box's children, so a tap on one reaches
  * *it* first and still opens the detail popup; only what nothing catches lands here. The tap is safe
  * beside the three drag gestures wrapped around this column — the hour scroll, the week pager and the
  * grid's pinch — because each of those consumes movement, which cancels a tap rather than firing it.
+ *
+ * **Holding a block picks it up** ([onDragStart]), where the event is one a write could actually
+ * land on ([canDragEvent]). What the column reports is raw pointer travel and nothing else — the day
+ * and minute it resolves to are the grid's to work out, since only the grid knows how wide a column
+ * is and where the hours have scrolled to. The picked-up block stays drawn in its own slot, dropped
+ * back to [HeldBlockAlpha], while the grid floats the real one over the columns.
+ *
+ * The long press outranks the taps and drags around it the way the queue's drag handle does: it
+ * consumes from the moment it fires, which cancels the block's own click and locks the hour scroll,
+ * the week pager and the page pager out for the rest of the gesture. Until it fires, any of them
+ * moving first cancels the pickup — which is exactly right, since that was a scroll, not a hold.
  */
 @Composable
 private fun DayColumn(
     date: LocalDate,
+    dayIndex: Int,
     events: List<CalendarEvent>,
     sources: List<CalendarSource>,
     hourHeight: Dp,
+    dragEnabled: Boolean,
+    /** The event currently in hand, whose own slot this column draws faintly. */
+    draggedEvent: CalendarEvent?,
     onOpenEvent: (CalendarEvent) -> Unit,
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
+    onDragStart: (PositionedEvent, Int) -> Unit,
+    onDragDelta: (Offset) -> Unit,
+    onDragEnd: (PositionedEvent, cancelled: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val positioned = remember(events) { layoutDayEvents(events) }
-    val floor = (Dimensions.weekMinBlockHeight * (hourHeight / Dimensions.weekHourHeightMax))
-        .coerceAtLeast(MinBlockHeightFloor)
     // The detector is keyed on the column's day, not on the scale, and reaches the current scale and
     // callback through rememberUpdatedState — a pinch changes the scale every frame, and restarting the
     // gesture that often would drop the tap that produced it.
     val currentNewEventAt by rememberUpdatedState(onNewEventAt)
     val currentHourHeight by rememberUpdatedState(hourHeight)
+    val currentDragStart by rememberUpdatedState(onDragStart)
+    val currentDragDelta by rememberUpdatedState(onDragDelta)
+    val currentDragEnd by rememberUpdatedState(onDragEnd)
+    val haptics = LocalHapticFeedback.current
     // The two line boxes the block's text is fitted to, in dp, so the font scale is honoured.
     val density = LocalDensity.current
     val titleLine = with(density) { WeekBlockTitleLineHeight.toDp() }
@@ -696,25 +930,44 @@ private fun DayColumn(
         val columnWidth = maxWidth
         positioned.forEach { placed ->
             val laneWidth = columnWidth / placed.laneCount
-            val blockHeight = minuteOffset(placed.endMinute - placed.startMinute, hourHeight)
-                .coerceAtLeast(floor)
+            val height = blockHeight(placed.endMinute - placed.startMinute, hourHeight)
             // The **event's** own bounds, not the placed ones: [layoutDayEvents] floors a short span to
             // [MinEventSpanMinutes] so the block can be hit, and printing that as its end time would be
             // a lie. Its start it copies through, so that one is the event's either way.
             val endLabel = placed.event.endMinute
                 ?.takeIf { it != placed.startMinute }
                 ?.let(::formatMinuteOfDay)
+            val draggable = dragEnabled && canDragEvent(placed.event, sources)
             EventBlock(
                 event = placed.event,
                 color = calendarDotColor(placed.event.sourceId, sources),
                 startLabel = formatMinuteOfDay(placed.startMinute),
                 endLabel = endLabel,
-                text = blockText(blockHeight, titleLine, timeLine, if (endLabel == null) 1 else 2),
+                text = blockText(height, titleLine, timeLine, if (endLabel == null) 1 else 2),
                 onOpen = onOpenEvent,
                 modifier = Modifier
                     .offset(x = laneWidth * placed.lane, y = minuteOffset(placed.startMinute, hourHeight))
                     .width(laneWidth - Dimensions.weekBlockGap)
-                    .height(blockHeight),
+                    .height(height)
+                    .alpha(if (placed.event == draggedEvent) HeldBlockAlpha else 1f)
+                    .then(
+                        // Keyed on what it carries, not on the scale or the drag: it has to survive
+                        // both a pinch and its own drag's recompositions without restarting.
+                        if (!draggable) Modifier else Modifier.pointerInput(placed.event.uid, dayIndex) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    currentDragStart(placed, dayIndex)
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    currentDragDelta(amount)
+                                },
+                                onDragEnd = { currentDragEnd(placed, false) },
+                                onDragCancel = { currentDragEnd(placed, true) },
+                            )
+                        },
+                    ),
             )
         }
     }
@@ -760,6 +1013,9 @@ private fun blockText(blockHeight: Dp, titleLine: Dp, timeLine: Dp, timeLines: I
  * Tapping it opens the detail popup rather than the editor: at [Dimensions.weekMinBlockHeight] and a
  * seventh of the card wide, a block is often too small to say what it even is — and a text-less one
  * says nothing at all, which is why its description stays whatever it is showing.
+ *
+ * A null [onOpen] is the copy floating under a finger ([HeldBlock]): it is neither a tap target nor
+ * a second thing for a screen reader to find, since the block it was lifted off is still there.
  */
 @Composable
 private fun EventBlock(
@@ -768,15 +1024,19 @@ private fun EventBlock(
     startLabel: String,
     endLabel: String?,
     text: BlockText,
-    onOpen: (CalendarEvent) -> Unit,
+    onOpen: ((CalendarEvent) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(Dimensions.weekBlockRadius))
             .background(eventBlockFill(color))
-            .clickable { onOpen(event) }
-            .semantics { contentDescription = "Åbn ${event.title}" },
+            .then(
+                if (onOpen == null) Modifier
+                else Modifier
+                    .clickable { onOpen(event) }
+                    .semantics { contentDescription = "Åbn ${event.title}" },
+            ),
     ) {
         Box(Modifier.width(Dimensions.weekBlockBarWidth).fillMaxHeight().background(color))
         if (text.titleMaxLines > 0) {

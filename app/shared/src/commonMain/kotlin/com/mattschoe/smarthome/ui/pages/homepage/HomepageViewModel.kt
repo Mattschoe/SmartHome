@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.mattschoe.smarthome.data.CalendarFilterStore
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
+import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
 import com.mattschoe.smarthome.data.InMemoryWeekZoomStore
@@ -17,6 +18,7 @@ import com.mattschoe.smarthome.data.audioJoined
 import com.mattschoe.smarthome.data.audioSessionOf
 import com.mattschoe.smarthome.data.audioSessionRoom
 import com.mattschoe.smarthome.data.minutesOfDay
+import com.mattschoe.smarthome.data.movedEventDraft
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
@@ -133,6 +135,7 @@ class HomepageViewModel(
     private val _calendarView = MutableStateFlow(CalendarView.Month)
     private val _eventEditor = MutableStateFlow<EventEditorTarget?>(null)
     private val _eventDetail = MutableStateFlow<CalendarEvent?>(null)
+    private val _eventMove = MutableStateFlow<PendingEventMove?>(null)
     private val _savingEvent = MutableStateFlow(false)
     private val _calendarFilters = MutableStateFlow(filterStore.read())
     private val _calendarSettingsOpen = MutableStateFlow(false)
@@ -199,9 +202,9 @@ class HomepageViewModel(
                 combine(
                     _calendarView, _eventEditor, _eventDetail, _savingEvent,
                     combine(
-                        _calendarFilters, _calendarSettingsOpen, _weekHourHeight, _todoDay,
-                    ) { filters, open, hourHeight, todoDay ->
-                        CalendarChrome(filters, open, hourHeight, todoDay)
+                        _calendarFilters, _calendarSettingsOpen, _weekHourHeight, _todoDay, _eventMove,
+                    ) { filters, open, hourHeight, todoDay, move ->
+                        CalendarChrome(filters, open, hourHeight, todoDay, move)
                     },
                 ) { view, editor, detail, saving, chrome ->
                     CalendarSurfaceSelection(view, editor, detail, saving, chrome)
@@ -241,6 +244,7 @@ class HomepageViewModel(
                 nowMinutes = calendar.nowMinutes,
                 eventEditor = calendar.surface.eventEditor,
                 eventDetail = calendar.surface.eventDetail,
+                eventMove = calendar.surface.chrome.eventMove,
                 calendarFilters = calendar.surface.chrome.filters,
                 calendarSettingsOpen = calendar.surface.chrome.settingsOpen,
                 weekHourHeight = calendar.surface.chrome.weekHourHeight,
@@ -676,6 +680,83 @@ class HomepageViewModel(
     }
 
     /**
+     * A week-grid block was dropped somewhere new. The slot itself was already resolved and clamped
+     * to the week by `droppedEventSlot`; what is decided here is only *when* the write goes out.
+     *
+     * A one-off event is written immediately — the drag said everything there was to say. An
+     * occurrence of a recurring series is held instead ([PendingEventMove.awaitingScope]) so the
+     * editor's own scope card can ask the question a drag has no way of asking; until it is
+     * answered, the hold is what keeps the block at the slot it was dropped on rather than behind
+     * the popup in its old one.
+     */
+    fun moveEvent(move: EventMove) {
+        if (_savingEvent.value || _eventMove.value != null) return
+        val event = move.event
+        if (event.uid == null) return
+        val isSeries = event.recurrenceId != null || event.rrule != null
+        _eventMove.value = PendingEventMove(move, awaitingScope = isSeries)
+        if (!isSeries) writeEventMove(move, EventEditScope.ThisEvent)
+    }
+
+    /** The scope card's answer for a dropped occurrence: write the move over the occurrences it names. */
+    fun pickEventMoveScope(scope: EventEditScope) {
+        val pending = _eventMove.value?.takeIf { it.awaitingScope } ?: return
+        _eventMove.value = pending.copy(awaitingScope = false)
+        writeEventMove(pending.move, scope)
+    }
+
+    /** Dismiss the scope card without moving anything — the block goes back where it came from. */
+    fun cancelEventMove() {
+        if (_eventMove.value?.awaitingScope == true) _eventMove.value = null
+    }
+
+    /**
+     * The drag's write, shaped like [saveEvent]'s edit path: same scope translation, same failure
+     * toast. The hold ([_eventMove]) is dropped only once the write has landed *and* the refetch it
+     * triggers has been given a moment to arrive — clearing it on the reply alone would put the
+     * block back in its old slot for the frames between the two.
+     */
+    private fun writeEventMove(move: EventMove, scope: EventEditScope) {
+        val event = move.event
+        val uid = event.uid ?: return
+        _savingEvent.value = true
+        viewModelScope.launch {
+            try {
+                adapter.updateEvent(
+                    event.sourceId,
+                    uid,
+                    movedEventDraft(event, move),
+                    recurrenceIdFor(event, scope),
+                    rangeFor(scope),
+                )
+                // Wait for the moved event to come back before letting go of the hold. The overlay is
+                // idempotent, so seeing it either way is harmless — this only avoids the flicker.
+                withTimeoutOrNull(MOVED_EVENT_TIMEOUT_MS) {
+                    adapter.subscribe()
+                        .map { home -> home.calendar.events.any { it.matches(move) } }
+                        .first { it }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("moving '${event.title}' failed: ${e.message}")
+                showToast(SAVE_FAILED_TOAST)
+            } finally {
+                _savingEvent.value = false
+                _eventMove.value = null
+            }
+        }
+    }
+
+    /** Whether this row is the moved event as the backend now holds it — the hold's release signal. */
+    private fun CalendarEvent.matches(move: EventMove): Boolean =
+        uid != null &&
+            uid == move.event.uid &&
+            sourceId == move.event.sourceId &&
+            date == move.date &&
+            startMinute == move.startMinute
+
+    /**
      * Page the checklist to [date] — pure UI selection, and deliberately not [selectDay]: the two
      * panels swipe independently.
      */
@@ -971,6 +1052,14 @@ class HomepageViewModel(
         const val CREATED_UID_TIMEOUT_MS = 15_000L
 
         /**
+         * How long a dropped block is held at its new slot waiting for the refetch to show it there.
+         * Shorter than [CREATED_UID_TIMEOUT_MS] because nothing depends on the answer — this only
+         * decides when to stop drawing the optimistic copy, and a timeout simply hands over to
+         * whatever the backend actually has.
+         */
+        const val MOVED_EVENT_TIMEOUT_MS = 5_000L
+
+        /**
          * How often the real current day is re-read. Only one tick a day changes anything, so this
          * is about *how soon after* midnight the grid catches up, not about precision.
          */
@@ -1014,6 +1103,7 @@ private data class CalendarChrome(
     val settingsOpen: Boolean,
     val weekHourHeight: Float,
     val todoDay: LocalDate,
+    val eventMove: PendingEventMove?,
 )
 
 /**

@@ -2,6 +2,8 @@ package com.mattschoe.smarthome.ui.pages.homepage
 
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
+import com.mattschoe.smarthome.data.EventMove
+import com.mattschoe.smarthome.data.applyEventMove
 import com.mattschoe.smarthome.data.audioJoined
 import com.mattschoe.smarthome.data.audioSessionOf
 import com.mattschoe.smarthome.data.model.AudioState
@@ -123,6 +125,19 @@ sealed interface EventEditorTarget {
     }
 }
 
+/**
+ * A block dropped somewhere new in the week grid, from the moment the finger lifts until the write
+ * lands (VM-owned). It is two things at once, which is why it is one state and not two:
+ *
+ * - the **optimistic hold** — the panel draws the event at [move]'s slot for as long as this stands,
+ *   so a dropped block stays where it was put instead of snapping back while Home Assistant is
+ *   written and the refetch comes round (no adapter applies calendar writes optimistically);
+ * - the **question**, when [awaitingScope]: a dropped occurrence of a recurring series has no
+ *   dialog of its own, so the editor's `EventScopePopup` is opened over the panel and nothing is
+ *   written until it is answered. A one-off event is written straight away and never sets this.
+ */
+data class PendingEventMove(val move: EventMove, val awaitingScope: Boolean)
+
 sealed interface HomeScreenState {
     data object Loading : HomeScreenState
 
@@ -181,6 +196,8 @@ sealed interface HomeScreenState {
         val eventEditor: EventEditorTarget?,
         /** The event the week view's detail popup is open on, or `null` when none is (VM-owned). */
         val eventDetail: CalendarEvent?,
+        /** A week-grid block dropped somewhere new, still being asked about or written (VM-owned). */
+        val eventMove: PendingEventMove?,
         /** Which calendars each view draws — what the header's gear edits (VM-owned, persisted). */
         val calendarFilters: CalendarFilters,
         /** Whether the gear's popup is showing (VM-owned). */
@@ -254,8 +271,12 @@ sealed interface HomeScreenState {
          * a fresh list before. Equality is unaffected — lazy fields are not constructor params.
          */
         private val visibleEvents: List<CalendarEvent> by lazy {
+            // The pending move is applied here rather than in any one view, so the dropped event is
+            // in its new place everywhere at once — the week block, the month grid's dots, the
+            // agenda — for as long as the hold stands.
+            val events = eventMove?.let { applyEventMove(calendar.events, it.move) } ?: calendar.events
             calendarFilters.hidden(calendarView).let { hidden ->
-                if (hidden.isEmpty()) calendar.events else calendar.events.filterNot { it.sourceId in hidden }
+                if (hidden.isEmpty()) events else events.filterNot { it.sourceId in hidden }
             }
         }
 

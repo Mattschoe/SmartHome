@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
@@ -61,6 +62,12 @@ fun CalendarPanel(
     onOpenEventDetail: (CalendarEvent) -> Unit,
     /** An empty week-grid slot was tapped: open a blank form on that day, at that time. */
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
+    /**
+     * A week block was long-pressed and dropped on a new slot of the same week. The day and minute
+     * are already resolved and clamped to the week shown; what happens next — write it, or ask which
+     * occurrences of a series it applies to — is the ViewModel's call.
+     */
+    onMoveEvent: (EventMove) -> Unit,
     onWeekHourHeight: (Float) -> Unit,
     /** The home's reminder rules — the editor's reminder row reads and resolves out of these. */
     reminders: ReminderRules,
@@ -117,6 +124,11 @@ fun CalendarPanel(
                 onOpenEvent = onOpenEvent,
                 onOpenEventDetail = onOpenEventDetail,
                 onNewEventAt = onNewEventAt,
+                onMoveEvent = onMoveEvent,
+                // A block cannot be picked up while a write is already going out: the drop that
+                // started it is still being answered or written, and the grid may be holding the
+                // moved event optimistically.
+                dragEnabled = !savingEvent,
                 onWeekHourHeight = onWeekHourHeight,
                 headerTrailing = headerTrailing,
                 modifier = Modifier.fillMaxSize(),

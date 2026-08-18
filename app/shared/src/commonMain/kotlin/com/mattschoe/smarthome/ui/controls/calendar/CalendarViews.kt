@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.HoursPerDay
 import com.mattschoe.smarthome.data.danishMonths
+import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
@@ -102,6 +103,10 @@ internal fun CalendarViews(
     onOpenEvent: (CalendarEvent) -> Unit,
     onOpenEventDetail: (CalendarEvent) -> Unit,
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
+    /** A week block was long-pressed and dropped on a new slot of the same week. */
+    onMoveEvent: (EventMove) -> Unit,
+    /** Whether week blocks may be picked up — false while a calendar write is already in flight. */
+    dragEnabled: Boolean,
     onWeekHourHeight: (Float) -> Unit,
     headerTrailing: @Composable RowScope.() -> Unit,
     modifier: Modifier = Modifier,
@@ -162,6 +167,8 @@ internal fun CalendarViews(
                     onShowWeek = onShowWeek,
                     onOpenEvent = onOpenEventDetail,
                     onNewEventAt = onNewEventAt,
+                    onMoveEvent = onMoveEvent,
+                    dragEnabled = dragEnabled,
                     onHourHeight = { onWeekHourHeight(it.coerceIn(fit, ceiling)) },
                     onChrome = { chrome = it },
                     modifier = Modifier.fillMaxSize(),
