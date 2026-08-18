@@ -25,6 +25,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,9 +40,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.formatEventWhen
+import com.mattschoe.smarthome.data.formatReminderOffset
+import com.mattschoe.smarthome.data.offsetFor
+import com.mattschoe.smarthome.data.remindsByCalendarDefault
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.ReminderRule
+import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.ui.components.PopupCard
 import com.mattschoe.smarthome.ui.components.PopupScrim
 import com.mattschoe.smarthome.ui.components.SectionLabel
@@ -56,6 +65,7 @@ import smarthome.shared.generated.resources.calender_filled
 import smarthome.shared.generated.resources.close_filled
 import smarthome.shared.generated.resources.delete_filled
 import smarthome.shared.generated.resources.edit_filled
+import smarthome.shared.generated.resources.notifications_filled
 
 /**
  * The Calendar panel's two floating cards, emitted as siblings inside the right card's
@@ -83,6 +93,8 @@ import smarthome.shared.generated.resources.edit_filled
 fun BoxScope.EventDetailPopup(
     event: CalendarEvent,
     sources: List<CalendarSource>,
+    /** The home's rules — what the bell line resolves this event's reminder out of. */
+    reminders: ReminderRules,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
@@ -167,6 +179,32 @@ fun BoxScope.EventDetailPopup(
                 )
                 Text(source?.displayName ?: "Ukendt kalender", color = Muted, fontSize = 14.sp)
             }
+            // Where the reminder came from is worth as much as what it is set to: on a subscribed
+            // work roster it is the calendar's standing rule doing the work, not anything on the
+            // event, and the line says so rather than leaving that to be guessed at.
+            Spacer(Modifier.height(8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    painter = painterResource(Res.drawable.notifications_filled),
+                    contentDescription = null,
+                    tint = Muted,
+                    modifier = Modifier.size(16.dp),
+                )
+                val offset = offsetFor(event, reminders)
+                val fromDefault = remindsByCalendarDefault(event, reminders)
+                Text(
+                    text = when {
+                        offset == null -> "Ingen påmindelse"
+                        fromDefault -> "${formatReminderOffset(offset)} (kalenderens standard)"
+                        else -> formatReminderOffset(offset)
+                    },
+                    color = Muted,
+                    fontSize = 14.sp,
+                )
+            }
         }
     }
 }
@@ -206,11 +244,19 @@ fun BoxScope.CalendarSettingsPopup(
     view: CalendarView,
     sources: List<CalendarSource>,
     filters: CalendarFilters,
+    /** The home's rules — each row reads its calendar's standing default out of these. */
+    reminders: ReminderRules,
     onToggle: (String) -> Unit,
+    /** Set or clear a calendar's standing reminder; `null` clears it. */
+    onSetReminderDefault: (String, Int?) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val hidden = filters.hidden(view)
+    // Whose default is being picked, kept here rather than hoisted: the picker is this popup's own
+    // second step, and it is emitted as a sibling below so it floats over the card rather than
+    // inside its scroll.
+    var pickingFor by remember { mutableStateOf<CalendarSource?>(null) }
     PopupScrim(onClose)
     PopupCard(
         modifier = modifier
@@ -258,10 +304,63 @@ fun BoxScope.CalendarSettingsPopup(
                         fontSize = 16.sp,
                         modifier = Modifier.weight(1f),
                     )
+                    // The calendar's standing reminder, opening its own picker. This is where a
+                    // read-only calendar — a work roster — gets reminders at all: there is no event
+                    // on it to hang one off.
+                    ReminderDefaultLabel(
+                        offsetMin = reminders.byCalendar[source.id],
+                        onClick = { pickingFor = source },
+                    )
                     CheckboxGlyph(checked = source.id !in hidden)
                 }
             }
         }
+    }
+    pickingFor?.let { source ->
+        ReminderPickerPopup(
+            // A calendar's default has nothing above it to inherit from, so "Ingen" is the absence
+            // of one rather than an override of anything.
+            selected = ReminderRule(reminders.byCalendar[source.id]),
+            calendarDefault = null,
+            showInherit = false,
+            title = "Standard for ${source.displayName}",
+            onPick = { picked ->
+                onSetReminderDefault(source.id, picked?.offsetMin)
+                pickingFor = null
+            },
+            onDismiss = { pickingFor = null },
+        )
+    }
+}
+
+/**
+ * A calendar's standing reminder as a small tappable label at the end of its row. Its own target
+ * inside a row that otherwise toggles visibility, so the two settings a row carries stay separable
+ * by where the finger lands.
+ */
+@Composable
+private fun ReminderDefaultLabel(offsetMin: Int?, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .heightIn(min = Dimensions.minTouch)
+            .clip(RoundedCornerShape(percent = 50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp)
+            .semantics { contentDescription = "Standardpåmindelse" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            painter = painterResource(Res.drawable.notifications_filled),
+            contentDescription = null,
+            tint = if (offsetMin == null) Muted else InkSoft,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            text = offsetMin?.let(::formatReminderOffset) ?: "Ingen",
+            color = if (offsetMin == null) Muted else InkSoft,
+            fontSize = 13.sp,
+        )
     }
 }
 

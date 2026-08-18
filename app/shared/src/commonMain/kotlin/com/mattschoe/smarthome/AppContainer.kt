@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome
 
 import com.mattschoe.smarthome.data.CalendarFilterStore
+import com.mattschoe.smarthome.data.AlarmScheduler
 import com.mattschoe.smarthome.data.CompositeHomeAdapter
 import com.mattschoe.smarthome.data.HaConfig
 import com.mattschoe.smarthome.data.HomeAdapter
@@ -15,7 +16,10 @@ import com.mattschoe.smarthome.data.WeekZoomStore
 import com.mattschoe.smarthome.data.MaConfig
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.MusicAssistantAdapter
+import com.mattschoe.smarthome.data.NoOpNotificationPresenter
+import com.mattschoe.smarthome.data.NotificationPresenter
 import com.mattschoe.smarthome.data.NowPlayingBridge
+import com.mattschoe.smarthome.data.ReminderScheduler
 import com.mattschoe.smarthome.data.platformKeyValueStore
 
 /**
@@ -52,7 +56,37 @@ class AppContainer(
      * surfaces. Android's media session reads it; the platforms without one never look.
      */
     val nowPlaying: NowPlayingBridge = NowPlayingBridge(),
-)
+    /**
+     * What this device is in the home. Not a size class and not a setting: it decides whether the
+     * device says anything at all when a reminder comes due, and the wall display deliberately says
+     * nothing (see [ReminderScheduler]). The Android entry point works it out from the screen; every
+     * other target is somebody's own device.
+     */
+    val deviceRole: DeviceRole = DeviceRole.Phone,
+    /**
+     * How this device arms OS alarms, or `null` where it has none. Android's needs a `Context`, so —
+     * exactly like the key/value store — `AppApplication` builds one and passes it in rather than
+     * this resolving it; desktop and iOS have no alarm surface at all and stay null.
+     */
+    alarmScheduler: AlarmScheduler? = null,
+    /**
+     * How this device shows a notice. The seam the wall display's coming notification centre plugs
+     * into; today only the Android phone has a real one.
+     */
+    val notifications: NotificationPresenter = NoOpNotificationPresenter,
+) {
+    /**
+     * Keeps this device's alarms in step with the home's events and reminder rules. Held rather than
+     * merely constructed: it subscribes for the life of the process.
+     */
+    val reminders: ReminderScheduler = ReminderScheduler(homeAdapter, alarmScheduler, deviceRole)
+}
+
+/**
+ * What this device is. Reminders fire on a [Phone]; a [WallDisplay] arms nothing and shows nothing —
+ * a tablet on the wall buzzing at everyone who walks past it is the opposite of the point.
+ */
+enum class DeviceRole { Phone, WallDisplay }
 
 /**
  * Pick the adapter stack: no HA token → [MockAdapter]; HA only → [HomeAssistantAdapter]; HA + MA →

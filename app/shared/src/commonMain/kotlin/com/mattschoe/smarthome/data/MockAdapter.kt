@@ -6,6 +6,8 @@ import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarState
+import com.mattschoe.smarthome.data.model.ReminderRule
+import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.data.model.ClimateState
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.BrowseItem
@@ -156,6 +158,36 @@ class MockAdapter(
         _state.update { home -> home.withEvents(home.calendar.events.filterNot { it.uid == uid }) }
     }
 
+    // Reminder rules live in the same in-memory store, so the picker, the detail popup and the gear's
+    // per-calendar default are all exercisable on the desktop preview path. There is nothing to arm
+    // there — the alarm scheduler is null off Android — so this is the UI's half alone.
+    override suspend fun setEventReminder(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        rule: ReminderRule?,
+    ) {
+        val key = reminderKey(sourceId, uid, recurrenceId)
+        _state.update { home ->
+            home.withReminders { rules ->
+                if (rule == null) rules.copy(byEvent = rules.byEvent - key)
+                else rules.copy(byEvent = rules.byEvent + (key to rule))
+            }
+        }
+    }
+
+    override suspend fun setCalendarReminderDefault(sourceId: String, offsetMin: Int?) {
+        _state.update { home ->
+            home.withReminders { rules ->
+                if (offsetMin == null) rules.copy(byCalendar = rules.byCalendar - sourceId)
+                else rules.copy(byCalendar = rules.byCalendar + (sourceId to offsetMin))
+            }
+        }
+    }
+
+    private fun HomeState.withReminders(transform: (ReminderRules) -> ReminderRules): HomeState =
+        copy(calendar = calendar.copy(reminders = transform(calendar.reminders)))
+
     private fun requireWritable(sourceId: String) {
         val source = _state.value.calendar.sources.firstOrNull { it.id == sourceId }
             ?: throw IllegalArgumentException("unknown calendar '$sourceId'")
@@ -304,6 +336,9 @@ internal fun seedHome(): HomeState {
                 uid = "seed-5",
             )
         ),
+        // One standing rule, on the calendar that most needs it: the read-only work roster, where a
+        // reminder can only ever come from beside the event.
+        reminders = ReminderRules(byCalendar = mapOf("calendar.c_arbejde" to 30)),
         todos = listOf(
             TodoItem("seed-vand", today, "Vand planterne", done = false),
             // Closed today, and one of them had been hanging over since yesterday — the pair the

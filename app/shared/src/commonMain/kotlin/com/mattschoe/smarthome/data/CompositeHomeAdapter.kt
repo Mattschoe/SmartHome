@@ -8,6 +8,7 @@ import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RecurrenceRange
+import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
@@ -95,6 +96,17 @@ class CompositeHomeAdapter(
         recurrenceId: String?,
         range: RecurrenceRange,
     ) = ha.deleteEvent(sourceId, uid, recurrenceId, range)
+
+    // Reminders ride on HA's MQTT broker, reached over the same socket as the calendar itself.
+    override suspend fun setEventReminder(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        rule: ReminderRule?,
+    ) = ha.setEventReminder(sourceId, uid, recurrenceId, rule)
+
+    override suspend fun setCalendarReminderDefault(sourceId: String, offsetMin: Int?) =
+        ha.setCalendarReminderDefault(sourceId, offsetMin)
 }
 
 /**

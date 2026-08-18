@@ -75,6 +75,8 @@ fun PortraitCalendarPage(
             onOpenEventDetail = viewModel::openEventDetail,
             onNewEventAt = viewModel::openNewEventAt,
             onWeekHourHeight = viewModel::setWeekHourHeight,
+            reminders = calendar.reminders,
+            onSetEventReminder = viewModel::setEventReminder,
             onSaveEvent = viewModel::saveEvent,
             onDeleteEvent = viewModel::deleteEvent,
             onCloseEventEditor = viewModel::closeEventEditor,
@@ -108,6 +110,7 @@ fun PortraitCalendarPage(
             EventDetailPopup(
                 event = event,
                 sources = calendar.sources,
+                reminders = calendar.reminders,
                 onEdit = viewModel::editEventDetail,
                 onDelete = viewModel::deleteEventDetail,
                 onClose = viewModel::closeEventDetail,
@@ -119,7 +122,9 @@ fun PortraitCalendarPage(
                 view = calendarView,
                 sources = calendar.sources,
                 filters = calendarFilters,
+                reminders = calendar.reminders,
                 onToggle = viewModel::toggleCalendarFilter,
+                onSetReminderDefault = viewModel::setCalendarReminderDefault,
                 onClose = viewModel::closeCalendarSettings,
                 modifier = popupInset,
             )

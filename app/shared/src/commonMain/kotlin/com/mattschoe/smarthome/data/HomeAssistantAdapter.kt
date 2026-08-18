@@ -4,6 +4,7 @@ import com.mattschoe.smarthome.data.ha.HaAreaDto
 import com.mattschoe.smarthome.data.ha.HaCalendarEventDto
 import com.mattschoe.smarthome.data.ha.HaDeviceDto
 import com.mattschoe.smarthome.data.ha.HaEntityRegistryDto
+import com.mattschoe.smarthome.data.ha.HaMqttStore
 import com.mattschoe.smarthome.data.ha.HaStateDto
 import com.mattschoe.smarthome.data.ha.HaTodoItemsDto
 import com.mattschoe.smarthome.data.ha.MEDIA_PLAYER_BY_ROOM
@@ -35,6 +36,7 @@ import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RecurrenceRange
+import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
@@ -58,6 +60,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -137,6 +140,11 @@ class HomeAssistantAdapter(
     private val todoItems = MutableStateFlow<List<TodoItem>>(emptyList())
     // True until a live fetch lands — what the panel labels as showing cached, possibly outdated data.
     private val calendarStale = MutableStateFlow(true)
+
+    // The reminder table, held in the home's MQTT broker and read over this same socket. Its own
+    // store rather than another field here: the topics *are* the keys and the payloads the records,
+    // so there is nothing for the adapter to map (see HaMqttStore).
+    private val mqtt = HaMqttStore { type, extra, onEvent -> request(type, extra, onEvent) }
     @Volatile private var todoEntityId: String? = null
     // Whether that list can take a description, which is where the day a task was closed is stamped.
     @Volatile private var todoDescriptionCapable: Boolean = false
@@ -191,6 +199,16 @@ class HomeAssistantAdapter(
     }
 
     override fun subscribe(): StateFlow<HomeState> = _state.asStateFlow()
+
+    /**
+     * Drop the connection and everything it owns. The dashboard never calls this — its adapter lives
+     * as long as the process — but a headless background job that builds one to recompute reminders
+     * has to be able to put it down again (see the Android `ReminderSyncWorker`).
+     */
+    fun close() {
+        scope.cancel()
+        runCatching { client.close() }
+    }
 
     // --- Device intents: optimistic local apply, then the matching HA service call ---
 
@@ -490,6 +508,25 @@ class HomeAssistantAdapter(
         refreshCalendar()
     }
 
+    // Reminder rules go to the MQTT broker rather than onto the event: a reminder belongs to the
+    // event or the calendar and has to reach every device, including for calendars — the work roster
+    // — that nothing can be written back to. Failure propagates; the picker reports it.
+
+    override suspend fun setEventReminder(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        rule: ReminderRule?,
+    ) {
+        mqtt.setEventReminder(sourceId, uid, recurrenceId, rule)
+        rebuild()
+    }
+
+    override suspend fun setCalendarReminderDefault(sourceId: String, offsetMin: Int?) {
+        mqtt.setCalendarDefault(sourceId, offsetMin)
+        rebuild()
+    }
+
     /** The calendar [sourceId] names, or a failure — a read-only calendar is never a write target. */
     private fun writableSource(sourceId: String): CalendarSource {
         val source = calendarSources.value.firstOrNull { it.id == sourceId }
@@ -662,6 +699,12 @@ class HomeAssistantAdapter(
         launch { calendarRefreshConsumer() }
         launch { calendarPollLoop() }
         launch { rediscoverConsumer() }
+        // The reminder subscription is per-session like the todo one — a socket takes its
+        // subscriptions with it — and the broker replays the whole retained table on taking it out.
+        launch { mqtt.subscribe() }
+        // Retained replay arrives as a burst of messages rather than as one payload, so the rules are
+        // republished per message; collecting them is what puts each into the state the UI reads.
+        launch { mqtt.rules.collect { rebuild() } }
     }
 
     /**
@@ -1087,6 +1130,7 @@ class HomeAssistantAdapter(
         // Stale means nothing has been discovered yet (or the socket is down), and an unreached box is
         // not the same as a home without a list — only claim the absence once we have actually looked.
         hasTodoList = todoEntityId != null || calendarStale.value,
+        reminders = mqtt.rules.value,
     )
 
     // --- Safe attribute readers (an absent or null attribute yields null, never throws) ---

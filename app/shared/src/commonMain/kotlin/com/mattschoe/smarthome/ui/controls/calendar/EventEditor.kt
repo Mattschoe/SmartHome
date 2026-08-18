@@ -49,9 +49,13 @@ import com.mattschoe.smarthome.data.MinutesPerDay
 import com.mattschoe.smarthome.data.buildEventDraft
 import com.mattschoe.smarthome.data.formatLongDate
 import com.mattschoe.smarthome.data.formatTimeOfDay
+import com.mattschoe.smarthome.data.formatReminderRule
 import com.mattschoe.smarthome.data.minutesOfDay
+import com.mattschoe.smarthome.data.ruleFor
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
+import com.mattschoe.smarthome.data.model.ReminderRule
+import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.ui.components.InsetSurface
 import com.mattschoe.smarthome.ui.components.PillChip
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
@@ -78,6 +82,7 @@ import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.compose.resources.painterResource
 import smarthome.shared.generated.resources.Res
 import smarthome.shared.generated.resources.arrow_back_filled
+import smarthome.shared.generated.resources.notifications_filled
 import kotlin.time.Clock
 
 /**
@@ -95,14 +100,30 @@ import kotlin.time.Clock
  * whole dashboard per keystroke, which is the one thing this surface exists to avoid.
  *
  * An event on a read-only calendar (the subscribed work roster) opens with every field disabled and
- * no save or delete, so its details are still reachable without pretending they can be changed.
+ * no save or delete, so its details are still reachable without pretending they can be changed. The
+ * reminder row is the one exception, and deliberately: a reminder is stored beside the event rather
+ * than in it, so it can be set on a roster shift nothing else about can be touched.
  */
 @Composable
 fun EventEditorSurface(
     target: EventEditorTarget,
     saving: Boolean,
     sources: List<CalendarSource>,
-    onSave: (String, CalendarEventDraft) -> Unit,
+    /** The home's reminder rules — what the reminder row opens on, and resolves its label from. */
+    reminders: ReminderRules,
+    /**
+     * Set the reminder on an event that already exists. Applied the moment it is picked rather than
+     * on "Gem": it is not part of the event being edited, and committing it here is what lets a
+     * read-only calendar's event — which has no "Gem" at all — still get one.
+     */
+    onSetEventReminder: (ReminderRule?) -> Unit,
+    /**
+     * Save the form. The third argument is the reminder to attach **once the event exists**, and is
+     * only ever non-null on the create path: an existing event's reminder was already committed by
+     * [onSetEventReminder]. `null` means there is nothing to attach — the event inherits its
+     * calendar's default, which is what a fresh form opens on.
+     */
+    onSave: (String, CalendarEventDraft, ReminderRule?) -> Unit,
     onDelete: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -119,6 +140,12 @@ fun EventEditorSurface(
     var startAt by remember(target) { mutableStateOf(seed.first) }
     var endAt by remember(target) { mutableStateOf(seed.second) }
     var picking by remember(target) { mutableStateOf<PickTarget?>(null) }
+    // The rule as it stands for this event: null is "inherit the calendar's default". On the edit
+    // path it is seeded from the store and every pick is written through immediately; on the create
+    // path there is no uid to key a rule on yet, so it is held here and rides out with the save.
+    var reminder by remember(target) {
+        mutableStateOf(existing?.let { ruleFor(it, reminders) })
+    }
 
     val writable = remember(sources) { sources.filter { it.canWrite } }
     // The edit path is locked to the event's own calendar: a Home Assistant write addresses one
@@ -147,7 +174,14 @@ fun EventEditorSurface(
                 showSave = editable,
                 saveEnabled = title.isNotBlank() && sourceId.isNotEmpty() && !saving,
                 saving = saving,
-                onSave = { onSave(sourceId, buildEventDraft(title, startAt, endAt, allDay, location)) },
+                onSave = {
+                    onSave(
+                        sourceId,
+                        buildEventDraft(title, startAt, endAt, allDay, location),
+                        // Only the create path carries it out; an existing event's rule is already written.
+                        reminder.takeIf { existing == null },
+                    )
+                },
             )
             Spacer(Modifier.height(16.dp))
 
@@ -221,6 +255,12 @@ fun EventEditorSurface(
                 enabled = editable,
                 placeholder = "Lokation",
             )
+            Spacer(Modifier.height(4.dp))
+
+            ReminderRow(
+                label = formatReminderRule(reminder, reminders.byCalendar[sourceId]),
+                onClick = { picking = PickTarget.Reminder },
+            )
 
             if (editable && existing != null) {
                 Spacer(Modifier.height(Dimensions.mediaSectionGap))
@@ -250,13 +290,57 @@ fun EventEditorSurface(
                 onPick = { endAt = LocalDateTime(endAt.date, it); picking = null },
                 onDismiss = dismiss,
             )
+            PickTarget.Reminder -> ReminderPickerPopup(
+                selected = reminder,
+                calendarDefault = reminders.byCalendar[sourceId],
+                showInherit = true,
+                title = "Påmindelse",
+                onPick = { picked ->
+                    reminder = picked
+                    // An event that already exists can be keyed on now; a new one has no uid yet, so
+                    // its rule waits for the save that mints one.
+                    if (existing?.uid != null) onSetEventReminder(picked)
+                    picking = null
+                },
+                onDismiss = dismiss,
+            )
             null -> Unit
         }
     }
 }
 
 /** Which half of which boundary row opened a picker — the surface shows at most one at a time. */
-private enum class PickTarget { StartDate, StartTime, EndDate, EndTime }
+private enum class PickTarget { StartDate, StartTime, EndDate, EndTime, Reminder }
+
+/**
+ * "Påmindelse", and what it is set to, as one tappable row. Bare like the boundary rows rather than
+ * boxed like the title and location fields: it is a value being read back, not something typed.
+ *
+ * Never disabled, even on a read-only calendar. The reminder is not part of the event — it lives
+ * beside it — which is exactly why a work roster nobody can write to can still remind.
+ */
+@Composable
+private fun ReminderRow(label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Dimensions.minTouch)
+            .clip(RoundedCornerShape(Dimensions.insetRadius))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            painter = painterResource(Res.drawable.notifications_filled),
+            contentDescription = null,
+            tint = InkSoft,
+            modifier = Modifier.size(18.dp),
+        )
+        Text("Påmindelse", color = InkSoft, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Text(label, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+    }
+}
 
 /**
  * Back on the left, "Gem" on the right — the shape a phone calendar's editor has, and the reason the

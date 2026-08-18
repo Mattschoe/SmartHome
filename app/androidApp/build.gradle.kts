@@ -24,6 +24,11 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
+    // Calendar reminders: the notification itself, and the periodic worker that keeps the alarms
+    // armed on a phone that never opens the dashboard.
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.work.runtime)
+
     implementation(libs.compose.uiToolingPreview)
     debugImplementation(libs.compose.uiTooling)
 }

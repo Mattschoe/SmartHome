@@ -15,6 +15,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.mattschoe.smarthome.data.SharedPreferencesStore
 import com.mattschoe.smarthome.media.SmartHomeMediaService
+import com.mattschoe.smarthome.reminders.AndroidAlarmScheduler
+import com.mattschoe.smarthome.reminders.ReminderSyncWorker
+import com.mattschoe.smarthome.reminders.SystemNotificationPresenter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -97,6 +100,31 @@ class AppApplication : Application() {
         super.onCreate()
         // Android's key/value store needs a Context, which only exists here — hence supplying it
         // rather than letting AppContainer resolve one (see platformKeyValueStore).
-        appContainer = AppContainer(keyValueStore = SharedPreferencesStore(this))
+        val store = SharedPreferencesStore(this)
+        val role = deviceRole()
+        appContainer = AppContainer(
+            keyValueStore = store,
+            deviceRole = role,
+            alarmScheduler = AndroidAlarmScheduler(this, store),
+            notifications = SystemNotificationPresenter(this),
+        )
+        // The phone keeps its alarms current even when nobody opens the dashboard, so an event the
+        // *other* phone created still reminds here. The wall display arms nothing, so it syncs
+        // nothing — and drops a schedule left behind by an earlier build.
+        if (role == DeviceRole.Phone) ReminderSyncWorker.schedule(this) else ReminderSyncWorker.cancel(this)
+    }
+
+    /**
+     * Which device this is. Read off the screen's smallest dimension, the same 600dp line
+     * `DashboardLayout.from` draws — a phone is somebody's own device and reminds; the wall tablet
+     * is furniture and stays silent.
+     */
+    private fun deviceRole(): DeviceRole =
+        if (resources.configuration.smallestScreenWidthDp >= WallDisplayMinWidthDp) DeviceRole.WallDisplay
+        else DeviceRole.Phone
+
+    private companion object {
+        /** Matches `DashboardLayout.compactMaxWidth`, in the units the configuration reports. */
+        const val WallDisplayMinWidthDp = 600
     }
 }

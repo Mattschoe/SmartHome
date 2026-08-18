@@ -317,6 +317,44 @@ data class TodoItem(
 }
 
 /**
+ * One event's own reminder rule. [offsetMin] is how many minutes before the event to remind, and
+ * `null` means **explicitly no reminder** — which is not the same as having no rule at all. An event
+ * absent from [ReminderRules.byEvent] inherits its calendar's default; one present with a null offset
+ * overrides that default with silence, which is how a single shift of a read-only work roster is
+ * muted without anything being written to the roster itself.
+ */
+data class ReminderRule(val offsetMin: Int?) {
+    companion object {
+        /** The explicit "don't remind me about this one", as opposed to a missing rule. */
+        val None = ReminderRule(null)
+    }
+}
+
+/**
+ * The home's reminder rules, as they arrive from the backend beside the events they describe. A
+ * reminder is a property of the **event or the calendar**, never of the device that set it: set "1
+ * time før" on a shared event here and every phone that can see the event reminds for it.
+ *
+ * [byEvent] is keyed by [com.mattschoe.smarthome.data.reminderKey] — `sourceId|uid` for a whole
+ * series, `sourceId|uid#recurrenceId` for one occurrence of it, the occurrence winning where both
+ * exist. [byCalendar] is a calendar's standing default, keyed by source id; it is what gives a
+ * read-only calendar reminders at all, and what a new event's picker opens on.
+ *
+ * Resolution order is [com.mattschoe.smarthome.data.offsetFor]: occurrence → series → calendar
+ * default → no reminder.
+ */
+@Immutable
+data class ReminderRules(
+    val byEvent: Map<String, ReminderRule> = emptyMap(),
+    val byCalendar: Map<String, Int> = emptyMap(),
+) {
+    companion object {
+        /** What a home with no reminder backend (or none set yet) has. */
+        val Empty = ReminderRules()
+    }
+}
+
+/**
  * The calendar payload the adapter exposes: a flat list of [events] and [todos] over whatever window
  * the adapter fetched, plus the [sources] those events came from. The current day and the displayed
  * month are UI selection (they come from the system clock / the ViewModel), not device data, so they
@@ -337,6 +375,12 @@ data class CalendarState(
      * the todo intents are inert without such a list.
      */
     val hasTodoList: Boolean = true,
+    /**
+     * Which events and calendars remind, and how long before. Device-truth like the events
+     * themselves — it arrives from the backend, not from this device's own settings — so it rides
+     * along here rather than needing a flow of its own.
+     */
+    val reminders: ReminderRules = ReminderRules.Empty,
 ) {
     /** The calendars an event may be written to — the add/edit surface's only legal targets. */
     val writableSources: List<CalendarSource> by lazy { sources.filter { it.canWrite } }

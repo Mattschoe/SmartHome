@@ -15,6 +15,8 @@ import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.ReminderRule
+import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
 import com.mattschoe.smarthome.ui.pages.homepage.EventEditorTarget
 import kotlinx.datetime.LocalDate
@@ -59,7 +61,11 @@ fun CalendarPanel(
     /** An empty week-grid slot was tapped: open a blank form on that day, at that time. */
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
     onWeekHourHeight: (Float) -> Unit,
-    onSaveEvent: (String, CalendarEventDraft) -> Unit,
+    /** The home's reminder rules — the editor's reminder row reads and resolves out of these. */
+    reminders: ReminderRules,
+    /** Set the reminder on the event the editor is open on (existing events only; see the editor). */
+    onSetEventReminder: (ReminderRule?) -> Unit,
+    onSaveEvent: (String, CalendarEventDraft, ReminderRule?) -> Unit,
     onDeleteEvent: () -> Unit,
     onCloseEventEditor: () -> Unit,
     modifier: Modifier = Modifier,
@@ -83,6 +89,8 @@ fun CalendarPanel(
                 target = eventEditor,
                 saving = savingEvent,
                 sources = calendarSources,
+                reminders = reminders,
+                onSetEventReminder = onSetEventReminder,
                 onSave = onSaveEvent,
                 onDelete = onDeleteEvent,
                 onBack = onCloseEventEditor,

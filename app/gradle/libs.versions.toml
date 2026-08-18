@@ -22,6 +22,7 @@ ktor = "3.5.1"
 coil = "3.3.0"
 media3 = "1.10.1"
 reorderable = "2.5.1"
+androidx-work = "2.11.0"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -50,6 +51,10 @@ coil-network-ktor3 = { module = "io.coil-kt.coil3:coil-network-ktor3", version.r
 reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 androidx-media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
 androidx-media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
+# NotificationCompat + channel handling for the calendar-reminder notification.
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
+# The periodic background re-sync that keeps a phone's reminders armed without it being opened.
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

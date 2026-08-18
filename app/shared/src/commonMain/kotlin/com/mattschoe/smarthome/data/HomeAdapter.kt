@@ -6,6 +6,7 @@ import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.RecurrenceRange
+import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
@@ -153,4 +154,31 @@ interface HomeAdapter {
         recurrenceId: String? = null,
         range: RecurrenceRange = RecurrenceRange.ThisEvent,
     )
+
+    /**
+     * Set how long before the event [uid] on [sourceId] to remind. The reminder is a property of the
+     * **event**, not of this device: it is stored in the home and every device that can see the event
+     * reminds for it — which is also why it works for a calendar nothing can be written back to.
+     *
+     * [recurrenceId] scopes the rule to a single occurrence of a series (a rule keyed on the series
+     * alone covers every occurrence, and an occurrence's own rule wins over it). A `null` [rule]
+     * removes the rule, so the calendar's default applies again; a rule with a null offset is an
+     * explicit silence that overrides that default.
+     *
+     * `suspend` and failure-propagating like [createEvent]: the picker that called it has to say
+     * whether the change stuck.
+     */
+    suspend fun setEventReminder(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        rule: ReminderRule?,
+    )
+
+    /**
+     * Set the standing reminder every event on [sourceId] inherits, or clear it with a `null`
+     * [offsetMin]. This is where a read-only calendar — a work roster fed from an external feed —
+     * gets reminders at all, there being no event to write anything onto.
+     */
+    suspend fun setCalendarReminderDefault(sourceId: String, offsetMin: Int?)
 }

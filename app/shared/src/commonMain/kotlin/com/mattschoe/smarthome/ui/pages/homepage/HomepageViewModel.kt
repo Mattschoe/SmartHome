@@ -25,6 +25,7 @@ import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.QueueMode
+import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.RepeatMode
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
@@ -43,6 +44,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -516,7 +518,7 @@ class HomepageViewModel(
      * create, which this surface does not offer). Same shape as [startPlay]: the button spins until
      * the adapter replies, and a **failure leaves the surface open** so nothing typed is lost.
      */
-    fun saveEvent(sourceId: String, draft: CalendarEventDraft) {
+    fun saveEvent(sourceId: String, draft: CalendarEventDraft, reminder: ReminderRule? = null) {
         val target = _eventEditor.value ?: return
         if (_savingEvent.value) return
         val existing = (target as? EventEditorTarget.Existing)?.event
@@ -529,6 +531,12 @@ class HomepageViewModel(
                     adapter.updateEvent(existing.sourceId, uid, draft, existing.recurrenceId)
                 } else {
                     adapter.createEvent(sourceId, draft)
+                    // A reminder is keyed on the event's uid, and a create doesn't return one — Home
+                    // Assistant's `calendar/event/create` replies with nothing. The create already
+                    // triggers a refetch, so the uid is recovered by finding the event that just
+                    // appeared. The event itself is saved either way: a reminder that could not be
+                    // attached is worth a notice, not a rollback.
+                    if (reminder != null) attachReminder(sourceId, draft, reminder)
                 }
                 _eventEditor.value = null
             } catch (e: CancellationException) {
@@ -538,6 +546,67 @@ class HomepageViewModel(
                 showToast(SAVE_FAILED_TOAST)
             } finally {
                 _savingEvent.value = false
+            }
+        }
+    }
+
+    /**
+     * Wait for the just-created event to come back from the refetch and put [reminder] on its uid.
+     * Matched on the calendar, the title and the start — the three fields the draft fixes — since
+     * that is all there is to match on before the backend has named it.
+     */
+    private suspend fun attachReminder(sourceId: String, draft: CalendarEventDraft, reminder: ReminderRule) {
+        val created = withTimeoutOrNull(CREATED_UID_TIMEOUT_MS) {
+            adapter.subscribe()
+                .map { home -> home.calendar.events.firstOrNull { it.matches(sourceId, draft) } }
+                .first { it != null }
+        }
+        val uid = created?.uid
+        if (uid == null) {
+            log("created '${draft.summary}' but never saw it come back; reminder not set")
+            showToast(REMINDER_FAILED_TOAST)
+            return
+        }
+        adapter.setEventReminder(sourceId, uid, created.recurrenceId, reminder)
+    }
+
+    private fun CalendarEvent.matches(sourceId: String, draft: CalendarEventDraft): Boolean =
+        uid != null && this.sourceId == sourceId && title == draft.summary && start == draft.start
+
+    /**
+     * Set (or clear) the reminder on the event the editor is open on. Applied straight away rather
+     * than on a save: a reminder lives beside the event, not in it, which is what lets one be put on
+     * an event of a read-only calendar that has no save at all. Which event that is is resolved here
+     * rather than at the call site, like [deleteEvent].
+     *
+     * A brand-new event has no uid to key a rule on and is simply left alone — its reminder rides
+     * out with [saveEvent] instead, once the create has minted one.
+     */
+    fun setEventReminder(rule: ReminderRule?) {
+        val event = (_eventEditor.value as? EventEditorTarget.Existing)?.event ?: return
+        val uid = event.uid ?: return
+        viewModelScope.launch {
+            try {
+                adapter.setEventReminder(event.sourceId, uid, event.recurrenceId, rule)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("setting reminder on '${event.title}' failed: ${e.message}")
+                showToast(REMINDER_FAILED_TOAST)
+            }
+        }
+    }
+
+    /** Set (or clear, with a null [offsetMin]) the standing reminder every event on a calendar gets. */
+    fun setCalendarReminderDefault(sourceId: String, offsetMin: Int?) {
+        viewModelScope.launch {
+            try {
+                adapter.setCalendarReminderDefault(sourceId, offsetMin)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("setting reminder default on '$sourceId' failed: ${e.message}")
+                showToast(REMINDER_FAILED_TOAST)
             }
         }
     }
@@ -858,6 +927,14 @@ class HomepageViewModel(
 
         const val SAVE_FAILED_TOAST = "Kunne ikke gemme"
         const val DELETE_FAILED_TOAST = "Kunne ikke slette"
+        const val REMINDER_FAILED_TOAST = "Kunne ikke gemme påmindelsen"
+
+        /**
+         * How long to wait for a just-created event to come back from the refetch, so its reminder
+         * can be keyed on the uid the backend minted. Generous: it spans a write, a coordinator
+         * re-poll and a REST window fetch.
+         */
+        const val CREATED_UID_TIMEOUT_MS = 15_000L
 
         /**
          * How often the real current day is re-read. Only one tick a day changes anything, so this

@@ -111,6 +111,8 @@ fun LandscapeCalendarPage(
                     onOpenEventDetail = viewModel::openEventDetail,
                     onNewEventAt = viewModel::openNewEventAt,
                     onWeekHourHeight = viewModel::setWeekHourHeight,
+                    reminders = calendar.reminders,
+                    onSetEventReminder = viewModel::setEventReminder,
                     onSaveEvent = viewModel::saveEvent,
                     onDeleteEvent = viewModel::deleteEvent,
                     onCloseEventEditor = viewModel::closeEventEditor,
@@ -136,6 +138,7 @@ fun LandscapeCalendarPage(
             EventDetailPopup(
                 event = event,
                 sources = calendar.sources,
+                reminders = calendar.reminders,
                 onEdit = viewModel::editEventDetail,
                 onDelete = viewModel::deleteEventDetail,
                 onClose = viewModel::closeEventDetail,
@@ -147,7 +150,9 @@ fun LandscapeCalendarPage(
                 view = calendarView,
                 sources = calendar.sources,
                 filters = calendarFilters,
+                reminders = calendar.reminders,
                 onToggle = viewModel::toggleCalendarFilter,
+                onSetReminderDefault = viewModel::setCalendarReminderDefault,
                 onClose = viewModel::closeCalendarSettings,
                 // Its own drop is measured from the header row, so only the card's content inset is
                 // added here — and the x-offset lands its right edge on the gear, which sits inside

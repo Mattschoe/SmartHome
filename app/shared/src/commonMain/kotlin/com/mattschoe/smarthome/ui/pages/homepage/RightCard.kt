@@ -44,6 +44,8 @@ import com.mattschoe.smarthome.data.model.AudioState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.ReminderRule
+import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.MusicSource
@@ -125,6 +127,8 @@ fun RightCard(
     calendarStale: Boolean,
     /** Whether Home Assistant exposes a todo list the checklist can write to. */
     calendarHasTodoList: Boolean,
+    /** The home's reminder rules — read by the editor's row, the detail popup and the gear popup. */
+    calendarReminders: ReminderRules,
     /** Per-day marks for the month grid's cells, keyed by date. */
     dayMarks: Map<LocalDate, DayMarks>,
     /** The week grid's hour-row height in dp — the reader's pinch level. */
@@ -177,7 +181,11 @@ fun RightCard(
     onOpenCalendarSettings: () -> Unit,
     onCloseCalendarSettings: () -> Unit,
     onToggleCalendarFilter: (String) -> Unit,
-    onSaveEvent: (String, CalendarEventDraft) -> Unit,
+    /** Set the reminder on the event the editor is open on (existing events only). */
+    onSetEventReminder: (ReminderRule?) -> Unit,
+    /** Set or clear a calendar's standing reminder — the gear popup's per-calendar row. */
+    onSetCalendarReminderDefault: (String, Int?) -> Unit,
+    onSaveEvent: (String, CalendarEventDraft, ReminderRule?) -> Unit,
     onDeleteEvent: () -> Unit,
     onCloseEventEditor: () -> Unit,
     modifier: Modifier = Modifier,
@@ -291,6 +299,8 @@ fun RightCard(
                         onOpenEventDetail = onOpenEventDetail,
                         onNewEventAt = onNewEventAt,
                         onWeekHourHeight = onWeekHourHeight,
+                        reminders = calendarReminders,
+                        onSetEventReminder = onSetEventReminder,
                         onSaveEvent = onSaveEvent,
                         onDeleteEvent = onDeleteEvent,
                         onCloseEventEditor = onCloseEventEditor,
@@ -370,6 +380,7 @@ fun RightCard(
                 EventDetailPopup(
                     event = event,
                     sources = calendarSources,
+                    reminders = calendarReminders,
                     onEdit = onEditEventDetail,
                     onDelete = onDeleteEventDetail,
                     onClose = onCloseEventDetail,
@@ -380,7 +391,9 @@ fun RightCard(
                     view = calendarView,
                     sources = calendarSources,
                     filters = calendarFilters,
+                    reminders = calendarReminders,
                     onToggle = onToggleCalendarFilter,
+                    onSetReminderDefault = onSetCalendarReminderDefault,
                     onClose = onCloseCalendarSettings,
                 )
             }
