@@ -136,6 +136,12 @@ fun EventEditorSurface(
     onSave: (String, CalendarEventDraft, ReminderRule?, EventEditScope) -> Unit,
     /** Delete, scoped exactly as [onSave] is. */
     onDelete: (EventEditScope) -> Unit,
+    /**
+     * How long a new event on a given calendar lasts, in minutes — this device's setting for it (see
+     * `CalendarPrefs`). Asked per calendar rather than taken once, because switching the calendar
+     * chip on a fresh event re-seeds the end from the new one's length.
+     */
+    defaultDurationFor: (String) -> Int,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -147,9 +153,19 @@ fun EventEditorSurface(
     var title by remember(target) { mutableStateOf(existing?.title.orEmpty()) }
     var location by remember(target) { mutableStateOf(existing?.location.orEmpty()) }
     var allDay by remember(target) { mutableStateOf(existing?.allDay == true) }
-    val seed = remember(target) { seedEventBounds(target) }
+    val writable = remember(sources) { sources.filter { it.canWrite } }
+    // The edit path is locked to the event's own calendar: a Home Assistant write addresses one
+    // entity, so moving an event between calendars is a delete plus a create — out of scope here.
+    var sourceId by remember(target) {
+        mutableStateOf(existing?.sourceId ?: writable.firstOrNull()?.id.orEmpty())
+    }
+    val seed = remember(target) { seedEventBounds(target, defaultDurationFor(sourceId)) }
     var startAt by remember(target) { mutableStateOf(seed.first) }
     var endAt by remember(target) { mutableStateOf(seed.second) }
+    // Whether the end has been set by hand. A new event's end follows the calendar it is being put
+    // on — pick the one that runs in two-hour blocks and the form says two hours — but only until
+    // somebody types an end themselves, after which switching calendar must not overwrite it.
+    var endTouched by remember(target) { mutableStateOf(false) }
     var picking by remember(target) { mutableStateOf<PickTarget?>(null) }
     // The rule as it stands for this event: null is "inherit the calendar's default". On the edit
     // path it is seeded from the store and every pick is written through immediately; on the create
@@ -175,12 +191,6 @@ fun EventEditorSurface(
     // least the rest of the series — which is what takes "Denne begivenhed" off the scope popup.
     val ruleChanged = recurrence != storedRule
 
-    val writable = remember(sources) { sources.filter { it.canWrite } }
-    // The edit path is locked to the event's own calendar: a Home Assistant write addresses one
-    // entity, so moving an event between calendars is a delete plus a create — out of scope here.
-    var sourceId by remember(target) {
-        mutableStateOf(existing?.sourceId ?: writable.firstOrNull()?.id.orEmpty())
-    }
     val sourceChips = if (existing != null) sources.filter { it.id == existing.sourceId } else writable
 
     // Moving the start carries the end with it, so an event keeps the length it had rather than
@@ -190,6 +200,18 @@ fun EventEditorSurface(
         val span = minutesBetween(startAt, endAt).coerceAtLeast(0)
         startAt = moved
         endAt = moved.plusMinutes(span)
+    }
+
+    // A fresh event follows the calendar it is being put on: pick the one that runs in two-hour
+    // blocks and the end moves to match. Only on the create path, only while the end is still the
+    // one this surface chose, and never for an all-day event — that has no length to set.
+    //
+    // Keyed on the calendar alone, deliberately: [moveStart] already carries the end along to keep
+    // the length, and re-deriving it from the start as well would be this effect fighting that.
+    if (existing == null && !endTouched && !allDay) {
+        LaunchedEffect(sourceId) {
+            if (sourceId.isNotEmpty()) endAt = startAt.plusMinutes(defaultDurationFor(sourceId))
+        }
     }
 
     /** The one write this surface performs, in whatever scope it was told to reach. */
@@ -333,12 +355,12 @@ fun EventEditorSurface(
             )
             PickTarget.EndDate -> DatePickerPopup(
                 initial = endAt.date,
-                onPick = { endAt = LocalDateTime(it, endAt.time); picking = null },
+                onPick = { endAt = LocalDateTime(it, endAt.time); endTouched = true; picking = null },
                 onDismiss = dismiss,
             )
             PickTarget.EndTime -> TimePickerPopup(
                 initial = endAt.time,
-                onPick = { endAt = LocalDateTime(endAt.date, it); picking = null },
+                onPick = { endAt = LocalDateTime(endAt.date, it); endTouched = true; picking = null },
                 onDismiss = dismiss,
             )
             PickTarget.Recurrence -> RecurrencePickerPopup(
@@ -745,21 +767,25 @@ internal fun TwoTapConfirm(
 /** How long a tapped delete stays armed before it goes back to being harmless. */
 private const val ConfirmWindowMs = 4_000L
 
-/** Whole hours ahead of the next one, so a fresh event opens on a round time rather than 14:37. */
-private const val NewEventDurationMinutes = 60
-
 /**
  * What the boundary rows open on: an existing event's own bounds, or — for a new one — the slot tapped
  * in the week grid ([EventEditorTarget.New.time]), falling back to the next whole hour on
- * [EventEditorTarget.date]; either way running [NewEventDurationMinutes]. An all-day event's stored end
- * is *exclusive*, so it is pulled back to the last day it actually covers for display;
- * [buildEventDraft] puts the day back on save.
+ * [EventEditorTarget.date]; either way running [durationMinutes], which is the chosen length of the
+ * calendar it is being put on. An all-day event's stored end is *exclusive*, so it is pulled back to
+ * the last day it actually covers for display; [buildEventDraft] puts the day back on save.
+ *
+ * An **existing** event with no stored end is the one place [durationMinutes] is not a preference:
+ * it is a repair for a row the backend gave no end, and the calendar's own length is as good a guess
+ * as any.
  */
-private fun seedEventBounds(target: EventEditorTarget): Pair<LocalDateTime, LocalDateTime> {
+private fun seedEventBounds(
+    target: EventEditorTarget,
+    durationMinutes: Int,
+): Pair<LocalDateTime, LocalDateTime> {
     val existing = (target as? EventEditorTarget.Existing)?.event
     var start = existing?.start
     if (existing != null && start != null) {
-        val end = existing.end ?: start.plusMinutes(NewEventDurationMinutes)
+        val end = existing.end ?: start.plusMinutes(durationMinutes)
         val shown =
             if (existing.allDay && end.date > start.date) {
                 LocalDateTime(end.date.plus(-1, DateTimeUnit.DAY), LocalTime(0, 0))
@@ -773,7 +799,7 @@ private fun seedEventBounds(target: EventEditorTarget): Pair<LocalDateTime, Loca
     val tapped = (target as? EventEditorTarget.New)?.time
     val hour = ((currentTimeOfDay().hour + 1) % 24).coerceAtLeast(0)
     start = LocalDateTime(target.date, tapped ?: LocalTime(hour, 0))
-    return start to start.plusMinutes(NewEventDurationMinutes)
+    return start to start.plusMinutes(durationMinutes)
 }
 
 private fun currentTimeOfDay(): LocalTime =

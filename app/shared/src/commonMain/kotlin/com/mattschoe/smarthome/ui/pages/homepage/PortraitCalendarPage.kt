@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.CalendarPrefs
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
@@ -13,7 +14,6 @@ import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
 import com.mattschoe.smarthome.ui.controls.calendar.TodayButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
-import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventScopePopup
 import com.mattschoe.smarthome.ui.theme.Dimensions
@@ -49,8 +49,9 @@ fun PortraitCalendarPage(
     weekHourHeight: Float,
     eventDetail: CalendarEvent?,
     eventMove: PendingEventMove?,
-    calendarSettingsOpen: Boolean,
+    calendarSettings: CalendarSettingsRoute?,
     calendarFilters: CalendarFilters,
+    calendarPrefs: CalendarPrefs,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
@@ -83,11 +84,22 @@ fun PortraitCalendarPage(
             onSaveEvent = viewModel::saveEvent,
             onDeleteEvent = viewModel::deleteEvent,
             onCloseEventEditor = viewModel::closeEventEditor,
-            // The today button and the "+" stand down while the editor is open, as on the tablet —
-            // re-opening a blank form would discard what is typed.
+            defaultDurationFor = viewModel::defaultDurationFor,
+            settings = calendarSettings,
+            calendarFilters = calendarFilters,
+            calendarPrefs = calendarPrefs,
+            onToggleCalendarFilter = viewModel::toggleCalendarFilter,
+            onSetCalendarColor = viewModel::setCalendarColor,
+            onSetCalendarDuration = viewModel::setCalendarDuration,
+            onSetCalendarReminderDefault = viewModel::setCalendarReminderDefault,
+            onOpenSettingsRoute = viewModel::openCalendarSettingsRoute,
+            onSettingsBack = viewModel::backFromCalendarSettings,
+            // The today button and the "+" stand down while the editor or the settings are open, as
+            // on the tablet — re-opening a blank form would discard what is typed, and neither
+            // surface has a calendar behind it for "today" to scroll to.
             headerTrailing = {
-                CalendarSettingsButton(viewModel::openCalendarSettings)
-                if (eventEditor == null) {
+                if (eventEditor == null && calendarSettings == null) {
+                    CalendarSettingsButton(viewModel::openCalendarSettings)
                     TodayButton(today, viewModel::showToday)
                     AddEventButton(viewModel::openNewEvent)
                 }
@@ -104,8 +116,7 @@ fun PortraitCalendarPage(
         // grid scrolls, and a popup remembered down there would scroll away from the control that
         // opened it. Their scrim covers the whole page here rather than a card — nothing beside them
         // stays live on a phone — but the cards themselves take the page's own margins, since there is
-        // no card padding to sit inside. The settings card's built-in drop is measured from the header
-        // row, so it clears the top pad the panel is inset by too.
+        // no card padding to sit inside.
         val popupInset = Modifier
             .padding(horizontal = Dimensions.phonePagePad)
             .padding(top = Dimensions.phonePageTopPad, bottom = Dimensions.phonePageBottomClearance)
@@ -129,18 +140,6 @@ fun PortraitCalendarPage(
                 allowThisEvent = true,
                 onPick = viewModel::pickEventMoveScope,
                 onDismiss = viewModel::cancelEventMove,
-            )
-        }
-        if (calendarSettingsOpen) {
-            CalendarSettingsPopup(
-                view = calendarView,
-                sources = calendar.sources,
-                filters = calendarFilters,
-                reminders = calendar.reminders,
-                onToggle = viewModel::toggleCalendarFilter,
-                onSetReminderDefault = viewModel::setCalendarReminderDefault,
-                onClose = viewModel::closeCalendarSettings,
-                modifier = popupInset,
             )
         }
     }

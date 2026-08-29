@@ -11,6 +11,8 @@ import androidx.work.WorkerParameters
 import com.mattschoe.smarthome.data.HomeAssistantAdapter
 import com.mattschoe.smarthome.data.KeyValueCalendarCache
 import com.mattschoe.smarthome.data.SharedPreferencesStore
+import com.mattschoe.smarthome.data.KeyValueCalendarPrefsStore
+import com.mattschoe.smarthome.data.applyCalendarPrefs
 import com.mattschoe.smarthome.data.dueReminders
 import com.mattschoe.smarthome.haConfigFromSecrets
 import kotlinx.coroutines.delay
@@ -52,7 +54,9 @@ class ReminderSyncWorker(
             AndroidAlarmScheduler(applicationContext, store).replaceAll(
                 dueReminders(
                     events = calendar.events,
-                    sources = calendar.sources,
+                    // The same store the app reads, so a rescheduled alarm keeps the color this
+                    // device draws the calendar in.
+                    sources = applyCalendarPrefs(calendar.sources, KeyValueCalendarPrefsStore(store).read()),
                     rules = calendar.reminders,
                     from = Clock.System.now(),
                 ),

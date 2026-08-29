@@ -46,6 +46,7 @@ import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
+import com.mattschoe.smarthome.ui.theme.color
 import com.mattschoe.smarthome.ui.theme.CalendarDotColors
 import com.mattschoe.smarthome.ui.theme.Card
 import com.mattschoe.smarthome.ui.theme.Dimensions
@@ -308,7 +309,13 @@ internal fun AgendaSection(
  */
 internal fun calendarDotColor(sourceId: String, sources: List<CalendarSource>): Color {
     val index = sources.indexOfFirst { it.id == sourceId }
-    haCalendarColor(sources.getOrNull(index)?.color)?.let { return it }
+    val source = sources.getOrNull(index)
+    // This device's own choice first, then the color Home Assistant carries, then the calendar's
+    // position. Every surface that draws a calendar — dots, agenda rows, week blocks and their bar,
+    // the editor's chips, the notification's accent — comes through here, so this is the whole of
+    // the precedence.
+    source?.colorOverride?.let { return it.color() }
+    haCalendarColor(source?.color)?.let { return it }
     return CalendarDotColors[index.coerceAtLeast(0) % CalendarDotColors.size]
 }
 

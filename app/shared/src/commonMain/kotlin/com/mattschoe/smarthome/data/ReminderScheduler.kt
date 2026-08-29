@@ -25,6 +25,11 @@ class ReminderScheduler(
     /** This device's alarm surface, or `null` where the platform has none (desktop, iOS). */
     private val alarms: AlarmScheduler?,
     private val role: DeviceRole,
+    /**
+     * This device's calendar colors, so the notification's accent is the color the calendar is drawn
+     * in on this device's own screen rather than the one Home Assistant happens to carry.
+     */
+    private val prefs: CalendarPrefsStore = InMemoryCalendarPrefsStore(),
     private val zone: TimeZone = TimeZone.currentSystemDefault(),
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
@@ -54,7 +59,7 @@ class ReminderScheduler(
                 alarms?.replaceAll(
                     dueReminders(
                         events = calendar.events,
-                        sources = calendar.sources,
+                        sources = applyCalendarPrefs(calendar.sources, prefs.read()),
                         rules = calendar.reminders,
                         from = Clock.System.now(),
                         zone = zone,

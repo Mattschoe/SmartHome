@@ -286,8 +286,8 @@ private fun CalendarViewSegment(
 }
 
 /**
- * The gear that picks which calendars the view being shown draws. A header-trailing control, placed
- * *after* the view toggle where there is one, since what it filters is whichever view that toggle
+ * The gear that opens the calendar settings over the panel. A header-trailing control, placed *after*
+ * the view toggle where there is one, since the visibility it settles is whichever view that toggle
  * has landed on.
  */
 @Composable
@@ -297,7 +297,7 @@ fun CalendarSettingsButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .size(Dimensions.minTouch)
             .clip(CircleShape)
             .clickable(onClick = onClick)
-            .semantics { contentDescription = "Vælg kalendere" },
+            .semantics { contentDescription = "Kalenderindstillinger" },
         contentAlignment = Alignment.Center,
     ) {
         Icon(

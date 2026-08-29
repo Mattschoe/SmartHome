@@ -211,7 +211,25 @@ data class CalendarSource(
      * leaves its dot the one assigned by position.
      */
     val color: String? = null,
+    /**
+     * This device's own choice of color for the calendar, which beats both [color] and the
+     * position-assigned fallback. It is applied on the way out of the ViewModel, never by the
+     * adapter, so it stays out of the offline snapshot and off the wire — the whole point is that it
+     * is *this* device's, and the tablet in the hall may well disagree with the phone in a pocket.
+     */
+    val colorOverride: CalendarPaletteColor? = null,
 )
+
+/**
+ * The colors a calendar may be given by hand, in the order they are offered. Ten of them because a
+ * home's calendars are told apart by color at a glance and five ran out once people started picking
+ * rather than taking what they were given.
+ *
+ * The **names are what gets persisted**, so they are load-bearing: renaming an entry silently
+ * discards whatever color the people living here had already chosen. Adding to the end is free.
+ */
+@Serializable
+enum class CalendarPaletteColor { Forest, Teal, Slate, Plum, Rose, Terracotta, Amber, Olive, Sage, Mocha }
 
 /**
  * A calendar event **as it appears on one day**: an event spanning several days is expanded to one

@@ -1,6 +1,7 @@
 package com.mattschoe.smarthome.ui.pages.homepage
 
 import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.CalendarPrefs
 import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.applyEventMove
@@ -126,6 +127,39 @@ sealed interface EventEditorTarget {
 }
 
 /**
+ * Which level of the Calendar panel's settings is showing; `null` while the views or the editor hold
+ * the panel.
+ *
+ * The settings are a menu rather than one page: the home's calendars, and one calendar's own
+ * settings. Only the level showing is kept — no back stack, since every level has exactly one parent
+ * (see [parent]), and a stack could otherwise outlive the calendar it points at.
+ */
+sealed interface CalendarSettingsRoute {
+    /** The home's calendars, as a list to drill into — where the gear lands. */
+    data object Calendars : CalendarSettingsRoute
+
+    /**
+     * One calendar's settings. Held by id rather than by [com.mattschoe.smarthome.data.model.CalendarSource]
+     * so the page always draws the calendar as it is *now* — a source captured here would go stale on
+     * the next fetch, and a calendar removed in Home Assistant would keep a page open on nothing.
+     */
+    data class Calendar(val sourceId: String) : CalendarSettingsRoute
+}
+
+/** One level up; `null` means the settings close and the calendar views come back. */
+fun CalendarSettingsRoute.parent(): CalendarSettingsRoute? = when (this) {
+    CalendarSettingsRoute.Calendars -> null
+    is CalendarSettingsRoute.Calendar -> CalendarSettingsRoute.Calendars
+}
+
+/** How deep the level sits — what the level transition reads to pick which way to slide. */
+val CalendarSettingsRoute.depth: Int
+    get() = when (this) {
+        CalendarSettingsRoute.Calendars -> 0
+        is CalendarSettingsRoute.Calendar -> 1
+    }
+
+/**
  * A block dropped somewhere new in the week grid, from the moment the finger lifts until the write
  * lands (VM-owned). It is two things at once, which is why it is one state and not two:
  *
@@ -198,10 +232,16 @@ sealed interface HomeScreenState {
         val eventDetail: CalendarEvent?,
         /** A week-grid block dropped somewhere new, still being asked about or written (VM-owned). */
         val eventMove: PendingEventMove?,
-        /** Which calendars each view draws — what the header's gear edits (VM-owned, persisted). */
+        /** Which calendars each view draws — what the settings surface edits (VM-owned, persisted). */
         val calendarFilters: CalendarFilters,
-        /** Whether the gear's popup is showing (VM-owned). */
-        val calendarSettingsOpen: Boolean,
+        /**
+         * This device's own calendar colors and default event lengths (VM-owned, persisted locally).
+         * The colors are already folded into [calendar]'s sources by the time they get here; what the
+         * settings surface needs this for is showing *which* swatch and length are selected.
+         */
+        val calendarPrefs: CalendarPrefs,
+        /** Which settings level has taken over the Calendar panel, or `null` when none has (VM-owned). */
+        val calendarSettings: CalendarSettingsRoute?,
         /**
          * How tall one hour row of the week grid is, in dp — what pinching the grid sets (VM-owned,
          * persisted). At the top of its range the day is 576dp and scrolls; the bottom is whatever

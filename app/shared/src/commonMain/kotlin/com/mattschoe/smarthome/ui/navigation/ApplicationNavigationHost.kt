@@ -30,6 +30,7 @@ fun ApplicationNavigationHost(
                     adapter = appContainer.homeAdapter,
                     filterStore = appContainer.calendarFilters,
                     zoomStore = appContainer.weekZoom,
+                    prefsStore = appContainer.calendarPrefs,
                     nowPlaying = appContainer.nowPlaying
                 )
             }

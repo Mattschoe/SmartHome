@@ -25,10 +25,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,7 +34,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.formatEventWhen
 import com.mattschoe.smarthome.data.formatRecurrence
 import com.mattschoe.smarthome.data.parseRrule
@@ -47,12 +42,9 @@ import com.mattschoe.smarthome.data.offsetFor
 import com.mattschoe.smarthome.data.remindsByCalendarDefault
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
-import com.mattschoe.smarthome.data.model.CalendarView
-import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.ui.components.PopupCard
 import com.mattschoe.smarthome.ui.components.PopupScrim
-import com.mattschoe.smarthome.ui.components.SectionLabel
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
 import com.mattschoe.smarthome.ui.theme.CardBorder
 import com.mattschoe.smarthome.ui.theme.Dimensions
@@ -70,13 +62,13 @@ import smarthome.shared.generated.resources.edit_filled
 import smarthome.shared.generated.resources.notifications_filled
 
 /**
- * The Calendar panel's two floating cards, emitted as siblings inside the right card's
+ * The Calendar panel's floating card, emitted as a sibling inside the right card's
  * [com.mattschoe.smarthome.ui.components.CardContainer] rather than as dialogs over the dashboard —
  * so, like every other surface in this card, they leave the lights, dial and volume beside them live.
  * The container already clips to the card's rounded rect and insets by its content padding, which is
  * what bounds them to the card.
  *
- * Both take a `modifier` for that inset, because the phone's Calendar page floats them over a bare
+ * It takes a `modifier` for that inset, because the phone's Calendar page floats it over a bare
  * page with no card padding to inherit — it passes the page's own margins instead. The modifier
  * insets the *card*, never the scrim: the scrim covers whatever box the popup was emitted into, which
  * on the phone is the whole page and on the tablet is the card.
@@ -238,135 +230,6 @@ private fun DeleteAction(onDelete: () -> Unit) {
             },
             description = if (armed) "Bekræft sletning" else "Slet",
             onClick = onTap,
-        )
-    }
-}
-
-/**
- * Which calendars the view being looked at draws. The setting is per view, so the heading names the
- * view it applies to rather than leaving it to be inferred; the other view keeps its own.
- */
-@Composable
-fun BoxScope.CalendarSettingsPopup(
-    view: CalendarView,
-    sources: List<CalendarSource>,
-    filters: CalendarFilters,
-    /** The home's rules — each row reads its calendar's standing default out of these. */
-    reminders: ReminderRules,
-    onToggle: (String) -> Unit,
-    /** Set or clear a calendar's standing reminder; `null` clears it. */
-    onSetReminderDefault: (String, Int?) -> Unit,
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val hidden = filters.hidden(view)
-    // Whose default is being picked, kept here rather than hoisted: the picker is this popup's own
-    // second step, and it is emitted as a sibling below so it floats over the card rather than
-    // inside its scroll.
-    var pickingFor by remember { mutableStateOf<CalendarSource?>(null) }
-    PopupScrim(onClose)
-    PopupCard(
-        modifier = modifier
-            .align(Alignment.TopEnd)
-            .offset(y = Dimensions.calendarSettingsTopOffset)
-            .widthIn(max = Dimensions.eventDetailMaxWidth)
-            .heightIn(max = Dimensions.eventDetailMaxHeight),
-    ) {
-        SectionLabel(
-            when (view) {
-                CalendarView.Month -> "Vises i månedsvisning"
-                CalendarView.Week -> "Vises i ugevisning"
-            },
-        )
-        Spacer(Modifier.height(8.dp))
-        if (sources.isEmpty()) {
-            Text("Ingen kalendere", color = Muted, fontSize = 15.sp)
-            return@PopupCard
-        }
-        val scroll = rememberScrollState()
-        Column(
-            modifier = Modifier
-                .weight(1f, fill = false)
-                .verticalScrollFade(scroll)
-                .verticalScroll(scroll),
-        ) {
-            sources.forEach { source ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Dimensions.minTouch)
-                        .clickable { onToggle(source.id) },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(calendarDotColor(source.id, sources)),
-                    )
-                    Text(
-                        text = source.displayName,
-                        color = Ink,
-                        fontSize = 16.sp,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // The calendar's standing reminder, opening its own picker. This is where a
-                    // read-only calendar — a work roster — gets reminders at all: there is no event
-                    // on it to hang one off.
-                    ReminderDefaultLabel(
-                        offsetMin = reminders.byCalendar[source.id],
-                        onClick = { pickingFor = source },
-                    )
-                    CheckboxGlyph(checked = source.id !in hidden)
-                }
-            }
-        }
-    }
-    pickingFor?.let { source ->
-        ReminderPickerPopup(
-            // A calendar's default has nothing above it to inherit from, so "Ingen" is the absence
-            // of one rather than an override of anything.
-            selected = ReminderRule(reminders.byCalendar[source.id]),
-            calendarDefault = null,
-            showInherit = false,
-            title = "Standard for ${source.displayName}",
-            onPick = { picked ->
-                onSetReminderDefault(source.id, picked?.offsetMin)
-                pickingFor = null
-            },
-            onDismiss = { pickingFor = null },
-        )
-    }
-}
-
-/**
- * A calendar's standing reminder as a small tappable label at the end of its row. Its own target
- * inside a row that otherwise toggles visibility, so the two settings a row carries stay separable
- * by where the finger lands.
- */
-@Composable
-private fun ReminderDefaultLabel(offsetMin: Int?, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .heightIn(min = Dimensions.minTouch)
-            .clip(RoundedCornerShape(percent = 50))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp)
-            .semantics { contentDescription = "Standardpåmindelse" },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(
-            painter = painterResource(Res.drawable.notifications_filled),
-            contentDescription = null,
-            tint = if (offsetMin == null) Muted else InkSoft,
-            modifier = Modifier.size(14.dp),
-        )
-        Text(
-            text = offsetMin?.let(::formatReminderOffset) ?: "Ingen",
-            color = if (offsetMin == null) Muted else InkSoft,
-            fontSize = 13.sp,
         )
     }
 }

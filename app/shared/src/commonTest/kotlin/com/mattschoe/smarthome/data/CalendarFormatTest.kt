@@ -265,3 +265,23 @@ class CalendarFormatTest {
         assertEquals("31. december", formatDayAndMonth(LocalDate(2026, 12, 31)))
     }
 }
+
+class DurationFormatTest {
+
+    @Test
+    fun formatDuration_readsAsTheLengthsTheSurfaceOffers() {
+        assertEquals("15 min", formatDuration(15))
+        assertEquals("45 min", formatDuration(45))
+        assertEquals("1 time", formatDuration(60))
+        assertEquals("1½ time", formatDuration(90))
+        assertEquals("2 timer", formatDuration(120))
+        assertEquals("4 timer", formatDuration(240))
+    }
+
+    @Test
+    fun formatDuration_stillReadsForLengthsNotOnTheList() {
+        // Nothing offers these, but a blob written by a later version can hand them over.
+        assertEquals("2½ timer", formatDuration(150))
+        assertEquals("1 t 20 min", formatDuration(80))
+    }
+}

@@ -145,9 +145,14 @@ object Dimensions {
     // What every [PopupCard] insets its content by — stated here because a popup sized from its
     // content ([browseMenuHeight]) has to add it back.
     val popupCardPadding = 16.dp
-    // How far under the card's top edge the gear's popup hangs, so it reads as dropped from the
-    // header it was opened from rather than floating free.
-    val calendarSettingsTopOffset = minTouch
+    // The calendar settings surface. A colour swatch is smaller than the warmth dial's, because ten
+    // of them have to wrap into the phone's narrower card without becoming three rows.
+    val calendarColorSwatchDiameter = 32.dp
+    val calendarColorHaloGap = 2.dp
+    val calendarColorHaloRingWidth = 2.dp
+    // A row that leads into a settings level. Taller than a bare touch target: these are read down
+    // a list rather than aimed at, and the extra air is what makes the list scannable.
+    val settingsRowHeight = 52.dp
 
     // The Opgaver panel's UDFØRT rule — the hairline on either side of the label that separates what
     // is still open from what has been ticked off.

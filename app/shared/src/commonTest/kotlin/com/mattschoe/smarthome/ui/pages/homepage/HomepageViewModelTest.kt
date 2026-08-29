@@ -1428,19 +1428,52 @@ class HomepageViewModelTest {
     }
 
     @Test
-    fun calendarSettings_openAndClose() = runTest(mainDispatcher) {
+    fun calendarSettings_stepThroughTheMenuAndBackOutOfIt() = runTest(mainDispatcher) {
         val vm = HomepageViewModel(MockAdapter())
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
-        assertFalse((vm.screenState.value as HomeScreenState.Ready).calendarSettingsOpen)
+        fun settings() = (vm.screenState.value as HomeScreenState.Ready).calendarSettings
+        assertNull(settings())
 
+        // The gear opens the list, not a calendar.
         vm.openCalendarSettings()
         advanceUntilIdle()
-        assertTrue((vm.screenState.value as HomeScreenState.Ready).calendarSettingsOpen)
+        assertEquals(CalendarSettingsRoute.Calendars, settings())
 
-        vm.closeCalendarSettings()
+        vm.openCalendarSettingsRoute(CalendarSettingsRoute.Calendar("calendar.test"))
         advanceUntilIdle()
-        assertFalse((vm.screenState.value as HomeScreenState.Ready).calendarSettingsOpen)
+        assertEquals(CalendarSettingsRoute.Calendar("calendar.test"), settings())
+
+        // Back is one level at a time, all the way out.
+        vm.backFromCalendarSettings()
+        advanceUntilIdle()
+        assertEquals(CalendarSettingsRoute.Calendars, settings())
+
+        vm.backFromCalendarSettings()
+        advanceUntilIdle()
+        assertNull(settings())
+    }
+
+    @Test
+    fun showCalendarViews_leavesBothTheSettingsAndTheEditor() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        // Inside a calendar's page: the Kalender tab is a way out, not one more thing to back out of.
+        vm.openCalendarSettings()
+        vm.openCalendarSettingsRoute(CalendarSettingsRoute.Calendar("calendar.test"))
+        vm.showCalendarViews()
+        advanceUntilIdle()
+        assertNull((vm.screenState.value as HomeScreenState.Ready).calendarSettings)
+
+        vm.openNewEvent()
+        advanceUntilIdle()
+        assertNotNull((vm.screenState.value as HomeScreenState.Ready).eventEditor)
+
+        vm.showCalendarViews()
+        advanceUntilIdle()
+        assertNull((vm.screenState.value as HomeScreenState.Ready).eventEditor)
     }
 
     @Test

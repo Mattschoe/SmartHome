@@ -2,6 +2,7 @@ package com.mattschoe.smarthome.ui.theme
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import com.mattschoe.smarthome.data.model.CalendarPaletteColor
 import com.mattschoe.smarthome.data.model.Warmth
 
 val SageSurface = Color(0xFFB2C488)
@@ -28,6 +29,18 @@ val WarmAmber = Color(0xFFE0A24E)
 
 val Forest = Color(0xFF0A3323)
 val OnForest = Color(0xFFF6EEC7)
+
+/**
+ * The rest of the calendar palette — the five above are the app's own accents, and a home with four
+ * calendars can already exhaust them once people start picking rather than taking what they are
+ * given. These are chosen to sit on the same cream/sage ground: muted, slightly dusty, and spread
+ * far enough apart in hue and lightness that two calendars beside each other never read as one.
+ */
+val Slate = Color(0xFF4C6382)
+val Plum = Color(0xFF6E4C6B)
+val Terracotta = Color(0xFFA4552F)
+val Olive = Color(0xFF656F38)
+val Mocha = Color(0xFF7A6350)
 
 /**
  * The weather glyph's layer colors. Each condition icon is stacked from one drawable per color layer
@@ -75,8 +88,11 @@ fun haCalendarColor(name: String?): Color? = when (name) {
 
 /**
  * Above which relative luminance a fill needs dark text on it rather than cream. Placed so the
- * calendar palette splits where it actually reads: [Teal] and [Forest] carry [OnForest], while
- * [Rose], [WarmAmber], [Muted] and [SageGreen] — all far too light for cream — carry [Ink].
+ * calendar palette splits where it actually reads: [Rose], [WarmAmber], [Muted] and [SageGreen] —
+ * all far too light for cream — carry [Ink], while every darker token ([Forest], [Teal], [Slate],
+ * [Plum], [Terracotta], [Olive], [Mocha]) carries [OnForest]. The pickable colors are tuned to clear
+ * roughly 4.5:1 against whichever of the two they land on, so no calendar can be given a fill its
+ * own label disappears into.
  */
 private const val OnColorLuminanceCut = 0.25f
 
@@ -103,6 +119,23 @@ val WarmthCool = Color(0xFFD6E8F5)
 
 /** The dial arc/knob/growth-shape color when a room's light is off. */
 val WarmthOffMuted = Color(0xFFCDC7AB)
+
+/**
+ * Maps a [CalendarPaletteColor] to its token. The enum lives in the data layer because the *choice*
+ * is persisted; the color it stands for belongs here, the same split [Warmth] already uses.
+ */
+fun CalendarPaletteColor.color(): Color = when (this) {
+    CalendarPaletteColor.Forest -> Forest
+    CalendarPaletteColor.Teal -> Teal
+    CalendarPaletteColor.Slate -> Slate
+    CalendarPaletteColor.Plum -> Plum
+    CalendarPaletteColor.Rose -> Rose
+    CalendarPaletteColor.Terracotta -> Terracotta
+    CalendarPaletteColor.Amber -> WarmAmber
+    CalendarPaletteColor.Olive -> Olive
+    CalendarPaletteColor.Sage -> SageGreen
+    CalendarPaletteColor.Mocha -> Mocha
+}
 
 /** Maps a [Warmth] preset to its dial/swatch color token. */
 fun Warmth.color(): Color = when (this) {

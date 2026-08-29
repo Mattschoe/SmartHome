@@ -19,6 +19,10 @@ import com.mattschoe.smarthome.data.MusicAssistantAdapter
 import com.mattschoe.smarthome.data.NoOpNotificationPresenter
 import com.mattschoe.smarthome.data.NotificationPresenter
 import com.mattschoe.smarthome.data.NowPlayingBridge
+import com.mattschoe.smarthome.data.CalendarPrefs
+import com.mattschoe.smarthome.data.CalendarPrefsStore
+import com.mattschoe.smarthome.data.InMemoryCalendarPrefsStore
+import com.mattschoe.smarthome.data.KeyValueCalendarPrefsStore
 import com.mattschoe.smarthome.data.ReminderScheduler
 import com.mattschoe.smarthome.data.platformKeyValueStore
 
@@ -52,6 +56,13 @@ class AppContainer(
      */
     val weekZoom: WeekZoomStore = keyValueStore?.let(::KeyValueWeekZoomStore) ?: InMemoryWeekZoomStore(),
     /**
+     * This device's own calendar colors and default event lengths. Local on purpose, and kept beside
+     * the filters rather than sent anywhere: the whole point is that this device may disagree with
+     * the other ones (see [CalendarPrefs]).
+     */
+    val calendarPrefs: CalendarPrefsStore =
+        keyValueStore?.let(::KeyValueCalendarPrefsStore) ?: InMemoryCalendarPrefsStore(),
+    /**
      * Where the ViewModel publishes the active audio room's playback for the platform's own media
      * surfaces. Android's media session reads it; the platforms without one never look.
      */
@@ -79,7 +90,8 @@ class AppContainer(
      * Keeps this device's alarms in step with the home's events and reminder rules. Held rather than
      * merely constructed: it subscribes for the life of the process.
      */
-    val reminders: ReminderScheduler = ReminderScheduler(homeAdapter, alarmScheduler, deviceRole)
+    val reminders: ReminderScheduler =
+        ReminderScheduler(homeAdapter, alarmScheduler, deviceRole, calendarPrefs)
 }
 
 /**

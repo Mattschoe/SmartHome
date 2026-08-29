@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.mattschoe.smarthome.data.CalendarFilters
+import com.mattschoe.smarthome.data.CalendarPrefs
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
@@ -21,7 +22,6 @@ import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
 import com.mattschoe.smarthome.ui.controls.calendar.TodayButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
-import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventScopePopup
 import com.mattschoe.smarthome.ui.theme.Dimensions
@@ -50,7 +50,6 @@ fun LandscapeCalendarPage(
     today: LocalDate,
     displayedMonth: LocalDate,
     selectedDay: LocalDate,
-    calendarView: CalendarView,
     eventsByDay: Map<LocalDate, List<CalendarEvent>>,
     weekDays: List<LocalDate>,
     calendarWindow: ClosedRange<LocalDate>,
@@ -59,8 +58,9 @@ fun LandscapeCalendarPage(
     weekHourHeight: Float,
     eventDetail: CalendarEvent?,
     eventMove: PendingEventMove?,
-    calendarSettingsOpen: Boolean,
+    calendarSettings: CalendarSettingsRoute?,
     calendarFilters: CalendarFilters,
+    calendarPrefs: CalendarPrefs,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
@@ -119,11 +119,22 @@ fun LandscapeCalendarPage(
                     onSaveEvent = viewModel::saveEvent,
                     onDeleteEvent = viewModel::deleteEvent,
                     onCloseEventEditor = viewModel::closeEventEditor,
-                    // The today button and the "+" stand down while the editor is open, as on the
-                    // tablet — re-opening a blank form would discard what is typed.
+                    defaultDurationFor = viewModel::defaultDurationFor,
+                    settings = calendarSettings,
+                    calendarFilters = calendarFilters,
+                    calendarPrefs = calendarPrefs,
+                    onToggleCalendarFilter = viewModel::toggleCalendarFilter,
+                    onSetCalendarColor = viewModel::setCalendarColor,
+                    onSetCalendarDuration = viewModel::setCalendarDuration,
+                    onSetCalendarReminderDefault = viewModel::setCalendarReminderDefault,
+                    onOpenSettingsRoute = viewModel::openCalendarSettingsRoute,
+                    onSettingsBack = viewModel::backFromCalendarSettings,
+                    // The today button and the "+" stand down while the editor or the settings are
+                    // open, as on the tablet — re-opening a blank form would discard what is typed,
+                    // and neither surface has a calendar behind it for "today" to scroll to.
                     headerTrailing = {
-                        CalendarSettingsButton(viewModel::openCalendarSettings)
-                        if (eventEditor == null) {
+                        if (eventEditor == null && calendarSettings == null) {
+                            CalendarSettingsButton(viewModel::openCalendarSettings)
                             TodayButton(today, viewModel::showToday)
                             AddEventButton(viewModel::openNewEvent)
                         }
@@ -157,24 +168,6 @@ fun LandscapeCalendarPage(
                 allowThisEvent = true,
                 onPick = viewModel::pickEventMoveScope,
                 onDismiss = viewModel::cancelEventMove,
-            )
-        }
-        if (calendarSettingsOpen) {
-            CalendarSettingsPopup(
-                view = calendarView,
-                sources = calendar.sources,
-                filters = calendarFilters,
-                reminders = calendar.reminders,
-                onToggle = viewModel::toggleCalendarFilter,
-                onSetReminderDefault = viewModel::setCalendarReminderDefault,
-                onClose = viewModel::closeCalendarSettings,
-                // Its own drop is measured from the header row, so only the card's content inset is
-                // added here — and the x-offset lands its right edge on the gear, which sits inside
-                // the card's content padding rather than at the page's edge.
-                modifier = Modifier.offset(
-                    x = -Dimensions.phoneCardPadding,
-                    y = Dimensions.phoneCardPadding,
-                ),
             )
         }
     }

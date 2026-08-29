@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,6 +48,8 @@ import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.ReminderRule
+import com.mattschoe.smarthome.data.CalendarPrefs
+import com.mattschoe.smarthome.data.model.CalendarPaletteColor
 import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
@@ -59,7 +62,6 @@ import com.mattschoe.smarthome.ui.components.CardContainer
 import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
-import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsPopup
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarViewToggle
 import com.mattschoe.smarthome.ui.controls.calendar.EventDetailPopup
 import com.mattschoe.smarthome.ui.controls.calendar.EventScopePopup
@@ -141,10 +143,12 @@ fun RightCard(
     /** The event the week view's detail popup is open on, or `null` when none is. */
     eventDetail: CalendarEvent?,
     eventMove: PendingEventMove?,
-    /** Which calendars each view draws — what the header's gear popup edits. */
+    /** Which calendars each view draws — what the header's gear edits. */
     calendarFilters: CalendarFilters,
-    /** Whether the gear's popup is showing. */
-    calendarSettingsOpen: Boolean,
+    /** This device's own calendar colours and default event lengths. */
+    calendarPrefs: CalendarPrefs,
+    /** Which settings level has taken the panel over, or `null` when none has. */
+    calendarSettings: CalendarSettingsRoute?,
     /** Whether a save/delete from the editor is in flight. */
     savingEvent: Boolean,
     onSelectPanel: (Panel) -> Unit,
@@ -186,12 +190,21 @@ fun RightCard(
     onDeleteEventDetail: () -> Unit,
     onCloseEventDetail: () -> Unit,
     onOpenCalendarSettings: () -> Unit,
-    onCloseCalendarSettings: () -> Unit,
+    /** Drill into a settings level — a calendar picked out of the list. */
+    onOpenCalendarSettingsRoute: (CalendarSettingsRoute) -> Unit,
+    /** The settings' back arrow: one level up, and out of the settings from the root. */
+    onCalendarSettingsBack: () -> Unit,
+    /** Put the calendar views back on the panel from wherever it is — what the Kalender tab does. */
+    onShowCalendarViews: () -> Unit,
     onToggleCalendarFilter: (String) -> Unit,
     /** Set the reminder on the event the editor is open on (existing events only). */
     onSetEventReminder: (ReminderRule?) -> Unit,
     /** Set or clear a calendar's standing reminder — the gear popup's per-calendar row. */
     onSetCalendarReminderDefault: (String, Int?) -> Unit,
+    onSetCalendarColor: (String, CalendarPaletteColor) -> Unit,
+    onSetCalendarDuration: (String, Int) -> Unit,
+    /** How long a new event on a given calendar lasts — this device's setting. */
+    defaultDurationFor: (String) -> Int,
     onSaveEvent: (String, CalendarEventDraft, ReminderRule?, EventEditScope) -> Unit,
     onDeleteEvent: (EventEditScope) -> Unit,
     onCloseEventEditor: () -> Unit,
@@ -206,33 +219,26 @@ fun RightCard(
             // showing panel needs there: the source badge over Media, the today-and-add pair over the
             // Calendar, and over Opgaver the day it is paged to — which is a title rather than a
             // control, but this is the card's free corner and the checklist has no header of its own.
-            // All three animate, to keep the row from jumping as the tab changes. The pair stands
+            // All three crossfade in one slot, so the row never jumps as the tab changes. The pair stands
             // down while the editor is open — re-opening a blank form would discard what is typed, and
             // paging the grid underneath the editor moves nothing anybody can see.
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                PanelTabs(panel = panel, onSelectPanel = onSelectPanel)
+                PanelTabs(
+                    panel = panel,
+                    onSelectPanel = onSelectPanel,
+                    onShowCalendarViews = onShowCalendarViews,
+                )
                 Spacer(Modifier.weight(1f))
-                AnimatedVisibility(visible = panel == Panel.Media, enter = fadeIn(), exit = fadeOut()) {
-                    SourceToggle(source = musicSource, onToggle = onSelectMusicSource)
-                }
-                AnimatedVisibility(
-                    visible = panel == Panel.Calendar && eventEditor == null,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TodayButton(today = today, onClick = onShowToday)
-                        AddEventButton(onClick = onAddEvent)
-                    }
-                }
-                AnimatedVisibility(visible = panel == Panel.Opgaver, enter = fadeIn(), exit = fadeOut()) {
-                    Text(
-                        text = formatDayAndMonth(todoDay),
-                        color = Ink,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
+                TrailingControl(
+                    panel = panel,
+                    musicSource = musicSource,
+                    calendarBusy = eventEditor != null || calendarSettings != null,
+                    today = today,
+                    todoDay = todoDay,
+                    onSelectMusicSource = onSelectMusicSource,
+                    onShowToday = onShowToday,
+                    onAddEvent = onAddEvent,
+                )
             }
             Spacer(Modifier.height(Dimensions.mediaSectionGap))
             AnimatedContent(
@@ -312,7 +318,17 @@ fun RightCard(
                         onSaveEvent = onSaveEvent,
                         onDeleteEvent = onDeleteEvent,
                         onCloseEventEditor = onCloseEventEditor,
-                        // The gear sits *after* the toggle because what it filters is whichever view
+                        defaultDurationFor = defaultDurationFor,
+                        settings = calendarSettings,
+                        calendarFilters = calendarFilters,
+                        calendarPrefs = calendarPrefs,
+                        onToggleCalendarFilter = onToggleCalendarFilter,
+                        onSetCalendarColor = onSetCalendarColor,
+                        onSetCalendarDuration = onSetCalendarDuration,
+                        onSetCalendarReminderDefault = onSetCalendarReminderDefault,
+                        onOpenSettingsRoute = onOpenCalendarSettingsRoute,
+                        onSettingsBack = onCalendarSettingsBack,
+                        // The gear sits *after* the toggle because what it settles is whichever view
                         // that toggle has landed on.
                         headerTrailing = {
                             CalendarViewToggle(calendarView, onSelectCalendarView)
@@ -406,17 +422,62 @@ fun RightCard(
                     onDismiss = onCancelEventMove,
                 )
             }
-            if (calendarSettingsOpen) {
-                CalendarSettingsPopup(
-                    view = calendarView,
-                    sources = calendarSources,
-                    filters = calendarFilters,
-                    reminders = calendarReminders,
-                    onToggle = onToggleCalendarFilter,
-                    onSetReminderDefault = onSetCalendarReminderDefault,
-                    onClose = onCloseCalendarSettings,
-                )
+        }
+    }
+}
+
+/**
+ * The right card's trailing corner: whichever control the showing [panel] puts beside the tabs. The
+ * calendar's today-and-add pair stands down while the editor or the settings hold the panel — neither
+ * has a grid behind it for "today" to scroll to, and re-opening a blank form would discard typing.
+ * Its own composable rather than three siblings in the header row — see the crossfade note inside.
+ */
+@Composable
+private fun TrailingControl(
+    panel: Panel,
+    musicSource: MusicSource,
+    /** Whether a surface other than the views holds the Calendar panel — see the today/add pair. */
+    calendarBusy: Boolean,
+    today: LocalDate,
+    todoDay: LocalDate,
+    onSelectMusicSource: (MusicSource) -> Unit,
+    onShowToday: () -> Unit,
+    onAddEvent: () -> Unit,
+) {
+    // One slot, not three siblings: laid out beside each other, the outgoing control still
+    // holds its width while the incoming one fades in, so the arriving control is first
+    // placed next to it and then jumps to the edge as it leaves. Stacked in a trailing-
+    // aligned Box they overlap instead — each stays pinned to the card's edge for the whole
+    // crossfade, so the arriving control simply takes the leaving one's place.
+    Box(contentAlignment = Alignment.CenterEnd) {
+        AnimatedVisibility(
+            visible = panel == Panel.Media,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(120)),
+        ) {
+            SourceToggle(source = musicSource, onToggle = onSelectMusicSource)
+        }
+        AnimatedVisibility(
+            visible = panel == Panel.Calendar && !calendarBusy,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(120)),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TodayButton(today = today, onClick = onShowToday)
+                AddEventButton(onClick = onAddEvent)
             }
+        }
+        AnimatedVisibility(
+            visible = panel == Panel.Opgaver,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(120)),
+        ) {
+            Text(
+                text = formatDayAndMonth(todoDay),
+                color = Ink,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
@@ -427,7 +488,13 @@ fun RightCard(
  * carry no labels — see [PanelTab].
  */
 @Composable
-private fun PanelTabs(panel: Panel, onSelectPanel: (Panel) -> Unit, modifier: Modifier = Modifier) {
+private fun PanelTabs(
+    panel: Panel,
+    onSelectPanel: (Panel) -> Unit,
+    /** The Kalender segment's second job — see its onClick. */
+    onShowCalendarViews: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val shape = RoundedCornerShape(percent = 50)
     Row(
         modifier = modifier.clip(shape).background(InsetFill).padding(4.dp),
@@ -443,7 +510,13 @@ private fun PanelTabs(panel: Panel, onSelectPanel: (Panel) -> Unit, modifier: Mo
             label = "Kalender",
             icon = Res.drawable.calender_filled,
             selected = panel == Panel.Calendar,
-            onClick = { onSelectPanel(Panel.Calendar) },
+            // Always the month/week views, from any depth of the settings and from an open editor:
+            // the tab is the way *out* of the calendar's surfaces rather than one more thing to back
+            // out of. Re-selecting the tab it is already on is otherwise a no-op.
+            onClick = {
+                onSelectPanel(Panel.Calendar)
+                onShowCalendarViews()
+            },
         )
         PanelTab(
             label = "Opgaver",

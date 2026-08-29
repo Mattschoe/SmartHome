@@ -223,3 +223,18 @@ This is a loose list of things to do after HAOS backend is up and running:
 
 - [ ] Mobile phone support
 - [ ] "weekly" calendar view
+- [x] **Calendar settings as a whole card.** The header gear's popup became a third `CalendarPanel`
+      surface beside the views and the event editor (`CalendarSettingsSurface.kt`), because four
+      settings per calendar no longer fit a card pinned under the gear. Each calendar folds open to
+      its **colour** (ten on-theme choices, `CalendarPaletteColor`), its **default event length**
+      (what a tap on an empty week slot seeds — switching the calendar chip on a fresh event re-seeds
+      it, until an end is typed by hand), and its **standing reminder**; the collapsed row keeps the
+      per-view visibility checkbox.
+      Colour and length are **per device** (`CalendarPrefs`, key `calendar.prefs`, the
+      `CalendarFilterStore` idiom) — the point being that Matt, Cecilie and the hall tablet may each
+      want a different colour for the same calendar. The reminder stays in Home Assistant, since HA
+      is what fires it and the devices must agree. Colour resolves in one place —
+      `calendarDotColor`: this device's choice → HA's own colour → position — and is folded on in the
+      **ViewModel**, so the offline snapshot stays plain device truth.
+      *(Compiles on desktop, iOS arm64 + simulator, and Android debug. Not run on a device — the
+      on-screen verification is with Matthias.)*

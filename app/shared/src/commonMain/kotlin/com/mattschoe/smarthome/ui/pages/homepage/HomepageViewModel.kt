@@ -3,6 +3,10 @@ package com.mattschoe.smarthome.ui.pages.homepage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mattschoe.smarthome.data.CalendarFilterStore
+import com.mattschoe.smarthome.data.CalendarPrefs
+import com.mattschoe.smarthome.data.CalendarPrefsStore
+import com.mattschoe.smarthome.data.InMemoryCalendarPrefsStore
+import com.mattschoe.smarthome.data.applyCalendarPrefs
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.EventMove
@@ -22,6 +26,8 @@ import com.mattschoe.smarthome.data.movedEventDraft
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
+import com.mattschoe.smarthome.data.model.CalendarPaletteColor
+import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.MediaTrack
@@ -81,6 +87,8 @@ class HomepageViewModel(
     private val filterStore: CalendarFilterStore = InMemoryCalendarFilterStore(),
     /** Where the week grid's pinch level is kept between runs. See [setWeekHourHeight]. */
     private val zoomStore: WeekZoomStore = InMemoryWeekZoomStore(),
+    /** Where this device's own calendar colors and event lengths are kept. See [CalendarPrefs]. */
+    private val prefsStore: CalendarPrefsStore = InMemoryCalendarPrefsStore(),
     /**
      * Where the active audio room's playback is published for the platform's own media surfaces (the
      * Android notification / lock screen). A default instance keeps the ViewModel constructible on a
@@ -138,7 +146,14 @@ class HomepageViewModel(
     private val _eventMove = MutableStateFlow<PendingEventMove?>(null)
     private val _savingEvent = MutableStateFlow(false)
     private val _calendarFilters = MutableStateFlow(filterStore.read())
-    private val _calendarSettingsOpen = MutableStateFlow(false)
+    private val _calendarPrefs = MutableStateFlow(prefsStore.read())
+
+    // The two device-local calendar settings, folded into one combine input: the folds below are
+    // full at their typed overload's five arguments, and these two are the same kind of thing —
+    // choices that belong to this screen rather than to the home.
+    private val calendarLocal: Flow<Pair<CalendarFilters, CalendarPrefs>> =
+        combine(_calendarFilters, _calendarPrefs) { filters, prefs -> filters to prefs }
+    private val _calendarSettings = MutableStateFlow<CalendarSettingsRoute?>(null)
     private val _weekHourHeight = MutableStateFlow(clampWeekHourHeight(zoomStore.read()))
 
     /**
@@ -202,9 +217,9 @@ class HomepageViewModel(
                 combine(
                     _calendarView, _eventEditor, _eventDetail, _savingEvent,
                     combine(
-                        _calendarFilters, _calendarSettingsOpen, _weekHourHeight, _todoDay, _eventMove,
-                    ) { filters, open, hourHeight, todoDay, move ->
-                        CalendarChrome(filters, open, hourHeight, todoDay, move)
+                        calendarLocal, _calendarSettings, _weekHourHeight, _todoDay, _eventMove,
+                    ) { (filters, prefs), settings, hourHeight, todoDay, move ->
+                        CalendarChrome(filters, prefs, settings, hourHeight, todoDay, move)
                     },
                 ) { view, editor, detail, saving, chrome ->
                     CalendarSurfaceSelection(view, editor, detail, saving, chrome)
@@ -235,7 +250,10 @@ class HomepageViewModel(
                 musicSource = rightCard.media.musicSource,
                 spotifyPlaylists = home.spotifyPlaylists,
                 spotifyRecentlyPlayed = home.spotifyRecentlyPlayed,
-                calendar = home.calendar,
+                // The calendars carry this device's chosen colors from here on: every surface that
+                // draws one reads them off the source, so folding them in once here is the whole of
+                // the wiring (see applyCalendarPrefs).
+                calendar = home.calendar.withPrefs(calendar.surface.chrome.prefs),
                 today = calendar.today,
                 displayedMonth = calendar.displayedMonth,
                 selectedDay = calendar.selectedDay,
@@ -246,7 +264,8 @@ class HomepageViewModel(
                 eventDetail = calendar.surface.eventDetail,
                 eventMove = calendar.surface.chrome.eventMove,
                 calendarFilters = calendar.surface.chrome.filters,
-                calendarSettingsOpen = calendar.surface.chrome.settingsOpen,
+                calendarPrefs = calendar.surface.chrome.prefs,
+                calendarSettings = calendar.surface.chrome.settings,
                 weekHourHeight = calendar.surface.chrome.weekHourHeight,
                 savingEvent = calendar.surface.savingEvent,
             )
@@ -411,16 +430,53 @@ class HomepageViewModel(
     /** Switch the Calendar panel between the month grid and the week time grid. */
     fun setCalendarView(view: CalendarView) { _calendarView.value = view }
 
-    // Which calendars each view draws — the header gear's popup. The setting is per view, so the
-    // toggle is applied to whichever view is being looked at, and it is written through on every
-    // change: a wall tablet is restarted by a power cut, not by anyone closing a settings screen.
-    fun openCalendarSettings() { _calendarSettingsOpen.value = true }
+    // The settings surface: which level of it is showing, and what its levels set. Every setting is
+    // written through on the tap rather than on the way out — a wall tablet is restarted by a power
+    // cut, not by anyone closing a settings screen, so there is nothing to "save" and nothing a back
+    // arrow can discard.
+    fun openCalendarSettings() { _calendarSettings.value = CalendarSettingsRoute.Calendars }
 
-    fun closeCalendarSettings() { _calendarSettingsOpen.value = false }
+    /** Drill into a level of the settings — a calendar picked out of the list. */
+    fun openCalendarSettingsRoute(route: CalendarSettingsRoute) { _calendarSettings.value = route }
 
+    /** The back arrow: exactly one level up, and out of the settings altogether from the root. */
+    fun backFromCalendarSettings() { _calendarSettings.update { it?.parent() } }
+
+    /**
+     * Put the calendar views back on the panel from wherever it is — the right card's Kalender tab.
+     * It closes the editor too, so the tab always lands on the same place no matter what the panel
+     * was left holding; an unsaved draft goes with it, which is the price of the tab being a way
+     * *out* rather than one more thing to back out of.
+     *
+     * Deliberately not folded into [selectPanel]: that early-returns on re-selection because the
+     * phone's pager re-selects the same panel many times per swipe, and closing the editor there
+     * would discard a draft mid-gesture.
+     */
+    fun showCalendarViews() {
+        _calendarSettings.value = null
+        closeEventEditor()
+    }
+
+    /** Draw a calendar in the view being looked at, or stop drawing it. Per view, per device. */
     fun toggleCalendarFilter(sourceId: String) {
         filterStore.write(_calendarFilters.updateAndGet { it.toggle(_calendarView.value, sourceId) })
     }
+
+    /**
+     * Give a calendar a color on **this device**. Written through on the tap, like the filters: the
+     * choice is one deliberate act, and nothing about it is worth losing to a power cut.
+     */
+    fun setCalendarColor(sourceId: String, color: CalendarPaletteColor) {
+        prefsStore.write(_calendarPrefs.updateAndGet { it.withColor(sourceId, color) })
+    }
+
+    /** Set how long a new event on a calendar lasts by default, on this device. */
+    fun setCalendarDuration(sourceId: String, minutes: Int) {
+        prefsStore.write(_calendarPrefs.updateAndGet { it.withDuration(sourceId, minutes) })
+    }
+
+    /** How long a new event on [sourceId] lasts — what the editor seeds a fresh event's end from. */
+    fun defaultDurationFor(sourceId: String): Int = _calendarPrefs.value.durationFor(sourceId)
 
     /**
      * How tall one hour row of the week grid is, in dp — what pinching the grid sets, clamped to what
@@ -1094,13 +1150,26 @@ private data class CalendarSurfaceSelection(
 )
 
 /**
- * What [CalendarSurfaceSelection]'s own combine has no room left for: the gear's filters and popup,
- * the week grid's zoom, and the Opgaver panel's day. Not a family so much as the overflow — both
- * folds above it are full at their typed overload's five arguments.
+ * The calendar as this device draws it: the same events and rules, with each source carrying whatever
+ * color has been chosen for it here. Kept off the adapter's own [CalendarState] on purpose — the
+ * offline snapshot is written from that, and it should stay plain device truth.
+ */
+private fun CalendarState.withPrefs(prefs: CalendarPrefs): CalendarState {
+    val applied = applyCalendarPrefs(sources, prefs)
+    // Identity, not equality: this runs on every emission — every light and volume change — and an
+    // unchanged calendar should cost nothing at all.
+    return if (applied === sources) this else copy(sources = applied)
+}
+
+/**
+ * What [CalendarSurfaceSelection]'s own combine has no room left for: the settings surface and what
+ * it sets, the week grid's zoom, and the Opgaver panel's day. Not a family so much as the overflow —
+ * both folds above it are full at their typed overload's five arguments.
  */
 private data class CalendarChrome(
     val filters: CalendarFilters,
-    val settingsOpen: Boolean,
+    val prefs: CalendarPrefs,
+    val settings: CalendarSettingsRoute?,
     val weekHourHeight: Float,
     val todoDay: LocalDate,
     val eventMove: PendingEventMove?,

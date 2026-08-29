@@ -178,3 +178,17 @@ fun buildEventDraft(
         rrule = rrule?.trim()?.ifBlank { null },
     )
 }
+
+/**
+ * How long an event lasts, as the settings surface offers it: "45 min", "1 time", "1½ time",
+ * "2 timer". The half is written as a fraction rather than "1 t 30 min" because these are choices on
+ * a pill, not a computed span — nobody picks "1 t 30 min" off a list.
+ */
+fun formatDuration(minutes: Int): String = when {
+    minutes < 60 -> "$minutes min"
+    minutes == 60 -> "1 time"
+    minutes == 90 -> "1½ time"
+    minutes % 60 == 0 -> "${minutes / 60} timer"
+    minutes % 60 == 30 -> "${minutes / 60}½ timer"
+    else -> "${minutes / 60} t ${minutes % 60} min"
+}
