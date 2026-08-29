@@ -129,6 +129,7 @@ internal fun CalendarViews(
                     today = today,
                     selectedDay = selectedDay,
                     dayMarks = dayMarks,
+                    eventsByDay = eventsByDay,
                     sources = sources,
                     calendarWindow = calendarWindow,
                     onSelectDay = onSelectDay,

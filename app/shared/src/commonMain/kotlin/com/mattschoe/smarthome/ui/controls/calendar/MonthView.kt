@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -37,11 +38,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mattschoe.smarthome.data.DaySpan
 import com.mattschoe.smarthome.data.calendarGrid
+import com.mattschoe.smarthome.data.daySpanLanes
+import com.mattschoe.smarthome.data.isMultiDay
 import com.mattschoe.smarthome.data.danishMonths
 import com.mattschoe.smarthome.data.monthAtPage
 import com.mattschoe.smarthome.data.monthIndexOf
 import com.mattschoe.smarthome.data.monthPageCount
+import com.mattschoe.smarthome.data.weekStart
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.ui.components.SectionLabel
@@ -56,7 +61,9 @@ import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.OnForest
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 import kotlinx.datetime.number
 
 /** Seven equal-width, muted weekday initials aligned to the [MonthGrid] columns below. */
@@ -95,6 +102,7 @@ internal fun MonthPager(
     today: LocalDate,
     selectedDay: LocalDate,
     dayMarks: Map<LocalDate, DayMarks>,
+    eventsByDay: Map<LocalDate, List<CalendarEvent>>,
     sources: List<CalendarSource>,
     calendarWindow: ClosedRange<LocalDate>,
     onSelectDay: (LocalDate) -> Unit,
@@ -140,6 +148,7 @@ internal fun MonthPager(
             today = today,
             selectedDay = selectedDay,
             dayMarks = dayMarks,
+            eventsByDay = eventsByDay,
             sources = sources,
             onSelectDay = onSelectDay,
         )
@@ -153,6 +162,13 @@ private fun displayedMonthStart(displayedMonth: LocalDate) =
 /**
  * One page: a 6×7 Monday-first grid of [month]. Today is the accent cell; the selected day (if not
  * today) is ringed — both only on the page whose month they fall in.
+ *
+ * Under each week runs its band of **multi-day bars** ([daySpanLanes]): an event covering more than
+ * one day is drawn as one line from day to day rather than as a dot repeated in each cell, which is
+ * the only way a trip or a holiday reads as a single thing here. A run leaving the row — into the
+ * next week, or into the neighbouring month the grid doesn't draw days for — is cut square at that
+ * edge. The dot for a calendar already drawn as a bar through a day is dropped, so the same event is
+ * not marked twice in one cell.
  */
 @Composable
 private fun MonthGrid(
@@ -160,28 +176,107 @@ private fun MonthGrid(
     today: LocalDate,
     selectedDay: LocalDate,
     dayMarks: Map<LocalDate, DayMarks>,
+    eventsByDay: Map<LocalDate, List<CalendarEvent>>,
     sources: List<CalendarSource>,
     onSelectDay: (LocalDate) -> Unit,
 ) {
     val cells = calendarGrid(month.year, month.month.number)
+    // The Monday cell 0 stands on — the grid's leading cells belong to the previous month, and the
+    // spans below are laid out over real dates even where the grid prints no number.
+    val gridStart = weekStart(LocalDate(month.year, month.month.number, 1))
     Column(
         Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Dimensions.monthGridRowGap),
     ) {
         for (row in 0 until 6) {
-            Row(Modifier.fillMaxWidth()) {
-                for (col in 0 until 7) {
-                    val day = cells[row * 7 + col]
-                    val date = day?.let { LocalDate(month.year, month.month.number, it) }
-                    DayCell(
-                        day = day,
-                        isToday = date == today,
-                        isSelected = date == selectedDay,
-                        marks = date?.let { dayMarks[it] },
-                        sources = sources,
-                        onClick = { if (date != null) onSelectDay(date) },
-                        modifier = Modifier.weight(1f),
-                    )
+            val dates = List(7) { col -> gridStart.plus(row * 7 + col, DateTimeUnit.DAY) }
+            // The same seven days, blanked where this page prints no number for them.
+            val printed = List(7) { col -> dates[col].takeIf { cells[row * 7 + col] != null } }
+            // Only the days this page prints carry bars; a run continuing into the month either side
+            // clips here and is drawn cut, rather than reaching into a blank cell.
+            val spanRows = printed.filterNotNull()
+                .associateWith { date -> eventsByDay[date].orEmpty().filter { it.isMultiDay() } }
+            val lanes = daySpanLanes(dates, spanRows).take(Dimensions.monthSpanLanes)
+            // Which calendars a day already carries a bar for, so its dot row doesn't repeat them.
+            val barred = buildMap<LocalDate, MutableSet<String>> {
+                lanes.forEach { lane ->
+                    lane.forEach { span ->
+                        for (col in span.startIndex..span.endIndex) {
+                            getOrPut(dates[col]) { mutableSetOf() } += span.event.sourceId
+                        }
+                    }
+                }
+            }
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth()) {
+                    for (col in 0 until 7) {
+                        val date = printed[col]
+                        DayCell(
+                            day = cells[row * 7 + col],
+                            isToday = date == today,
+                            isSelected = date == selectedDay,
+                            marks = date?.let { dayMarks[it] },
+                            barredSources = date?.let { barred[it] }.orEmpty(),
+                            sources = sources,
+                            onClick = { if (date != null) onSelectDay(date) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                MonthSpanBand(lanes, printed, sources, onSelectDay)
+            }
+        }
+    }
+}
+
+/**
+ * The band under one week of the grid, holding that week's multi-day bars. Always
+ * [Dimensions.monthSpanBand] tall, whether or not it has anything in it — see that token for why.
+ *
+ * The day cells are repeated underneath it as bare touch targets: the bars are drawn over them and
+ * take no input of their own, so a tap anywhere in the band still selects the day it landed on,
+ * exactly as a tap on the number above does.
+ */
+@Composable
+private fun MonthSpanBand(
+    lanes: List<List<DaySpan>>,
+    printed: List<LocalDate?>,
+    sources: List<CalendarSource>,
+    onSelectDay: (LocalDate) -> Unit,
+) {
+    Box(Modifier.fillMaxWidth().height(Dimensions.monthSpanBand)) {
+        Row(Modifier.matchParentSize()) {
+            printed.forEach { date ->
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .then(if (date != null) Modifier.clickable { onSelectDay(date) } else Modifier),
+                )
+            }
+        }
+        Column(
+            modifier = Modifier.matchParentSize(),
+            verticalArrangement = Arrangement.spacedBy(Dimensions.monthSpanGap),
+        ) {
+            lanes.forEach { lane ->
+                Row(Modifier.fillMaxWidth().height(Dimensions.monthSpanBar)) {
+                    var column = 0
+                    lane.forEach { span ->
+                        if (span.startIndex > column) {
+                            Spacer(Modifier.weight((span.startIndex - column).toFloat()))
+                        }
+                        Box(
+                            Modifier
+                                .weight(span.dayCount.toFloat())
+                                .padding(horizontal = Dimensions.monthSpanInset)
+                                .fillMaxHeight()
+                                .clip(spanShape(span, Dimensions.monthSpanBar / 2))
+                                .background(calendarDotColor(span.event.sourceId, sources)),
+                        )
+                        column = span.endIndex + 1
+                    }
+                    if (column < 7) Spacer(Modifier.weight((7 - column).toFloat()))
                 }
             }
         }
@@ -198,6 +293,7 @@ private fun DayCell(
     isToday: Boolean,
     isSelected: Boolean,
     marks: DayMarks?,
+    barredSources: Set<String>,
     sources: List<CalendarSource>,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -228,7 +324,7 @@ private fun DayCell(
                 )
             }
             Spacer(Modifier.height(3.dp))
-            DayMarkDots(marks, sources)
+            DayMarkDots(marks, barredSources, sources)
         }
     }
 }
@@ -250,9 +346,9 @@ private const val MaxDayMarks = 4
  * an empty day still occupies the row so the grid doesn't shift.
  */
 @Composable
-private fun DayMarkDots(marks: DayMarks?, sources: List<CalendarSource>) {
+private fun DayMarkDots(marks: DayMarks?, barredSources: Set<String>, sources: List<CalendarSource>) {
     val colors = buildList {
-        marks?.sourceIds?.forEach { add(calendarDotColor(it, sources)) }
+        marks?.sourceIds?.forEach { if (it !in barredSources) add(calendarDotColor(it, sources)) }
         if (marks?.hasTodo == true) add(Muted)
     }.take(MaxDayMarks)
     val diameter = Dimensions.dayMarkDot

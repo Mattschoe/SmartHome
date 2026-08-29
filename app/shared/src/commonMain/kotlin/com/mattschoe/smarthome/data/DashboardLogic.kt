@@ -481,21 +481,15 @@ const val EventDragSnapMinutes = 15
 data class EventMove(val event: CalendarEvent, val date: LocalDate, val startMinute: Int)
 
 /**
- * Whether this row is the *whole* of its event rather than one day of a longer one — the same day
- * count [expandCalendarEvent] arrived at, read back off the bounds it stamped on every row.
+ * Whether this row is the *whole* of its event rather than one day of a longer one — [coveredDays]
+ * read off the bounds [expandCalendarEvent] stamped on every row.
  *
  * A multi-day row cannot be dragged: it draws the part of the event falling on its own day (a day
  * merely spanned reads 00:00–24:00), so there is no one start for a drop to move.
  */
 fun CalendarEvent.spansOneDay(): Boolean {
-    val start = start ?: return false
-    val end = end ?: return false
-    if (start.date != date) return false
-    val endsExclusively = allDay || end.time == LocalTime(0, 0)
-    val lastDay = end.date
-        .let { if (endsExclusively && it > start.date) it.plus(-1, DateTimeUnit.DAY) else it }
-        .coerceAtLeast(start.date)
-    return lastDay == start.date
+    val covered = coveredDays() ?: return false
+    return covered.start == date && covered.endInclusive == date
 }
 
 /**

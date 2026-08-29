@@ -71,7 +71,9 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mattschoe.smarthome.data.DaySpan
 import com.mattschoe.smarthome.data.DaysPerWeek
+import com.mattschoe.smarthome.data.daySpanLanes
 import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.HoursPerDay
 import com.mattschoe.smarthome.data.MinutesPerDay
@@ -97,6 +99,7 @@ import com.mattschoe.smarthome.ui.theme.Ink
 import com.mattschoe.smarthome.ui.theme.InkSoft
 import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.OnForest
+import com.mattschoe.smarthome.ui.theme.onCalendarColor
 import com.mattschoe.smarthome.ui.theme.Rose
 import kotlinx.coroutines.flow.first
 import kotlinx.datetime.DateTimeUnit
@@ -316,17 +319,23 @@ private fun WeekHeader(
     }
 }
 
-/** How many all-day chips a day column shows while the strip is collapsed. */
-private const val WeekAllDayCollapsedChips = 1
+/** How many lanes of all-day bars the strip shows while it is collapsed. */
+private const val WeekAllDayCollapsedLanes = 2
 
 /**
  * The band between the day header and the hour grid, holding what has no place on a clock: all-day
- * events, and the days a multi-day event merely spans. Since events are expanded per day upstream,
- * such an event shows as one chip in each day's column rather than one bar across them.
+ * events, and the days a multi-day event merely spans. An event covering several of the week's days
+ * is **one bar drawn across them** ([daySpanLanes]) rather than a chip repeated in each column — the
+ * layout every other calendar uses, and the only one in which a trip reads as a trip.
  *
- * It stays **collapsed** to a single row — a busy Tuesday would otherwise push the hours off the
- * card — with a "+n" hint on the days holding more, and a caret in the gutter that opens the lot.
- * A week with no all-day entries takes no room at all.
+ * Bars are packed into lanes longest-first, so a multi-day run always sits at the top of the strip
+ * and cannot be pushed under the fold by a day that happens to hold three single-day entries. Those
+ * single-day entries then share whatever lanes are left, since two bars on different days sit in the
+ * same lane.
+ *
+ * The strip stays **collapsed** to [WeekAllDayCollapsedLanes] lanes — a busy Tuesday would otherwise
+ * push the hours off the card — with a "+n" hint on the days holding more, and a caret in the gutter
+ * that opens the lot. A week with no all-day entries takes no room at all.
  */
 @Composable
 private fun AllDayStrip(
@@ -339,8 +348,15 @@ private fun AllDayStrip(
         eventsByDay[date].orEmpty().filter { it.startMinute == null }
     }
     if (byDay.values.all { it.isEmpty() }) return
-    var expanded by remember { mutableStateOf(false) }
-    val hasMore = byDay.values.any { it.size > WeekAllDayCollapsedChips }
+    val lanes = daySpanLanes(days, byDay)
+    var expanded by remember(days) { mutableStateOf(false) }
+    val shown = if (expanded) lanes else lanes.take(WeekAllDayCollapsedLanes)
+    // What the fold is hiding, per column: the days each dropped bar covers, so the hint lands on the
+    // day the reader would look for the event on.
+    val hidden = IntArray(days.size)
+    lanes.drop(shown.size).forEach { lane ->
+        lane.forEach { span -> for (index in span.startIndex..span.endIndex) hidden[index]++ }
+    }
 
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Box(
@@ -349,7 +365,7 @@ private fun AllDayStrip(
                 .height(Dimensions.weekAllDayChipHeight),
             contentAlignment = Alignment.Center,
         ) {
-            if (hasMore) {
+            if (lanes.size > WeekAllDayCollapsedLanes) {
                 Icon(
                     painter = painterResource(
                         if (expanded) Res.drawable.drop_up_filled else Res.drawable.drop_down_filled,
@@ -363,54 +379,109 @@ private fun AllDayStrip(
                 )
             }
         }
-        days.forEach { date ->
-            val events = byDay.getValue(date)
-            val shown = if (expanded) events else events.take(WeekAllDayCollapsedChips)
-            val hidden = events.size - shown.size
-            Column(
-                modifier = Modifier.weight(1f).padding(end = Dimensions.weekBlockGap),
-                verticalArrangement = Arrangement.spacedBy(Dimensions.weekBlockGap),
-            ) {
-                shown.forEach { event ->
-                    AllDayChip(event, calendarDotColor(event.sourceId, sources), onOpenEvent)
-                }
-                if (hidden > 0) {
-                    Text(
-                        text = "+$hidden",
-                        color = Muted,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .clickable { expanded = true }
-                            .padding(horizontal = Dimensions.weekBlockPadding),
-                    )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(Dimensions.weekBlockGap),
+        ) {
+            shown.forEach { lane -> AllDayLane(lane, days.size, sources, onOpenEvent) }
+            if (hidden.any { it > 0 }) {
+                Row(Modifier.fillMaxWidth()) {
+                    hidden.forEach { count ->
+                        Box(Modifier.weight(1f).padding(end = Dimensions.weekBlockGap)) {
+                            if (count > 0) {
+                                Text(
+                                    text = "+$count",
+                                    color = Muted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier
+                                        .clickable { expanded = true }
+                                        .padding(horizontal = Dimensions.weekBlockPadding),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * One lane of the strip: its bars laid across [dayCount] equal columns, with weighted spacers
+ * standing in for the days nothing covers. Weights rather than offsets, so a bar lines up with the
+ * hour grid's columns under it at any card width.
+ */
 @Composable
-private fun AllDayChip(event: CalendarEvent, color: Color, onOpen: (CalendarEvent) -> Unit) {
+private fun AllDayLane(
+    lane: List<DaySpan>,
+    dayCount: Int,
+    sources: List<CalendarSource>,
+    onOpenEvent: (CalendarEvent) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().height(Dimensions.weekAllDayChipHeight)) {
+        var column = 0
+        lane.forEach { span ->
+            if (span.startIndex > column) Spacer(Modifier.weight((span.startIndex - column).toFloat()))
+            AllDayBar(
+                span = span,
+                color = calendarDotColor(span.event.sourceId, sources),
+                onOpen = onOpenEvent,
+                modifier = Modifier.weight(span.dayCount.toFloat()),
+            )
+            column = span.endIndex + 1
+        }
+        if (column < dayCount) Spacer(Modifier.weight((dayCount - column).toFloat()))
+    }
+}
+
+/**
+ * One bar: its calendar's colour at full strength, unlike the hour grid's blocks — the strip is read
+ * across the week rather than down a column, and a solid run is what makes a span legible as one
+ * thing. The label rides on it in [onCalendarColor]'s ink.
+ *
+ * An edge the event carries on past is drawn square, so a run continuing into the neighbouring week
+ * (or, in the month grid, the next row) reads as cut rather than as ending here.
+ */
+@Composable
+private fun AllDayBar(
+    span: DaySpan,
+    color: Color,
+    onOpen: (CalendarEvent) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(Dimensions.weekAllDayChipHeight)
-            .clip(RoundedCornerShape(Dimensions.weekBlockRadius))
-            .background(eventBlockFill(color))
-            .clickable { onOpen(event) }
-            .semantics { contentDescription = "Åbn ${event.title}" },
+        modifier = modifier
+            .padding(end = Dimensions.weekBlockGap)
+            .fillMaxHeight()
+            .clip(spanShape(span, Dimensions.weekBlockRadius))
+            .background(color)
+            .clickable { onOpen(span.event) }
+            .semantics { contentDescription = "Åbn ${span.event.title}" },
         contentAlignment = Alignment.CenterStart,
     ) {
         Text(
-            text = event.title,
-            color = Ink,
+            text = span.event.title,
+            color = onCalendarColor(color),
             fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = Dimensions.weekBlockPadding),
         )
     }
+}
+
+/** A bar's corners: rounded where the event begins or ends, square where it runs on past the edge. */
+internal fun spanShape(span: DaySpan, radius: Dp): RoundedCornerShape {
+    val leading = if (span.continuesBefore) 0.dp else radius
+    val trailing = if (span.continuesAfter) 0.dp else radius
+    return RoundedCornerShape(
+        topStart = leading,
+        bottomStart = leading,
+        topEnd = trailing,
+        bottomEnd = trailing,
+    )
 }
 
 /** Fill alpha of an event block: its calendar's color dropped back far enough that the title reads. */

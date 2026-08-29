@@ -82,11 +82,21 @@ object Dimensions {
     val dayMarkRing = 0.5.dp
     // The disc carrying a day number, in the month grid and in the week view's day header.
     val calendarDayDisc = 34.dp
-    // A month page: six rows of [minTouch] cells, gapped. Stated rather than wrapped, because the
-    // grid pages inside a vertical scroll — a pager there has no height to measure against, and every
-    // month is this tall anyway, so the agenda under it doesn't shift as the months slide past.
+    // Under each week of the month grid, the band its multi-day events run their bars across (see
+    // MonthView.kt). Reserved on every row rather than only the rows that need it: a page whose rows
+    // changed height as the reader paged months would walk the grid up and down under their finger.
+    val monthSpanLanes = 2
+    val monthSpanBar = 4.dp
+    val monthSpanGap = 2.dp
+    // Held off the cell's edges, so two events sharing a lane on neighbouring days read as two bars.
+    val monthSpanInset = 1.dp
+    val monthSpanBand = (monthSpanBar + monthSpanGap) * monthSpanLanes
+    // A month page: six rows of a [minTouch] cell over that band, gapped. Stated rather than wrapped,
+    // because the grid pages inside a vertical scroll — a pager there has no height to measure
+    // against, and every month is this tall anyway, so the agenda under it doesn't shift as the
+    // months slide past.
     val monthGridRowGap = 2.dp
-    val monthGridHeight = minTouch * 6 + monthGridRowGap * 5
+    val monthGridHeight = (minTouch + monthSpanBand) * 6 + monthGridRowGap * 5
 
     // Right-card Calendar panel (week view). The grid is 24 hour rows beside a gutter of hour labels.
     // Widths stay proportional (seven weight(1f) columns), so the same composables re-flow on a phone.
