@@ -624,7 +624,8 @@ private const val MaxEventDays = 62
  * the 8th covers through the 7th, and a timed one ending exactly at midnight belongs to the day
  * before, not to a sliver of the next.
  *
- * Pure, and shared by the Home Assistant mapper and the mock store so both expand identically.
+ * Pure, and shared by the Home Assistant mapper, the mock store and the offline overlay so all three
+ * expand identically — [pending] is what the last of those marks its rows with.
  */
 fun expandCalendarEvent(
     sourceId: String,
@@ -636,6 +637,7 @@ fun expandCalendarEvent(
     recurrenceId: String? = null,
     location: String? = null,
     rrule: String? = null,
+    pending: Boolean = false,
 ): List<CalendarEvent> {
     val firstDay = start.date
     val endsExclusively = allDay || end.time == LocalTime(0, 0)
@@ -681,6 +683,7 @@ fun expandCalendarEvent(
             start = start,
             end = end,
             rrule = rrule,
+            pending = pending,
         )
     }
 }

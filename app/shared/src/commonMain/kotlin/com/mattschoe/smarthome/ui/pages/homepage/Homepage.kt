@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.mattschoe.smarthome.data.cycle
+import com.mattschoe.smarthome.data.model.ConnectionState
 import com.mattschoe.smarthome.ui.layout.DashboardLayout
 import com.mattschoe.smarthome.ui.theme.Dimensions
 import com.mattschoe.smarthome.ui.theme.Forest
@@ -141,6 +142,7 @@ private fun ExpandedDashboard(ready: HomeScreenState.Ready, viewModel: HomepageV
                 nowMinutes = ready.nowMinutes,
                 calendarSources = ready.calendar.sources,
                 calendarStale = ready.calendar.stale,
+                offline = ready.connection == ConnectionState.Offline,
                 calendarHasTodoList = ready.calendar.hasTodoList,
                 calendarReminders = ready.calendar.reminders,
                 dayMarks = ready.dayMarks,

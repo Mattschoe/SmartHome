@@ -454,6 +454,8 @@ private fun AllDayBar(
         modifier = modifier
             .padding(end = Dimensions.weekBlockGap)
             .fillMaxHeight()
+            // As in the timed blocks: an event still queued for the home is drawn back, not badged.
+            .alpha(if (span.event.pending) Dimensions.pendingWriteAlpha else 1f)
             .clip(spanShape(span, Dimensions.weekBlockRadius))
             .background(color)
             .clickable { onOpen(span.event) }
@@ -1020,7 +1022,15 @@ private fun DayColumn(
                     .offset(x = laneWidth * placed.lane, y = minuteOffset(placed.startMinute, hourHeight))
                     .width(laneWidth - Dimensions.weekBlockGap)
                     .height(height)
-                    .alpha(if (placed.event == draggedEvent) HeldBlockAlpha else 1f)
+                    // Held under a finger outranks unsent: a dragged block's own slot has to fall
+                    // back far enough to read what is under it, whichever of the two it is.
+                    .alpha(
+                        when {
+                            placed.event == draggedEvent -> HeldBlockAlpha
+                            placed.event.pending -> Dimensions.pendingWriteAlpha
+                            else -> 1f
+                        },
+                    )
                     .then(
                         // Keyed on what it carries, not on the scale or the drag: it has to survive
                         // both a pinch and its own drag's recompositions without restarting.

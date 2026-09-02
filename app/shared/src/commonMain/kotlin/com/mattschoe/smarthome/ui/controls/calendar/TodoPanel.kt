@@ -8,16 +8,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -159,53 +160,63 @@ private fun TodoDayPager(
     ) { page ->
         val pageDay = dayAtPage(calendarWindow, page)
         val content = remember(todos, pageDay) { todoPage(todos, pageDay) }
-        val scroll = rememberScrollState()
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScrollFade(scroll)
-                .verticalScroll(scroll),
+        // Lazy rather than a scrolled Column: a page carries every unfinished day before it, so a
+        // week of neglect is an arbitrarily long list, and the phone now scrolls it under a dead zone
+        // instead of ending above one. The fade goes outside the list, as everywhere else, and reads
+        // `canScroll*` off the same state — so it marks whichever edge still has rows beyond it.
+        val listState = rememberLazyListState()
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().verticalScrollFade(listState),
         ) {
-            content.open.forEach { group -> TodoDateGroup(group, today, onToggleTodo, onEditTodo) }
             if (content.open.isEmpty()) {
-                Text(
-                    text = "Ingen opgaver",
-                    color = Muted,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
+                item(key = "empty") {
+                    Text(
+                        text = "Ingen opgaver",
+                        color = Muted,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
             }
+            todoDateGroups(content.open, "open", today, onToggleTodo, onEditTodo)
             if (content.done.isNotEmpty()) {
-                DoneSeparator()
-                content.done.forEach { group -> TodoDateGroup(group, today, onToggleTodo, onEditTodo) }
+                item(key = "done-rule") { DoneSeparator() }
+                todoDateGroups(content.done, "done", today, onToggleTodo, onEditTodo)
             }
         }
     }
 }
 
 /**
- * One day's rows under its date header. Rows are keyed by stable id so a backend echo re-keys them
- * instead of rebuilding, and so a row moving between the two sections keeps its inline editor.
+ * The days' rows under their date headers, emitted straight into the list. Rows are keyed by stable
+ * id so a backend echo re-keys them instead of rebuilding, and so a row moving between the two
+ * sections keeps its inline editor; the headers and their trailing gap are keyed by [section] and
+ * day, since the same day can head both the open half and the UDFØRT one.
  */
-@Composable
-private fun TodoDateGroup(
-    group: TodoGroup,
+private fun LazyListScope.todoDateGroups(
+    groups: List<TodoGroup>,
+    section: String,
     today: LocalDate,
     onToggleTodo: (String) -> Unit,
     onEditTodo: (String, String) -> Unit,
 ) {
-    SectionLabel(formatTodoDue(group.due, today))
-    Spacer(Modifier.height(4.dp))
-    group.items.forEach { todo ->
-        key(todo.id) {
+    groups.forEach { group ->
+        item(key = "$section-head-${group.due}") {
+            SectionLabel(formatTodoDue(group.due, today))
+            Spacer(Modifier.height(4.dp))
+        }
+        items(group.items, key = { it.id }) { todo ->
             TodoRow(
                 todo = todo,
                 onToggle = { onToggleTodo(todo.id) },
                 onCommitEdit = { text -> onEditTodo(todo.id, text) },
             )
         }
+        item(key = "$section-gap-${group.due}") {
+            Spacer(Modifier.height(Dimensions.mediaSectionGap))
+        }
     }
-    Spacer(Modifier.height(Dimensions.mediaSectionGap))
 }
 
 /**

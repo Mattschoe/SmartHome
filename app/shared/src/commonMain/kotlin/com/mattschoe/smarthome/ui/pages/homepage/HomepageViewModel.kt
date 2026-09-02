@@ -29,6 +29,7 @@ import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarPaletteColor
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.data.model.ConnectionState
 import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.MusicSource
@@ -254,6 +255,7 @@ class HomepageViewModel(
                 // draws one reads them off the source, so folding them in once here is the whole of
                 // the wiring (see applyCalendarPrefs).
                 calendar = home.calendar.withPrefs(calendar.surface.chrome.prefs),
+                connection = home.connection,
                 today = calendar.today,
                 displayedMonth = calendar.displayedMonth,
                 selectedDay = calendar.selectedDay,
@@ -615,9 +617,14 @@ class HomepageViewModel(
                     // triggers a refetch, so the uid is recovered by finding the event that just
                     // appeared. The event itself is saved either way: a reminder that could not be
                     // attached is worth a notice, not a rollback.
-                    if (reminder != null) attachReminder(sourceId, draft, reminder)
+                    //
+                    // A queued create has no uid to key on at all — the one it is drawn under is this
+                    // device's, and the reminder table is the home's — so its reminder is left for
+                    // the event to be given again once the create has landed.
+                    if (reminder != null && !wasQueued()) attachReminder(sourceId, draft, reminder)
                 }
                 _eventEditor.value = null
+                if (wasQueued()) showToast(QUEUED_TOAST)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -659,6 +666,18 @@ class HomepageViewModel(
 
     private fun rangeFor(scope: EventEditScope): RecurrenceRange =
         if (scope == EventEditScope.ThisAndFuture) RecurrenceRange.ThisAndFuture else RecurrenceRange.ThisEvent
+
+    /**
+     * Whether the calendar write that just returned was queued rather than sent. A write with no
+     * connection behind it succeeds locally — the adapter puts it in the offline outbox and draws it
+     * — so the *only* thing that distinguishes the two is whether the home was reachable at the time,
+     * which is exactly what [ConnectionState] says.
+     *
+     * Read off the adapter rather than counted: a pending-write count on the device state would have
+     * to be diffed across an asynchronous republish to answer the same question, and would still be
+     * answering it from the connection's state.
+     */
+    private fun wasQueued(): Boolean = adapter.subscribe().value.connection == ConnectionState.Offline
 
     private fun CalendarEvent.matches(sourceId: String, draft: CalendarEventDraft): Boolean =
         uid != null && this.sourceId == sourceId && title == draft.summary && start == draft.start
@@ -724,6 +743,7 @@ class HomepageViewModel(
             try {
                 adapter.deleteEvent(event.sourceId, uid, recurrenceIdFor(event, scope), rangeFor(scope))
                 onDone()
+                if (wasQueued()) showToast(QUEUED_TOAST)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -792,6 +812,7 @@ class HomepageViewModel(
                         .map { home -> home.calendar.events.any { it.matches(move) } }
                         .first { it }
                 }
+                if (wasQueued()) showToast(QUEUED_TOAST)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1098,6 +1119,13 @@ class HomepageViewModel(
 
         const val SAVE_FAILED_TOAST = "Kunne ikke gemme"
         const val DELETE_FAILED_TOAST = "Kunne ikke slette"
+
+        /**
+         * What a calendar write made with the home unreachable says. The write itself succeeded as
+         * far as this device is concerned — it is queued, drawn, and will go out on reconnect — so
+         * the surface closes as usual and this only explains why the change is marked as unsent.
+         */
+        const val QUEUED_TOAST = "Gemt lokalt – sendes når forbindelsen er tilbage"
         const val REMINDER_FAILED_TOAST = "Kunne ikke gemme påmindelsen"
 
         /**

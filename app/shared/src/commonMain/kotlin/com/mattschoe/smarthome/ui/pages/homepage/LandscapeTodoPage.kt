@@ -30,6 +30,8 @@ fun LandscapeTodoPage(
     today: LocalDate,
     calendarWindow: ClosedRange<LocalDate>,
     hasTodoList: Boolean,
+    /** Whether the home is out of reach — what makes a tick or a new task wait in the outbox. */
+    offline: Boolean,
     viewModel: HomepageViewModel,
     modifier: Modifier = Modifier,
 ) {
@@ -38,7 +40,7 @@ fun LandscapeTodoPage(
         contentPadding = PaddingValues(Dimensions.phoneCardPadding),
     ) {
         Column(Modifier.fillMaxSize()) {
-            TodoPageHeader(todoDay)
+            TodoPageHeader(todoDay, offline)
             Spacer(Modifier.height(8.dp))
             TodoPanel(
                 todos = todos,

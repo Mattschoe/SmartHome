@@ -268,6 +268,12 @@ data class CalendarEvent(
     val start: LocalDateTime? = null,
     val end: LocalDateTime? = null,
     val rrule: String? = null,
+    /**
+     * Written here but not yet acknowledged by the home — an add, edit or move made while Home
+     * Assistant was unreachable, drawn from the offline outbox until the queued write lands. The
+     * views mark such a row so it does not read as agreed-upon truth.
+     */
+    val pending: Boolean = false,
 )
 
 /**
@@ -294,7 +300,11 @@ enum class EventEditScope { ThisEvent, ThisAndFuture, AllEvents }
  * ([allDay]) ignores the time parts. [end] is **exclusive**, matching iCal and Home Assistant.
  * Attendees are deliberately absent: Home Assistant's calendar model has no such field, and which
  * calendar an event lives on already says whose it is.
+ *
+ * Serializable because a draft written while the home is unreachable waits in the offline outbox
+ * (`data/offline/`), which is persisted as JSON.
  */
+@Serializable
 data class CalendarEventDraft(
     val summary: String,
     val start: LocalDateTime,
@@ -340,6 +350,13 @@ data class TodoItem(
     val done: Boolean,
     val completedOn: LocalDate? = null,
     val createdOn: LocalDate? = null,
+    /**
+     * Written here, not yet acknowledged by the home: the task is waiting in the offline outbox
+     * (`data/offline/`) for a socket. Not device truth and never sent anywhere — the overlay
+     * ([com.mattschoe.smarthome.data.offline.applyPendingTodos]) sets it, and it clears itself the
+     * moment the write lands and Home Assistant pushes the list back.
+     */
+    val pending: Boolean = false,
 ) {
     /** The day this belongs on once ticked off — [completedOn] where we have it, else [due]. */
     val closedOn: LocalDate get() = completedOn ?: due
@@ -422,6 +439,13 @@ data class CalendarState(
 }
 
 /**
+ * Whether the adapter is actually talking to the home right now. [Offline] is what makes a write
+ * queue instead of fail: the surfaces that have no staleness flag of their own read this to say
+ * whether what they just did went out or is waiting.
+ */
+enum class ConnectionState { Live, Offline }
+
+/**
  * The device-truth state for the whole home, exposed by a `HomeAdapter`
  * Each room owns its own lights *and* audio in [rooms];
  * @param playlists is the shared library any room can play from;
@@ -442,4 +466,9 @@ data class HomeState(
     val calendar: CalendarState,
     val spotifyPlaylists: List<BrowseItem> = emptyList(),
     val spotifyRecentlyPlayed: List<BrowseItem> = emptyList(),
+    /**
+     * Whether the home is reachable. Adapters with no connection of their own (the mock) are always
+     * [ConnectionState.Live] — nothing they do can fail for want of a network.
+     */
+    val connection: ConnectionState = ConnectionState.Live,
 )

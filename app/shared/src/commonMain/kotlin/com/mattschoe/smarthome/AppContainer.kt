@@ -19,6 +19,8 @@ import com.mattschoe.smarthome.data.MusicAssistantAdapter
 import com.mattschoe.smarthome.data.NoOpNotificationPresenter
 import com.mattschoe.smarthome.data.NotificationPresenter
 import com.mattschoe.smarthome.data.NowPlayingBridge
+import com.mattschoe.smarthome.data.offline.KeyValueOutboxStore
+import com.mattschoe.smarthome.data.offline.OfflineOutbox
 import com.mattschoe.smarthome.data.CalendarPrefs
 import com.mattschoe.smarthome.data.CalendarPrefsStore
 import com.mattschoe.smarthome.data.InMemoryCalendarPrefsStore
@@ -38,9 +40,10 @@ class AppContainer(
     haConfig: HaConfig? = haConfigFromSecrets(),
     maConfig: MaConfig? = maConfigFromSecrets(haConfig),
     /**
-     * Where the offline calendar snapshot is kept. Defaults to the platform's own store; Android has
-     * no ambient context to build one from, so `AppApplication` passes a
-     * [com.mattschoe.smarthome.data.SharedPreferencesStore] instead. `null` simply disables the cache.
+     * Where the offline calendar snapshot and the queue of unsent writes are kept. Defaults to the
+     * platform's own store; Android has no ambient context to build one from, so `AppApplication`
+     * passes a [com.mattschoe.smarthome.data.SharedPreferencesStore] instead. `null` simply disables
+     * both the cache and the outbox.
      */
     keyValueStore: KeyValueStore? = platformKeyValueStore(),
     val homeAdapter: HomeAdapter = buildHomeAdapter(haConfig, maConfig, keyValueStore),
@@ -103,7 +106,8 @@ enum class DeviceRole { Phone, WallDisplay }
 /**
  * Pick the adapter stack: no HA token → [MockAdapter]; HA only → [HomeAssistantAdapter]; HA + MA →
  * the [CompositeHomeAdapter] (HA devices + MA music). MA never runs without HA — it only enriches an
- * existing live home. The mock needs no calendar cache: its fixtures are always there.
+ * existing live home. The mock needs neither the calendar cache nor the write outbox: its fixtures
+ * are always there and nothing it is told can fail to reach a box.
  */
 private fun buildHomeAdapter(
     haConfig: HaConfig?,
@@ -111,7 +115,13 @@ private fun buildHomeAdapter(
     keyValueStore: KeyValueStore?,
 ): HomeAdapter {
     if (haConfig?.hasToken != true) return MockAdapter()
-    val ha = HomeAssistantAdapter(haConfig, keyValueStore?.let(::KeyValueCalendarCache))
+    val ha = HomeAssistantAdapter(
+        haConfig,
+        keyValueStore?.let(::KeyValueCalendarCache),
+        // Both ride on the same store, and both are pointless without one: with nowhere to persist
+        // it, a queued write would be lost by the restart it is meant to survive.
+        keyValueStore?.let { OfflineOutbox(KeyValueOutboxStore(it)) },
+    )
     return if (maConfig?.hasToken == true) CompositeHomeAdapter(ha, MusicAssistantAdapter(maConfig)) else ha
 }
 

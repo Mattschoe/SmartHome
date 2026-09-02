@@ -59,6 +59,7 @@ import com.mattschoe.smarthome.data.model.QueueMode
 import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.formatDayAndMonth
 import com.mattschoe.smarthome.ui.components.CardContainer
+import com.mattschoe.smarthome.ui.components.OfflineLabel
 import com.mattschoe.smarthome.ui.controls.calendar.AddEventButton
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarPanel
 import com.mattschoe.smarthome.ui.controls.calendar.CalendarSettingsButton
@@ -130,6 +131,8 @@ fun RightCard(
     calendarSources: List<CalendarSource>,
     /** Whether the calendar is being rendered from the offline cache rather than from a live fetch. */
     calendarStale: Boolean,
+    /** Whether the home is out of reach — what the Opgaver corner says beside its day. */
+    offline: Boolean,
     /** Whether Home Assistant exposes a todo list the checklist can write to. */
     calendarHasTodoList: Boolean,
     /** The home's reminder rules — read by the editor's row, the detail popup and the gear popup. */
@@ -235,6 +238,7 @@ fun RightCard(
                     calendarBusy = eventEditor != null || calendarSettings != null,
                     today = today,
                     todoDay = todoDay,
+                    offline = offline,
                     onSelectMusicSource = onSelectMusicSource,
                     onShowToday = onShowToday,
                     onAddEvent = onAddEvent,
@@ -440,6 +444,8 @@ private fun TrailingControl(
     calendarBusy: Boolean,
     today: LocalDate,
     todoDay: LocalDate,
+    /** See [RightCard]'s own parameter — the Opgaver corner is the checklist's only header. */
+    offline: Boolean,
     onSelectMusicSource: (MusicSource) -> Unit,
     onShowToday: () -> Unit,
     onAddEvent: () -> Unit,
@@ -472,12 +478,20 @@ private fun TrailingControl(
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(120)),
         ) {
-            Text(
-                text = formatDayAndMonth(todoDay),
-                color = Ink,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+            // The checklist has no header of its own, so the offline word joins the day here rather
+            // than being repeated over every waiting row.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (offline) OfflineLabel()
+                Text(
+                    text = formatDayAndMonth(todoDay),
+                    color = Ink,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
