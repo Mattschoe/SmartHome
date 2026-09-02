@@ -32,6 +32,7 @@ import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.ClimateState
+import com.mattschoe.smarthome.data.model.ConnectionState
 import com.mattschoe.smarthome.data.model.HomeState
 import com.mattschoe.smarthome.data.model.MediaTrack
 import com.mattschoe.smarthome.data.model.QueueMode
@@ -42,6 +43,10 @@ import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.RoomState
 import com.mattschoe.smarthome.data.model.TodoItem
 import com.mattschoe.smarthome.data.model.Warmth
+import com.mattschoe.smarthome.data.offline.OfflineOutbox
+import com.mattschoe.smarthome.data.offline.PendingWrite
+import com.mattschoe.smarthome.data.offline.applyPendingEvents
+import com.mattschoe.smarthome.data.offline.applyPendingTodos
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
@@ -126,6 +131,11 @@ import kotlinx.serialization.json.putJsonObject
 class HomeAssistantAdapter(
     private val config: HaConfig,
     private val cache: CalendarCache? = null,
+    /**
+     * Where writes made while the box is unreachable wait. `null` — like a `null` [cache] — simply
+     * means this adapter has no offline behaviour and a write with no socket fails as it always did.
+     */
+    private val outbox: OfflineOutbox? = null,
 ) : HomeAdapter {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -140,6 +150,9 @@ class HomeAssistantAdapter(
     private val todoItems = MutableStateFlow<List<TodoItem>>(emptyList())
     // True until a live fetch lands — what the panel labels as showing cached, possibly outdated data.
     private val calendarStale = MutableStateFlow(true)
+    // Whether the socket is up, published on the state so a surface with no staleness flag of its own
+    // (and the ViewModel, deciding what to say after a write) can still tell.
+    private val connection = MutableStateFlow(ConnectionState.Offline)
 
     // The reminder table, held in the home's MQTT broker and read over this same socket. Its own
     // store rather than another field here: the topics *are* the keys and the payloads the records,
@@ -188,7 +201,9 @@ class HomeAssistantAdapter(
 
     init {
         // Render the last-known calendar (marked stale) before the socket is even up: the household
-        // has no other calendar client, so an unreachable box must not mean an empty calendar.
+        // has no other calendar client, so an unreachable box must not mean an empty calendar. What
+        // was written during the last outage comes back with it — the outbox seeded itself from disk,
+        // and `calendarState()` overlays whatever is still queued onto the cached window.
         cache?.read()?.let { cached ->
             calendarSources.value = cached.sources
             calendarEvents.value = cached.events
@@ -356,8 +371,10 @@ class HomeAssistantAdapter(
     }
 
     // Todo intents. Each applies the matching pure transition optimistically (so the checkbox never
-    // lags the tap) and then calls the HA service; the list's push subscription re-publishes the
-    // whole list moments later, replacing the optimistic row — and its id — with HA's own.
+    // lags the tap) and then sends the HA service call through [writeOrQueue]: with a socket the list's
+    // push subscription re-publishes the whole list moments later, replacing the optimistic row — and
+    // its id — with HA's own; without one the write waits in the offline outbox and the overlay
+    // ([applyPendingTodos]) keeps drawing it, including through that very first push after reconnect.
 
     /**
      * Add a todo due on [due]. HA mints the real `uid`, so the optimistic row carries a temporary one
@@ -371,24 +388,22 @@ class HomeAssistantAdapter(
      */
     @OptIn(ExperimentalUuidApi::class)
     override fun addTodo(due: LocalDate, label: String) {
-        val entityId = todoEntityId ?: return
         val trimmed = label.trim()
         if (trimmed.isEmpty()) return
         val today = today()
-        val createdOn = today.takeIf { todoDescriptionCapable }
-        mutateTodos { it.addTodo(Uuid.random().toString(), due, trimmed, createdOn = createdOn ?: due) }
-        callService(
-            "todo",
-            "add_item",
-            buildJsonObject {
-                put("item", trimmed)
-                put("due_date", due.toString())
-                if (createdOn != null) {
-                    put("description", formatTodoDescription(createdOn = createdOn, closedOn = null))
-                }
-            },
-            entityTarget(entityId),
-        )
+        val localId = Uuid.random().toString()
+        // The optimistic row records the creation day only where the list can store it, so what is on
+        // screen is what Home Assistant will report back. The *queued* write records it either way:
+        // with no socket we have not discovered whether the list takes a description, and the day is
+        // dropped at send time if it turns out not to.
+        val recordedCreatedOn = if (todoDescriptionCapable) today else due
+        mutateTodos { it.addTodo(localId, due, trimmed, createdOn = recordedCreatedOn) }
+        queueableWrite(
+            name = "todo.add_item",
+            write = { id -> PendingWrite.AddTodo(id, nowEpochMs(), localId, due, trimmed, createdOn = today) },
+        ) {
+            sendAddTodo(due, trimmed, createdOn = today, closedOn = null)
+        }
     }
 
     /**
@@ -401,79 +416,140 @@ class HomeAssistantAdapter(
      * to sitting on the day they were due, identically on every client.
      */
     override fun toggleTodo(id: String) {
-        val entityId = todoEntityId ?: return
-        val existing = todoItems.value.firstOrNull { it.id == id } ?: return
-        val wasDone = existing.done
+        // Read the row from the published state, not the raw list: a task written down during an
+        // outage lives in the outbox overlay until it goes out, and it is just as tickable as any
+        // other row on the page.
+        val existing = _state.value.calendar.todos.firstOrNull { it.id == id } ?: return
         val today = today()
+        val done = !existing.done
+        val closedOn = today.takeIf { done }
         mutateTodos { it.toggleTodo(id, today) }
-        callService(
-            "todo",
-            "update_item",
-            // Always address by uid: `update_item` matches on uid *or* summary, and two todos may
-            // well share a summary.
-            buildJsonObject {
-                put("item", id)
-                put("status", if (wasDone) "needs_action" else "completed")
-                if (todoDescriptionCapable) {
-                    // The write replaces the field, so the creation day has to be carried back
-                    // through it — un-ticking clears only the closing day.
-                    put(
-                        "description",
-                        formatTodoDescription(
-                            createdOn = existing.createdOn,
-                            closedOn = today.takeUnless { wasDone },
-                        ),
-                    )
-                }
+        queueableWrite(
+            name = "todo.update_item",
+            write = { wid ->
+                PendingWrite.ToggleTodo(wid, nowEpochMs(), id, done, closedOn, existing.createdOn)
             },
-            entityTarget(entityId),
-        )
-    }
-
-    /** Set a todo's label; committing a blank one removes it — the UI's delete escape hatch. */
-    override fun editTodo(id: String, label: String) {
-        val entityId = todoEntityId ?: return
-        val trimmed = label.trim()
-        mutateTodos { it.editTodo(id, trimmed) }
-        if (trimmed.isEmpty()) {
-            // `remove_item` takes a *list* of items, unlike the other two.
-            callService(
-                "todo",
-                "remove_item",
-                buildJsonObject { putJsonArray("item") { add(id) } },
-                entityTarget(entityId),
-            )
-        } else {
-            callService(
-                "todo",
-                "update_item",
-                buildJsonObject { put("item", id); put("rename", trimmed) },
-                entityTarget(entityId),
-            )
+        ) {
+            sendToggleTodo(id, done, closedOn, existing.createdOn)
         }
     }
 
     /**
-     * Apply a pure todo transition to the published state *and* to the adapter's own todo field, so
-     * the optimistic edit survives the next `rebuild()` (which reads the field, not the old state).
+     * Set a todo's label; committing a blank one removes it — the UI's delete escape hatch. Which of
+     * the two it is, is decided here rather than on the wire: a queued write has to say what it means
+     * on its own, since the row it was made against is long gone by the time the queue drains.
      */
-    private fun mutateTodos(transform: (HomeState) -> HomeState) {
-        val next = transform(_state.value)
-        todoItems.value = next.calendar.todos
-        _state.value = next
+    override fun editTodo(id: String, label: String) {
+        val trimmed = label.trim()
+        mutateTodos { it.editTodo(id, trimmed) }
+        if (trimmed.isEmpty()) {
+            queueableWrite(
+                name = "todo.remove_item",
+                write = { wid -> PendingWrite.RemoveTodo(wid, nowEpochMs(), id) },
+            ) {
+                sendRemoveTodo(id)
+            }
+        } else {
+            queueableWrite(
+                name = "todo.update_item",
+                write = { wid -> PendingWrite.EditTodo(wid, nowEpochMs(), id, trimmed) },
+            ) {
+                sendEditTodo(id, trimmed)
+            }
+        }
     }
 
-    // Calendar writes. No optimistic apply: unlike a checkbox, a saved event is worth being sure
-    // about, and the caller is already waiting on the reply — so the panel updates from the refetch
-    // these trigger, which is also the only way an expanded recurring series comes back correct.
+    /**
+     * Apply a pure todo transition to the adapter's own todo field and republish, so the optimistic
+     * edit survives the next `rebuild()` (which reads the field, not the old state) — and a restart,
+     * since the field is what the offline snapshot is written from.
+     *
+     * The transition is handed the **raw** list rather than the published one: what `rebuild()`
+     * publishes already has the outbox overlay folded in, and writing that back would turn a queued
+     * row into device truth and cache it as such.
+     */
+    private fun mutateTodos(transform: (HomeState) -> HomeState) {
+        val base = _state.value.let { it.copy(calendar = it.calendar.copy(todos = todoItems.value)) }
+        todoItems.value = transform(base).calendar.todos
+        persistCalendar()
+        rebuild()
+    }
+
+    // The wire form of each todo write, shared by the intent above it and by the drain that replays a
+    // queued one — the same split the calendar writes have, and for the same reason: a write only the
+    // online path knew how to send would be unsendable the moment it was queued.
+
+    private suspend fun sendAddTodo(
+        due: LocalDate,
+        label: String,
+        createdOn: LocalDate?,
+        closedOn: LocalDate?,
+    ) {
+        callTodoService("add_item", buildJsonObject {
+            put("item", label)
+            put("due_date", due.toString())
+            if (todoDescriptionCapable) {
+                val description = formatTodoDescription(createdOn = createdOn, closedOn = closedOn)
+                if (description.isNotEmpty()) put("description", description)
+            }
+        })
+    }
+
+    private suspend fun sendToggleTodo(
+        todoId: String,
+        done: Boolean,
+        closedOn: LocalDate?,
+        createdOn: LocalDate?,
+    ) {
+        // Always address by uid: `update_item` matches on uid *or* summary, and two todos may well
+        // share a summary.
+        callTodoService("update_item", buildJsonObject {
+            put("item", todoId)
+            put("status", if (done) "completed" else "needs_action")
+            if (todoDescriptionCapable) {
+                // The write replaces the field, so the creation day has to be carried back through
+                // it — un-ticking clears only the closing day.
+                put("description", formatTodoDescription(createdOn = createdOn, closedOn = closedOn))
+            }
+        })
+    }
+
+    private suspend fun sendEditTodo(todoId: String, label: String) {
+        callTodoService("update_item", buildJsonObject { put("item", todoId); put("rename", label) })
+    }
+
+    private suspend fun sendRemoveTodo(todoId: String) {
+        // `remove_item` takes a *list* of items, unlike the other two.
+        callTodoService("remove_item", buildJsonObject { putJsonArray("item") { add(todoId) } })
+    }
+
+    /**
+     * One `todo.*` service call, awaited rather than fired and forgotten — which is what lets a write
+     * tell "the box never heard me" from "the box said no". A home with no todo list at all is the
+     * second kind: there is nowhere for the write to land now or ever, so it fails outright instead of
+     * queueing, and the drain drops it for the same reason.
+     */
+    private suspend fun callTodoService(service: String, data: JsonObject) {
+        val entityId = todoEntityId ?: throw IllegalStateException("todo.$service: no todo list")
+        request("call_service", buildJsonObject {
+            put("domain", "todo")
+            put("service", service)
+            put("service_data", data)
+            put("target", entityTarget(entityId))
+        })
+    }
+
+    // Calendar writes. With a live socket there is no optimistic apply: unlike a checkbox, a saved
+    // event is worth being sure about, and the caller is already waiting on the reply — so the panel
+    // updates from the refetch these trigger, which is also the only way an expanded recurring series
+    // comes back correct. With no socket there is nothing to be sure about and nothing to refetch, so
+    // the write goes to the offline outbox and is drawn from there until it lands (see [writeOrQueue]).
 
     override suspend fun createEvent(sourceId: String, draft: CalendarEventDraft) {
         writableSource(sourceId)
-        request("calendar/event/create", buildJsonObject {
-            put("entity_id", sourceId)
-            put("event", draft.toEventJson())
-        })
-        refreshCalendar()
+        writeOrQueue({ id -> PendingWrite.CreateEvent(id, nowEpochMs(), sourceId, draft) }) {
+            sendCreateEvent(sourceId, draft)
+        }
     }
 
     override suspend fun updateEvent(
@@ -484,13 +560,11 @@ class HomeAssistantAdapter(
         range: RecurrenceRange,
     ) {
         writableSource(sourceId)
-        request("calendar/event/update", buildJsonObject {
-            put("entity_id", sourceId)
-            put("uid", uid)
-            putRecurrence(recurrenceId, range)
-            put("event", draft.toEventJson())
-        })
-        refreshCalendar()
+        writeOrQueue({ id ->
+            PendingWrite.UpdateEvent(id, nowEpochMs(), sourceId, uid, draft, recurrenceId, range)
+        }) {
+            sendUpdateEvent(sourceId, uid, draft, recurrenceId, range)
+        }
     }
 
     override suspend fun deleteEvent(
@@ -500,13 +574,162 @@ class HomeAssistantAdapter(
         range: RecurrenceRange,
     ) {
         writableSource(sourceId)
+        writeOrQueue({ id ->
+            PendingWrite.DeleteEvent(id, nowEpochMs(), sourceId, uid, recurrenceId, range)
+        }) {
+            sendDeleteEvent(sourceId, uid, recurrenceId, range)
+        }
+    }
+
+    // The wire form of each calendar write, shared by the intent above it and by the drain that
+    // replays a queued one. Nothing else may talk to `calendar/event/*`: a write that only the
+    // online path knew how to send would be unreplayable the moment it was queued.
+
+    private suspend fun sendCreateEvent(sourceId: String, draft: CalendarEventDraft) {
+        request("calendar/event/create", buildJsonObject {
+            put("entity_id", sourceId)
+            put("event", draft.toEventJson())
+        })
+    }
+
+    private suspend fun sendUpdateEvent(
+        sourceId: String,
+        uid: String,
+        draft: CalendarEventDraft,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) {
+        request("calendar/event/update", buildJsonObject {
+            put("entity_id", sourceId)
+            put("uid", uid)
+            putRecurrence(recurrenceId, range)
+            put("event", draft.toEventJson())
+        })
+    }
+
+    private suspend fun sendDeleteEvent(
+        sourceId: String,
+        uid: String,
+        recurrenceId: String?,
+        range: RecurrenceRange,
+    ) {
         request("calendar/event/delete", buildJsonObject {
             put("entity_id", sourceId)
             put("uid", uid)
             putRecurrence(recurrenceId, range)
         })
+    }
+
+    /**
+     * Online-first: [send] the write, and only where it never *reached* Home Assistant queue it
+     * instead of failing. A rejection — a read-only calendar, an unknown uid, an error reply — is a
+     * real answer and propagates, because it would be the same answer on every retry.
+     *
+     * A queued write returns normally, so the caller's surface closes on it exactly as on a sent one.
+     * What tells the two apart afterwards is [HomeState.connection], which the ViewModel reads to say
+     * whether the change went out or is waiting.
+     *
+     * [refresh] is what a calendar write needs and a todo write does not: events are fetched, so a
+     * saved one is only on screen once the window is refetched, while the todo list pushes itself.
+     */
+    @OptIn(ExperimentalUuidApi::class)
+    private suspend fun writeOrQueue(
+        write: (String) -> PendingWrite,
+        refresh: Boolean = true,
+        send: suspend () -> Unit,
+    ) {
+        val outbox = outbox
+        if (outbox != null && session == null) return queue(outbox, write(Uuid.random().toString()))
+        try {
+            send()
+        } catch (e: HaOfflineException) {
+            if (outbox == null) throw e
+            return queue(outbox, write(Uuid.random().toString()))
+        }
+        if (refresh) refreshCalendar()
+    }
+
+    /**
+     * [writeOrQueue] for an intent nobody is awaiting. The todo intents are on [HomeAdapter] as plain
+     * `fun`s — a checkbox does not wait for the home — so the write runs on the adapter's own scope,
+     * and a rejection is logged the way [callService] logs one rather than thrown at a caller that
+     * stopped listening the moment the tap ended.
+     */
+    private fun queueableWrite(name: String, write: (String) -> PendingWrite, send: suspend () -> Unit) {
+        scope.launch {
+            runCatching { writeOrQueue(write, refresh = false, send = send) }
+                .onFailure { println("HomeAssistantAdapter: $name failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * Put a write in the queue and republish, so the overlay draws it at once. The offline snapshot
+     * is deliberately *not* rewritten: it stays plain device truth, and the queued write is restored
+     * on the next run from the outbox's own storage — writing it into both would draw it twice.
+     */
+    private fun queue(outbox: OfflineOutbox, write: PendingWrite) {
+        outbox.enqueue(write)
+        rebuild()
+    }
+
+    /**
+     * Replay what was queued during the outage, oldest first and one at a time — the writes were made
+     * in that order and may well be edits of each other.
+     *
+     * A write that fails for want of a connection stays queued and the drain stops there; the next
+     * reconnect picks it up. A write Home Assistant *rejects* can never succeed (the calendar was
+     * made read-only, the event was deleted on another device) and is dropped rather than retried
+     * forever — logged, since the surface that made it is long gone.
+     */
+    private suspend fun drainOutbox() {
+        val outbox = outbox ?: return
+        val queued = outbox.pending.value
+        if (queued.isEmpty()) return
+        for (write in queued) {
+            try {
+                sendPending(write)
+                outbox.complete(write.id)
+            } catch (e: HaOfflineException) {
+                println(
+                    "HomeAssistantAdapter: outbox drain paused (${e.message}); " +
+                        "${outbox.pending.value.size} write(s) still queued"
+                )
+                return
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                println("HomeAssistantAdapter: dropping unsendable queued write $write: ${e.message}")
+                outbox.complete(write.id)
+            }
+        }
         refreshCalendar()
     }
+
+    /** How one queued write is sent. A new family of writes adds its branch here. */
+    private suspend fun sendPending(write: PendingWrite): Unit = when (write) {
+        is PendingWrite.CreateEvent -> sendCreateEvent(write.sourceId, write.draft)
+        is PendingWrite.UpdateEvent ->
+            sendUpdateEvent(write.sourceId, write.uid, write.draft, write.recurrenceId, write.range)
+        is PendingWrite.DeleteEvent ->
+            sendDeleteEvent(write.sourceId, write.uid, write.recurrenceId, write.range)
+
+        is PendingWrite.AddTodo -> {
+            sendAddTodo(write.due, write.label, write.createdOn, write.closedOn)
+            // `todo.add_item` returns no uid — Home Assistant mints one and pushes the list moments
+            // later — so the local stand-in is dropped here rather than left to sit beside the row
+            // that comes back. Nothing else in the queue can still name it: a tick or a rename of a
+            // queued add folded into the add itself (see [coalesceTodo]).
+            todoItems.value = todoItems.value.filterNot { it.id == write.localId }
+            persistCalendar()
+        }
+
+        is PendingWrite.ToggleTodo ->
+            sendToggleTodo(write.todoId, write.done, write.closedOn, write.createdOn)
+        is PendingWrite.EditTodo -> sendEditTodo(write.todoId, write.label)
+        is PendingWrite.RemoveTodo -> sendRemoveTodo(write.todoId)
+    }
+
+    private fun nowEpochMs(): Long = Clock.System.now().toEpochMilliseconds()
 
     // Reminder rules go to the MQTT broker rather than onto the event: a reminder belongs to the
     // event or the calendar and has to reach every device, including for calendars — the work roster
@@ -604,8 +827,10 @@ class HomeAssistantAdapter(
                         // Subscriptions die with the socket; the next session takes them out again.
                         subscribedTodoEntity = null
                         // Whatever calendar is on screen is now last-known, not live — say so rather
-                        // than let it read as current until the socket comes back.
+                        // than let it read as current until the socket comes back. Writes made from
+                        // here on are queued rather than attempted.
                         calendarStale.value = true
+                        connection.value = ConnectionState.Offline
                         rebuild()
                     }
                 }
@@ -694,8 +919,15 @@ class HomeAssistantAdapter(
         if (todoEntityId != subscribedTodoEntity) subscribeTodos()
     }
 
-    /** Background work kicked off once the session is live: keeping the calendar window fetched. */
+    /**
+     * Background work kicked off once the session is live: emptying the offline outbox and keeping
+     * the calendar window fetched. The drain runs first, so a queued event reaches Home Assistant
+     * before the poll that would otherwise refetch a window it is not in yet.
+     */
     private fun CoroutineScope.onConnected() {
+        connection.value = ConnectionState.Live
+        rebuild()
+        launch { drainOutbox() }
         launch { calendarRefreshConsumer() }
         launch { calendarPollLoop() }
         launch { rediscoverConsumer() }
@@ -874,7 +1106,7 @@ class HomeAssistantAdapter(
      * receives every `event` frame HA pushes under the same id. Throws [HaCommandException] on an
      * unsuccessful reply, on timeout, and when the socket is down.
      *
-     * A timeout becomes an ordinary [HaCommandException] rather than the [withTimeout] cancellation
+     * A timeout becomes an [HaOfflineException] rather than the [withTimeout] cancellation
      * it arrives as: callers sit in flows and `viewModelScope` jobs that read a `CancellationException`
      * as "superseded" and drop it silently, so a slow reply would vanish instead of failing.
      */
@@ -909,7 +1141,7 @@ class HomeAssistantAdapter(
             failed = false
             return reply["result"] ?: JsonNull
         } catch (e: TimeoutCancellationException) {
-            throw HaCommandException(type, null, "no reply within ${REQUEST_TIMEOUT_MS}ms")
+            throw HaOfflineException(type, null, "no reply within ${REQUEST_TIMEOUT_MS}ms")
         } finally {
             // A subscription that never got its acknowledgement is not subscribed — drop its handler
             // so a later id reuse (after a reconnect) can't inherit it.
@@ -923,7 +1155,7 @@ class HomeAssistantAdapter(
     /** Fail every awaiting request when the socket drops, so callers don't hang until timeout. */
     private suspend fun failPending() {
         pendingMutex.withLock {
-            pending.values.forEach { it.completeExceptionally(HaCommandException("*", null, "connection closed")) }
+            pending.values.forEach { it.completeExceptionally(HaOfflineException("*", null, "connection closed")) }
             pending.clear()
             eventHandlers.clear()
         }
@@ -957,7 +1189,7 @@ class HomeAssistantAdapter(
     private fun entityTarget(entityId: String): JsonObject = buildJsonObject { put("entity_id", entityId) }
 
     private suspend fun sendText(text: String) {
-        val open = session ?: throw HaCommandException("send", null, "no connection")
+        val open = session ?: throw HaOfflineException("send", null, "no connection")
         open.send(Frame.Text(text))
     }
 
@@ -1003,6 +1235,7 @@ class HomeAssistantAdapter(
             quickPicks = emptyList(),
             mixedForYou = emptyList(),
             calendar = calendarState(),
+            connection = connection.value,
         )
         pruneSettledHolds(activeHolds, survivors)
     }
@@ -1089,6 +1322,7 @@ class HomeAssistantAdapter(
         quickPicks = emptyList(),
         mixedForYou = emptyList(),
         calendar = calendarState(),
+        connection = connection.value,
     )
 
     /**
@@ -1123,8 +1357,12 @@ class HomeAssistantAdapter(
      * is up, hence the [CalendarState.stale] flag rather than an empty calendar.
      */
     private fun calendarState(): CalendarState = CalendarState(
-        events = calendarEvents.value,
-        todos = todoItems.value,
+        // The one place events are published, and therefore the one place the outbox overlay is
+        // applied: a poll, a rebuild or a cache read can never put a queued write back off screen.
+        events = applyPendingEvents(calendarEvents.value, outbox?.pending?.value.orEmpty()),
+        // Likewise the one place todos are published: the list arrives as a whole-list push, so a
+        // queue not re-applied here would be wiped off the screen by the first push after reconnect.
+        todos = applyPendingTodos(todoItems.value, outbox?.pending?.value.orEmpty()),
         sources = calendarSources.value,
         stale = calendarStale.value,
         // Stale means nothing has been discovered yet (or the socket is down), and an unreached box is
@@ -1151,8 +1389,17 @@ class HomeAssistantAdapter(
         (attributes[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }
 
     private class HaAuthException(message: String) : Exception(message)
-    private class HaCommandException(type: String, code: String?, message: String?) :
+    private open class HaCommandException(type: String, code: String?, message: String?) :
         Exception("HA command '$type' failed (code=$code): $message")
+
+    /**
+     * The command never reached Home Assistant — no socket, a socket that dropped mid-flight, or no
+     * reply at all. Distinguished from its parent because it is the only failure a write may be
+     * *queued* for: a command Home Assistant answered with a rejection would be rejected again on
+     * every reconnect, and a queue that never drains is worse than a failure the user is told about.
+     */
+    private class HaOfflineException(type: String, code: String?, message: String?) :
+        HaCommandException(type, code, message)
 
     private companion object {
         const val INITIAL_RECONNECT_MS = 1_000L

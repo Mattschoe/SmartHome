@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.mattschoe.smarthome.data.model.ConnectionState
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.Panel
@@ -165,6 +166,7 @@ private fun PortraitPages(ready: HomeScreenState.Ready, viewModel: HomepageViewM
                     today = ready.today,
                     calendarWindow = ready.calendarWindow,
                     hasTodoList = ready.calendar.hasTodoList,
+                    offline = ready.connection == ConnectionState.Offline,
                     viewModel = viewModel,
                     modifier = modifier,
                 )
@@ -293,6 +295,7 @@ private fun LandscapePages(ready: HomeScreenState.Ready, viewModel: HomepageView
                     today = ready.today,
                     calendarWindow = ready.calendarWindow,
                     hasTodoList = ready.calendar.hasTodoList,
+                    offline = ready.connection == ConnectionState.Offline,
                     viewModel = viewModel,
                     modifier = modifier,
                 )

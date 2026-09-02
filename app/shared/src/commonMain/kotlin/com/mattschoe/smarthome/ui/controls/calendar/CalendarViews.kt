@@ -43,6 +43,7 @@ import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
 import com.mattschoe.smarthome.data.model.CalendarView
+import com.mattschoe.smarthome.ui.components.OfflineLabel
 import com.mattschoe.smarthome.ui.components.verticalScrollFade
 import com.mattschoe.smarthome.ui.pages.homepage.DayMarks
 import com.mattschoe.smarthome.ui.theme.ChipIdle
@@ -210,9 +211,7 @@ private fun CalendarHeader(
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.weight(1f))
-        if (stale) {
-            Text(text = "Offline", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        }
+        if (stale) OfflineLabel()
         trailing()
     }
 }

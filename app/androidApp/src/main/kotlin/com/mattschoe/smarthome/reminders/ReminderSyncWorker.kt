@@ -40,6 +40,8 @@ class ReminderSyncWorker(
     override suspend fun doWork(): Result {
         val config = haConfigFromSecrets()?.takeIf { it.hasToken } ?: return Result.success()
         val store = SharedPreferencesStore(applicationContext)
+        // No offline outbox: this connection exists to read the calendar, and a second drainer over
+        // the same queue could send a queued write twice. The app's own adapter drains it.
         val adapter = HomeAssistantAdapter(config, KeyValueCalendarCache(store))
         try {
             // A stale calendar is the cache, not the home. Waiting for it to go live is what makes

@@ -132,6 +132,14 @@ object Dimensions {
     val weekDragElevation = 8.dp
     val weekDragAutoScrollEdge = 44.dp
 
+    /**
+     * How far back an event written while the home was unreachable is drawn — the month agenda's rows
+     * and the week's blocks alike. One restrained cue rather than a badge or a second colour: the
+     * event *is* on the calendar as far as this device is concerned, it simply has not been agreed
+     * with the home yet, and it stops looking unsent the moment the write goes out.
+     */
+    const val pendingWriteAlpha = 0.55f
+
     // Right-card Calendar popups (CalendarPopups.kt): the week view's event detail card and the
     // header gear's calendar-filter card, both floated inside the right card rather than over the
     // dashboard. Bounded rather than sized, so a short event's card is only as tall as it needs and a
@@ -284,4 +292,13 @@ object Dimensions {
     val pageIndicatorActive = 22.dp
     val pageIndicatorGap = 7.dp
     val pageIndicatorInset = 16.dp
+    // The portrait dead zone: an empty strip below the Kalender and Opgaver content, above the dot
+    // row, kept clear so a horizontal drag started there reaches the *page* pager. Both surfaces
+    // otherwise run to the bottom clearance and both consume horizontal drags of their own — the week
+    // grid pages by week, the checklist pages by day — which leaves a thumb nowhere on the screen to
+    // swipe between pages from. Sized by feel, per surface: the calendar gives up grid height for it,
+    // the checklist scrolls its rows under it. Tune these two, not the clearance, which the other
+    // pages share.
+    val phoneCalendarDeadZone = 84.dp
+    val phoneTodoDeadZone = 84.dp
 }

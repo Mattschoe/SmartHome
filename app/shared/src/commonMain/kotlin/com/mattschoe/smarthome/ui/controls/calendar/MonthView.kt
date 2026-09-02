@@ -26,6 +26,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -424,6 +425,9 @@ private fun AgendaRow(event: CalendarEvent, dotColor: Color, onClick: () -> Unit
             // rather than the rows being spread apart to reach [Dimensions.minTouch].
             .clickable(onClick = onClick)
             .padding(vertical = 6.dp)
+            // An event still waiting in the offline outbox reads as written but not yet agreed with
+            // the home. It stays a full row and a full tap target — only its ink drops back.
+            .alpha(if (event.pending) Dimensions.pendingWriteAlpha else 1f)
             .semantics { contentDescription = "Åbn ${event.title}" },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

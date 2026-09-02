@@ -12,6 +12,7 @@ import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarState
 import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.ClimateState
+import com.mattschoe.smarthome.data.model.ConnectionState
 import com.mattschoe.smarthome.data.model.BrowseItem
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
@@ -252,6 +253,12 @@ sealed interface HomeScreenState {
         val savingEvent: Boolean,
         /** Minutes from midnight, ticking — where the week grid draws its "now" line. */
         val nowMinutes: Int,
+        /**
+         * Whether the home is reachable. Device truth, not a selection: it is what says a change made
+         * now is being queued rather than sent, on the surfaces that have no
+         * [CalendarState.stale] flag of their own.
+         */
+        val connection: ConnectionState = ConnectionState.Live,
     ) : HomeScreenState {
         /** The playlist shelf for the selected [musicSource]. */
         val browsePlaylists: List<BrowseItem>

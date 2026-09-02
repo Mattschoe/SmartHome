@@ -104,11 +104,15 @@ fun PortraitCalendarPage(
                     AddEventButton(viewModel::openNewEvent)
                 }
             },
+            // The panel stops short of the dot row by the clearance *plus* the dead zone
+            // ([Dimensions.phoneCalendarDeadZone]) — the week grid pages by week, so without a strip
+            // of page below it there is nowhere to start a swipe to the next screen from. The grid
+            // pays for it in height: it fits the hours it is zoomed to into whatever is left.
             modifier = Modifier
                 .padding(horizontal = Dimensions.phonePagePad)
                 .padding(
                     top = Dimensions.phonePageTopPad,
-                    bottom = Dimensions.phonePageBottomClearance,
+                    bottom = Dimensions.phonePageBottomClearance + Dimensions.phoneCalendarDeadZone,
                 ),
         )
 

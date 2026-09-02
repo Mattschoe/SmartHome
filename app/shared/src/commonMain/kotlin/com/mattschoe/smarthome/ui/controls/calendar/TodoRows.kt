@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -60,6 +61,10 @@ import smarthome.shared.generated.resources.checkbox_filled
  *
  * The row prints no date: the Opgaver panel stacks its rows under a date header per day, so saying
  * it again on every row would only repeat the header down the whole group.
+ *
+ * A row still waiting in the offline outbox is drawn back at [Dimensions.pendingWriteAlpha] — the
+ * same restrained cue the calendar gives a queued event, and for the same reason: the task *is* on
+ * the list as far as this device is concerned, it simply has not been agreed with the home yet.
  */
 @Composable
 internal fun TodoRow(
@@ -77,7 +82,10 @@ internal fun TodoRow(
         )
     } else {
         Row(
-            modifier = Modifier.fillMaxWidth().height(Dimensions.minTouch),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Dimensions.minTouch)
+                .alpha(if (todo.pending) Dimensions.pendingWriteAlpha else 1f),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
