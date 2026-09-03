@@ -1,11 +1,14 @@
 package com.mattschoe.smarthome.data
 
+import com.mattschoe.smarthome.data.model.CalendarEvent
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class RecurrenceFormatTest {
 
@@ -218,5 +221,15 @@ class RecurrenceFormatTest {
                 to = LocalDate(2027, 12, 31),
             ),
         )
+    }
+
+    @Test
+    fun onlyAnOccurrenceTheBackendNamedIsAskedWhichOccurrencesAWriteReaches() {
+        val plain = CalendarEvent(date = LocalDate(2026, 8, 5), title = "Fredagshygge", time = "17.00")
+        assertFalse(plain.asksEditScope)
+        // A repeating event drawn without a per-occurrence id — a create still in the offline outbox,
+        // say — can only be written whole, so all three answers would name the same write.
+        assertFalse(plain.copy(rrule = "FREQ=WEEKLY").asksEditScope)
+        assertTrue(plain.copy(rrule = "FREQ=WEEKLY", recurrenceId = "2026-08-05").asksEditScope)
     }
 }

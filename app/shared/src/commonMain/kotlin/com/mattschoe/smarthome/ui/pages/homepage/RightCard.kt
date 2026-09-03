@@ -190,7 +190,7 @@ fun RightCard(
     onCancelEventMove: () -> Unit,
     onWeekHourHeight: (Float) -> Unit,
     onEditEventDetail: () -> Unit,
-    onDeleteEventDetail: () -> Unit,
+    onDeleteEventDetail: (EventEditScope) -> Unit,
     onCloseEventDetail: () -> Unit,
     onOpenCalendarSettings: () -> Unit,
     /** Drill into a settings level — a calendar picked out of the list. */

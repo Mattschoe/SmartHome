@@ -1188,13 +1188,21 @@ class HomepageViewModelTest {
         advanceUntilIdle()
         assertEquals(occurrence.recurrenceId to RecurrenceRange.ThisAndFuture, recorder.lastDelete)
 
-        // The detail popup's trash has no scope to offer, so it stays on the single occurrence.
-        val next = (vm.screenState.value as HomeScreenState.Ready)
-            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
-        vm.openEventDetail(next)
-        vm.deleteEventDetail()
-        advanceUntilIdle()
-        assertEquals(next.recurrenceId to RecurrenceRange.ThisEvent, recorder.lastDelete)
+        // The detail popup's trash carries the same three answers, and addresses them the same way.
+        for (scope in EventEditScope.entries) {
+            val next = (vm.screenState.value as HomeScreenState.Ready)
+                .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+            vm.openEventDetail(next)
+            vm.deleteEventDetail(scope)
+            advanceUntilIdle()
+            val expected = when (scope) {
+                EventEditScope.ThisEvent -> next.recurrenceId to RecurrenceRange.ThisEvent
+                EventEditScope.ThisAndFuture -> next.recurrenceId to RecurrenceRange.ThisAndFuture
+                // "Alle begivenheder" drops the occurrence id — that is how the series itself is named.
+                EventEditScope.AllEvents -> null to RecurrenceRange.ThisEvent
+            }
+            assertEquals(expected, recorder.lastDelete)
+        }
     }
 
     @Test
@@ -1356,7 +1364,7 @@ class HomepageViewModelTest {
         val event = (vm.screenState.value as HomeScreenState.Ready)
             .selectedDayEvents.first { it.sourceId == "calendar.matt" }
         vm.openEventDetail(event)
-        vm.deleteEventDetail()
+        vm.deleteEventDetail(EventEditScope.ThisEvent)
         advanceUntilIdle()
 
         val ready = vm.screenState.value as HomeScreenState.Ready
@@ -1374,7 +1382,7 @@ class HomepageViewModelTest {
         val event = (vm.screenState.value as HomeScreenState.Ready)
             .selectedDayEvents.first { it.sourceId == "calendar.matt" }
         vm.openEventDetail(event)
-        vm.deleteEventDetail()
+        vm.deleteEventDetail(EventEditScope.ThisEvent)
         advanceUntilIdle()
 
         val ready = vm.screenState.value as HomeScreenState.Ready

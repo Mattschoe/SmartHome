@@ -7,6 +7,7 @@ import com.mattschoe.smarthome.data.CalendarPrefs
 import com.mattschoe.smarthome.data.CalendarPrefsStore
 import com.mattschoe.smarthome.data.InMemoryCalendarPrefsStore
 import com.mattschoe.smarthome.data.applyCalendarPrefs
+import com.mattschoe.smarthome.data.asksEditScope
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.DaysPerWeek
 import com.mattschoe.smarthome.data.EventMove
@@ -507,10 +508,14 @@ class HomepageViewModel(
         }
     }
 
-    /** The popup's trash. Same guards and failure handling as the editor's [deleteEvent]. */
-    fun deleteEventDetail() {
+    /**
+     * The popup's trash, over the occurrences [scope] names. Same guards and failure handling as the
+     * editor's [deleteEvent] — and the same question in front of it, since a series tapped in the
+     * month or week view is no less a series than one opened in the editor.
+     */
+    fun deleteEventDetail(scope: EventEditScope) {
         val event = _eventDetail.value ?: return
-        deleteEvent(event) { _eventDetail.value = null }
+        deleteEvent(event, scope) { _eventDetail.value = null }
     }
 
     /**
@@ -759,19 +764,19 @@ class HomepageViewModel(
      * A week-grid block was dropped somewhere new. The slot itself was already resolved and clamped
      * to the week by `droppedEventSlot`; what is decided here is only *when* the write goes out.
      *
-     * A one-off event is written immediately — the drag said everything there was to say. An
-     * occurrence of a recurring series is held instead ([PendingEventMove.awaitingScope]) so the
-     * editor's own scope card can ask the question a drag has no way of asking; until it is
-     * answered, the hold is what keeps the block at the slot it was dropped on rather than behind
-     * the popup in its old one.
+     * An event with nothing to choose between is written immediately — the drag said everything
+     * there was to say. An occurrence the wire can address on its own ([asksEditScope]) is held
+     * instead ([PendingEventMove.awaitingScope]) so the editor's own scope card can ask the question
+     * a drag has no way of asking; until it is answered, the hold is what keeps the block at the slot
+     * it was dropped on rather than behind the popup in its old one.
      */
     fun moveEvent(move: EventMove) {
         if (_savingEvent.value || _eventMove.value != null) return
         val event = move.event
         if (event.uid == null) return
-        val isSeries = event.recurrenceId != null || event.rrule != null
-        _eventMove.value = PendingEventMove(move, awaitingScope = isSeries)
-        if (!isSeries) writeEventMove(move, EventEditScope.ThisEvent)
+        val asksScope = event.asksEditScope
+        _eventMove.value = PendingEventMove(move, awaitingScope = asksScope)
+        if (!asksScope) writeEventMove(move, EventEditScope.ThisEvent)
     }
 
     /** The scope card's answer for a dropped occurrence: write the move over the occurrences it names. */

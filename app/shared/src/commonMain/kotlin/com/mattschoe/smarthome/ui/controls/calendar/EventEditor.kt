@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mattschoe.smarthome.data.MinutesPerDay
 import com.mattschoe.smarthome.data.RecurrenceUnknownLabel
+import com.mattschoe.smarthome.data.asksEditScope
 import com.mattschoe.smarthome.data.buildEventDraft
 import com.mattschoe.smarthome.data.buildRrule
 import com.mattschoe.smarthome.data.formatRecurrence
@@ -180,7 +181,7 @@ fun EventEditorSurface(
     val storedRule = remember(target) { parseRrule(existing?.rrule) }
     val ruleIsForeign = existing?.rrule != null && storedRule == null
     var recurrence by remember(target) { mutableStateOf(storedRule) }
-    val isSeries = existing?.recurrenceId != null || existing?.rrule != null
+    val asksScope = existing?.asksEditScope == true
     // Rebuilt rather than round-tripped as a string, so a rule keeps matching the event when "Hele
     // dagen" is toggled — UNTIL carries the same value type as the event's own start or Home
     // Assistant's iCal layer rejects it.
@@ -235,9 +236,9 @@ fun EventEditorSurface(
                 showSave = editable,
                 saveEnabled = title.isNotBlank() && sourceId.isNotEmpty() && !saving,
                 saving = saving,
-                // A series has to be told what it is being saved *to* before anything is written; a
-                // plain event has only one answer and is never asked.
-                onSave = { if (isSeries) picking = PickTarget.SaveScope else save(EventEditScope.ThisEvent) },
+                // An occurrence has to be told what it is being saved *to* before anything is
+                // written; anything the wire can only address whole has one answer and is never asked.
+                onSave = { if (asksScope) picking = PickTarget.SaveScope else save(EventEditScope.ThisEvent) },
             )
             Spacer(Modifier.height(16.dp))
 
@@ -331,11 +332,11 @@ fun EventEditorSurface(
                 Spacer(Modifier.height(Dimensions.mediaSectionGap))
                 DeleteAction(
                     enabled = !saving,
-                    // A series asks which occurrences to remove, and that question *is* the
-                    // confirmation — the two-tap arming is what a plain event gets instead.
-                    confirmInPlace = !isSeries,
+                    // An addressable occurrence asks which of them to remove, and that question
+                    // *is* the confirmation — the two-tap arming is what everything else gets.
+                    confirmInPlace = !asksScope,
                     onDelete = {
-                        if (isSeries) picking = PickTarget.DeleteScope else onDelete(EventEditScope.ThisEvent)
+                        if (asksScope) picking = PickTarget.DeleteScope else onDelete(EventEditScope.ThisEvent)
                     },
                 )
             }
