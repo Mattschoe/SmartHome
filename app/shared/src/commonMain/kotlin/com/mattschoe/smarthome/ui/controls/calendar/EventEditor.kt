@@ -124,10 +124,14 @@ fun EventEditorSurface(
      */
     onSetEventReminder: (ReminderRule?) -> Unit,
     /**
-     * Save the form. The third argument is the reminder to attach **once the event exists**, and is
-     * only ever non-null on the create path: an existing event's reminder was already committed by
-     * [onSetEventReminder]. `null` means there is nothing to attach — the event inherits its
-     * calendar's default, which is what a fresh form opens on.
+     * Save the form. The first argument is the calendar it is written to — the event's own on an
+     * ordinary edit, and a *different* one when the calendar chip was changed, which is a move.
+     *
+     * The third is the reminder to attach **once the event exists**, non-null only where the save
+     * mints a uid: the create path, and the move that re-creates the event elsewhere. An edit that
+     * stays put has already committed its reminder through [onSetEventReminder]. `null` means there
+     * is nothing to attach — the event inherits its calendar's default, which is what a fresh form
+     * opens on.
      *
      * The fourth is which occurrences of a recurring series the save reaches. It is asked for by
      * [EventScopePopup] before the write, and is [EventEditScope.ThisEvent] — the only thing it can
@@ -154,8 +158,10 @@ fun EventEditorSurface(
     var location by remember(target) { mutableStateOf(existing?.location.orEmpty()) }
     var allDay by remember(target) { mutableStateOf(existing?.allDay == true) }
     val writable = remember(sources) { sources.filter { it.canWrite } }
-    // The edit path is locked to the event's own calendar: a Home Assistant write addresses one
-    // entity, so moving an event between calendars is a delete plus a create — out of scope here.
+    // Free on the edit path too, not only on create. A Home Assistant write addresses one calendar
+    // entity, so there is no update that lands on a different one: picking another chip makes the
+    // save a *move*, which the ViewModel performs as a create on the new calendar plus a delete from
+    // the old.
     var sourceId by remember(target) {
         mutableStateOf(existing?.sourceId ?: writable.firstOrNull()?.id.orEmpty())
     }
@@ -191,7 +197,10 @@ fun EventEditorSurface(
     // least the rest of the series — which is what takes "Denne begivenhed" off the scope popup.
     val ruleChanged = recurrence != storedRule
 
-    val sourceChips = if (existing != null) sources.filter { it.id == existing.sourceId } else writable
+    // Every writable calendar, on both paths — which is what makes an event movable. The one
+    // exception is an event on a read-only calendar: it shows that calendar's chip alone, since
+    // where it lives is a fact about it rather than a choice, like every other field there.
+    val sourceChips = if (editable) writable else sources.filter { it.id == existing?.sourceId }
 
     // Moving the start carries the end with it, so an event keeps the length it had rather than
     // collapsing (or inverting) while a date is being picked. It is also what makes multi-day and
@@ -219,8 +228,10 @@ fun EventEditorSurface(
         onSave(
             sourceId,
             buildEventDraft(title, startAt, endAt, allDay, location, rrule),
-            // Only the create path carries it out; an existing event's rule is already written.
-            reminder.takeIf { existing == null },
+            // Carried out by the create path, and by a move — the copy on the new calendar is a new
+            // event with a uid of its own, so a rule keyed on the old one has to be set again. An
+            // edit that stays put has already written its rule through [onSetEventReminder].
+            reminder.takeIf { existing == null || sourceId != existing.sourceId },
             scope,
         )
     }
@@ -255,8 +266,7 @@ fun EventEditorSurface(
                 sources = sourceChips,
                 allSources = sources,
                 selectedId = sourceId,
-                // Locked on the edit path — the single chip is which calendar it lives on, not a choice.
-                enabled = editable && existing == null,
+                enabled = editable,
                 onSelect = { sourceId = it },
             )
             Spacer(Modifier.height(Dimensions.mediaSectionGap))

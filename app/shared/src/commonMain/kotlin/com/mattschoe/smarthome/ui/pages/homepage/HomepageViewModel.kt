@@ -578,9 +578,9 @@ class HomepageViewModel(
 
     /**
      * Write [draft] — creating it on [sourceId] from the "+" path, replacing the open event on the
-     * edit path (where the calendar is the event's own; moving between calendars is a delete plus a
-     * create, which this surface does not offer). Same shape as [startPlay]: the button spins until
-     * the adapter replies, and a **failure leaves the surface open** so nothing typed is lost.
+     * edit path, or **moving** it when [sourceId] is not the calendar the open event lives on. Same
+     * shape as [startPlay]: the button spins until the adapter replies, and a **failure leaves the
+     * surface open** so nothing typed is lost.
      *
      * [scope] is the editor's answer for a recurring event, resolved to Home Assistant's own pair by
      * [recurrenceIdFor]/[rangeFor]. Note what [EventEditScope.AllEvents] means for the boundaries:
@@ -602,29 +602,43 @@ class HomepageViewModel(
         viewModelScope.launch {
             try {
                 val uid = existing?.uid
-                if (existing != null && uid != null) {
-                    adapter.updateEvent(
-                        existing.sourceId,
-                        uid,
-                        draft,
-                        recurrenceIdFor(existing, scope),
-                        rangeFor(scope),
-                    )
-                } else {
-                    adapter.createEvent(sourceId, draft)
-                    // A reminder is keyed on the event's uid, and a create doesn't return one — Home
-                    // Assistant's `calendar/event/create` replies with nothing. The create already
-                    // triggers a refetch, so the uid is recovered by finding the event that just
-                    // appeared. The event itself is saved either way: a reminder that could not be
-                    // attached is worth a notice, not a rollback.
-                    //
-                    // A queued create has no uid to key on at all — the one it is drawn under is this
-                    // device's, and the reminder table is the home's — so its reminder is left for
-                    // the event to be given again once the create has landed.
-                    if (reminder != null && !wasQueued()) attachReminder(sourceId, draft, reminder)
+                // Whether a move left the event behind on its old calendar. Only a move can, and it
+                // is not a failed save — the event *is* on the calendar it was moved to.
+                val originalRemains = when {
+                    existing != null && uid != null && sourceId != existing.sourceId ->
+                        !moveEventToCalendar(existing, uid, sourceId, draft, reminder, scope)
+
+                    existing != null && uid != null -> {
+                        adapter.updateEvent(
+                            existing.sourceId,
+                            uid,
+                            draft,
+                            recurrenceIdFor(existing, scope),
+                            rangeFor(scope),
+                        )
+                        false
+                    }
+
+                    else -> {
+                        adapter.createEvent(sourceId, draft)
+                        // A reminder is keyed on the event's uid, and a create doesn't return one — Home
+                        // Assistant's `calendar/event/create` replies with nothing. The create already
+                        // triggers a refetch, so the uid is recovered by finding the event that just
+                        // appeared. The event itself is saved either way: a reminder that could not be
+                        // attached is worth a notice, not a rollback.
+                        //
+                        // A queued create has no uid to key on at all — the one it is drawn under is this
+                        // device's, and the reminder table is the home's — so its reminder is left for
+                        // the event to be given again once the create has landed.
+                        if (reminder != null && !wasQueued()) attachReminder(sourceId, draft, reminder)
+                        false
+                    }
                 }
                 _eventEditor.value = null
-                if (wasQueued()) showToast(QUEUED_TOAST)
+                when {
+                    originalRemains -> showToast(MOVE_LEFTOVER_TOAST)
+                    wasQueued() -> showToast(QUEUED_TOAST)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -634,6 +648,75 @@ class HomepageViewModel(
                 _savingEvent.value = false
             }
         }
+    }
+
+    /**
+     * Move the open event onto the calendar [target] names. A Home Assistant write addresses one
+     * calendar entity, so there is no update that lands on a different one: the event is written to
+     * the new calendar and removed from the old.
+     *
+     * Create first, then delete. Either order can be interrupted between the two writes, and the two
+     * failures are not equally bad — a create that landed with a delete that did not leaves the event
+     * on both calendars, where it is visible and can be removed by hand, while the other order loses
+     * it outright. Returns whether the old copy went with it, which is what tells the two halves'
+     * failures apart: a create that throws is a save that did not happen and is reported as one,
+     * while a delete that throws is answered by [MOVE_LEFTOVER_TOAST] instead — the event is on the
+     * new calendar, and a save the user is invited to repeat would write a second copy there.
+     *
+     * [scope] scopes both halves alike, which is what makes the three answers mean what they read as.
+     * "Denne begivenhed" lifts the one occurrence out of the series and puts it down on the new
+     * calendar as a plain event — a lone occurrence cannot carry the series' repetition rule, so it
+     * is dropped — while the other two carry the rule across and truncate or remove the old series
+     * exactly as an in-place edit of the same scope would.
+     *
+     * A series that ends after a number of occurrences (`COUNT=`) keeps that count on the copy, so
+     * "Denne og fremtidige" leaves the old series truncated here and starts a fresh full count on the
+     * new calendar. Counting the remainder would need the series' *first* occurrence, which an
+     * expanded occurrence does not carry — the extra repeats are visible on the calendar they land
+     * on, and the rule is editable there.
+     */
+    private suspend fun moveEventToCalendar(
+        event: CalendarEvent,
+        uid: String,
+        target: String,
+        draft: CalendarEventDraft,
+        reminder: ReminderRule?,
+        scope: EventEditScope,
+    ): Boolean {
+        // An occurrence with no recurrence id cannot be named on the wire — a null one is how the
+        // *series* is addressed — so "Denne begivenhed" on one would take the whole series off the
+        // old calendar while putting a single event on the new. It is the shape a still-queued
+        // recurring create is drawn in, before Home Assistant has expanded it, and there the series
+        // is all there is to move.
+        val occurrenceIsNamed = event.recurrenceId != null
+        val effective =
+            if (scope == EventEditScope.ThisEvent && !occurrenceIsNamed && event.rrule != null) {
+                EventEditScope.AllEvents
+            } else {
+                scope
+            }
+        val moved =
+            if (occurrenceIsNamed && effective == EventEditScope.ThisEvent) draft.copy(rrule = null)
+            else draft
+        adapter.createEvent(target, moved)
+        // Sampled here rather than after the delete: it is the create's fate the reminder follows,
+        // and a connection that drops between the two writes would otherwise read as a queued move
+        // and silently drop a reminder the event already had.
+        val createQueued = wasQueued()
+        val removed = try {
+            adapter.deleteEvent(event.sourceId, uid, recurrenceIdFor(event, effective), rangeFor(effective))
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("moved '${draft.summary}' to $target but could not remove it from ${event.sourceId}: ${e.message}")
+            false
+        }
+        // Whatever reminder the event carried was keyed on the uid it has just lost, so the copy has
+        // to be given one of its own — the same uid recovery as the create path, and the same
+        // tolerance when it never arrives: the move itself has already happened.
+        if (reminder != null && !createQueued) attachReminder(target, moved, reminder)
+        return removed
     }
 
     /**
@@ -1119,6 +1202,13 @@ class HomepageViewModel(
 
         const val SAVE_FAILED_TOAST = "Kunne ikke gemme"
         const val DELETE_FAILED_TOAST = "Kunne ikke slette"
+
+        /**
+         * What a move whose delete failed says. The event is on its new calendar and the save is
+         * over — this names the copy left behind on the old one, which is a thing to go and delete
+         * rather than a save to try again.
+         */
+        const val MOVE_LEFTOVER_TOAST = "Flyttet, men den gamle blev ikke slettet"
 
         /**
          * What a calendar write made with the home unreachable says. The write itself succeeded as

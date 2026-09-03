@@ -18,6 +18,7 @@ import com.mattschoe.smarthome.data.model.CalendarView
 import com.mattschoe.smarthome.data.model.MusicSource
 import com.mattschoe.smarthome.data.model.Panel
 import com.mattschoe.smarthome.data.model.QueueMode
+import com.mattschoe.smarthome.data.model.ReminderRule
 import com.mattschoe.smarthome.data.model.Room
 import com.mattschoe.smarthome.data.model.Warmth
 import kotlinx.coroutines.Dispatchers
@@ -1134,8 +1135,8 @@ class HomepageViewModelTest {
         val before = (vm.screenState.value as HomeScreenState.Ready)
             .selectedDayEvents.first { it.sourceId == "calendar.matt" }
         vm.openEvent(before)
-        // The calendar argument is ignored on the edit path — the event's own calendar is written to.
-        vm.saveEvent("calendar.cecilie", draftOn(before.date, "Morgenmøde (flyttet)"))
+        // The event's own calendar: naming another one would be a move, which is a different write.
+        vm.saveEvent(before.sourceId, draftOn(before.date, "Morgenmøde (flyttet)"))
         advanceUntilIdle()
 
         val ready = vm.screenState.value as HomeScreenState.Ready
@@ -1144,6 +1145,166 @@ class HomepageViewModelTest {
         assertEquals(1, same.size)
         assertEquals("Morgenmøde (flyttet)", same.single().title)
         assertEquals("calendar.matt", same.single().sourceId)
+    }
+
+    @Test
+    fun saveEvent_onAnotherCalendarMovesTheEventThere() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(MockAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val before = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEvent(before)
+        vm.saveEvent("calendar.cecilie", draftOn(before.date, "Morgenmøde"))
+        advanceUntilIdle()
+
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventEditor)
+        assertNull(ready.toast)
+        // A move is a create plus a delete, so the old row is gone and the new one is a new event —
+        // same title on the other calendar, addressed by a uid of its own.
+        assertTrue(ready.calendar.events.none { it.uid == before.uid })
+        val moved = ready.calendar.events.single { it.title == "Morgenmøde" }
+        assertEquals("calendar.cecilie", moved.sourceId)
+    }
+
+    @Test
+    fun saveEvent_movingOneOccurrenceLiftsItOutOfTheSeries() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val occurrence = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+
+        vm.openEvent(occurrence)
+        vm.saveEvent(
+            "calendar.cecilie",
+            draftOn(occurrence.date, "Fredagshygge").copy(rrule = "FREQ=WEEKLY"),
+            scope = EventEditScope.ThisEvent,
+        )
+        advanceUntilIdle()
+
+        // The copy is a plain event: one occurrence cannot carry the series' repetition rule.
+        assertEquals("calendar.cecilie", recorder.lastCreate?.first)
+        assertNull(recorder.lastCreate?.second?.rrule)
+        // And only that occurrence leaves the old series behind.
+        assertEquals(occurrence.recurrenceId to RecurrenceRange.ThisEvent, recorder.lastDelete)
+    }
+
+    @Test
+    fun saveEvent_movingAWholeSeriesCarriesItsRepetitionAcross() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val occurrence = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+
+        vm.openEvent(occurrence)
+        vm.saveEvent(
+            "calendar.cecilie",
+            draftOn(occurrence.date, "Fredagshygge").copy(rrule = "FREQ=WEEKLY"),
+            scope = EventEditScope.AllEvents,
+        )
+        advanceUntilIdle()
+
+        assertEquals("FREQ=WEEKLY", recorder.lastCreate?.second?.rrule)
+        // "Alle begivenheder" drops the occurrence id — that is how the old series itself is named.
+        assertEquals(null to RecurrenceRange.ThisEvent, recorder.lastDelete)
+        assertTrue((vm.screenState.value as HomeScreenState.Ready).calendar.events.none { it.uid == "seed-6" })
+    }
+
+    @Test
+    fun saveEvent_moveThatFailsToWriteKeepsTheSurfaceOpen() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(FailingCalendarWriteAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val before = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEvent(before)
+        vm.saveEvent("calendar.cecilie", draftOn(before.date, "Morgenmøde"))
+        advanceUntilIdle()
+
+        // The create is what failed, so nothing was deleted either — the event is still where it was.
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertIs<EventEditorTarget.Existing>(ready.eventEditor)
+        assertEquals("Kunne ikke gemme", ready.toast?.text)
+        assertTrue(ready.calendar.events.any { it.uid == before.uid })
+    }
+
+    @Test
+    fun saveEvent_moveWhoseDeleteFailsClosesTheSurfaceAndNamesTheCopyLeftBehind() = runTest(mainDispatcher) {
+        val vm = HomepageViewModel(FailingCalendarDeleteAdapter())
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val before = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEvent(before)
+        vm.saveEvent("calendar.cecilie", draftOn(before.date, "Morgenmøde"))
+        advanceUntilIdle()
+
+        // The create landed, so the save is over: the surface closes rather than inviting a Save that
+        // would write a second copy onto the new calendar.
+        val ready = vm.screenState.value as HomeScreenState.Ready
+        assertNull(ready.eventEditor)
+        assertEquals("Flyttet, men den gamle blev ikke slettet", ready.toast?.text)
+        // And the toast is true on both counts — the copy is there and the original stayed.
+        assertEquals("calendar.cecilie", ready.calendar.events.single { it.title == "Morgenmøde" }.sourceId)
+        assertTrue(ready.calendar.events.any { it.uid == before.uid })
+    }
+
+    @Test
+    fun saveEvent_movingASeriesWithNoNamedOccurrenceMovesTheWholeSeries() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        // A recurring event whose occurrences have no id of their own yet — the shape a still-queued
+        // recurring create is drawn in, before Home Assistant has expanded it.
+        val unexpanded = (vm.screenState.value as HomeScreenState.Ready)
+            .calendar.events.first { it.uid == "seed-6" && it.recurrenceId != null }
+            .copy(recurrenceId = null, rrule = "FREQ=WEEKLY")
+
+        vm.openEvent(unexpanded)
+        vm.saveEvent(
+            "calendar.cecilie",
+            draftOn(unexpanded.date, "Fredagshygge").copy(rrule = "FREQ=WEEKLY"),
+            scope = EventEditScope.ThisEvent,
+        )
+        advanceUntilIdle()
+
+        // There is no single occurrence to name, so the delete takes the series — and the copy has to
+        // be the series too, rather than the one plain event "Denne begivenhed" would otherwise make.
+        assertEquals(null to RecurrenceRange.ThisEvent, recorder.lastDelete)
+        assertEquals("FREQ=WEEKLY", recorder.lastCreate?.second?.rrule)
+    }
+
+    @Test
+    fun saveEvent_moveCarriesTheReminderOntoTheCopy() = runTest(mainDispatcher) {
+        val recorder = RecordingCalendarAdapter()
+        val vm = HomepageViewModel(recorder)
+        backgroundScope.launch { vm.screenState.collect {} }
+        advanceUntilIdle()
+
+        val before = (vm.screenState.value as HomeScreenState.Ready)
+            .selectedDayEvents.first { it.sourceId == "calendar.matt" }
+        vm.openEvent(before)
+        vm.saveEvent("calendar.cecilie", draftOn(before.date, "Morgenmøde"), reminder = ReminderRule(15))
+        advanceUntilIdle()
+
+        // The rule was keyed on a uid the event has just lost, so it is written again — on the new
+        // calendar, against the uid the copy was given there.
+        val (sourceId, uid, rule) = assertNotNull(recorder.lastReminder)
+        assertEquals("calendar.cecilie", sourceId)
+        assertEquals(ReminderRule(15), rule)
+        assertNotEquals(before.uid, uid)
     }
 
     @Test
@@ -1547,6 +1708,27 @@ class HomepageViewModelTest {
     ) : HomeAdapter by delegate {
         var lastUpdate: Pair<String?, RecurrenceRange>? = null
         var lastDelete: Pair<String?, RecurrenceRange>? = null
+
+        /** The calendar a create was addressed to and the draft it carried — the move's first half. */
+        var lastCreate: Pair<String, CalendarEventDraft>? = null
+
+        /** The calendar, uid and rule a reminder was last written against. */
+        var lastReminder: Triple<String, String, ReminderRule?>? = null
+
+        override suspend fun createEvent(sourceId: String, draft: CalendarEventDraft) {
+            lastCreate = sourceId to draft
+            delegate.createEvent(sourceId, draft)
+        }
+
+        override suspend fun setEventReminder(
+            sourceId: String,
+            uid: String,
+            recurrenceId: String?,
+            rule: ReminderRule?,
+        ) {
+            lastReminder = Triple(sourceId, uid, rule)
+            delegate.setEventReminder(sourceId, uid, recurrenceId, rule)
+        }
 
         override suspend fun updateEvent(
             sourceId: String,
