@@ -25,6 +25,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,9 +43,11 @@ import com.mattschoe.smarthome.data.formatRecurrence
 import com.mattschoe.smarthome.data.parseRrule
 import com.mattschoe.smarthome.data.formatReminderOffset
 import com.mattschoe.smarthome.data.offsetFor
+import com.mattschoe.smarthome.data.asksEditScope
 import com.mattschoe.smarthome.data.remindsByCalendarDefault
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarSource
+import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.ReminderRules
 import com.mattschoe.smarthome.ui.components.PopupCard
 import com.mattschoe.smarthome.ui.components.PopupScrim
@@ -90,13 +96,33 @@ fun BoxScope.EventDetailPopup(
     /** The home's rules — what the bell line resolves this event's reminder out of. */
     reminders: ReminderRules,
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
+    /** Delete, over the occurrences the scope names — the editor's [onDelete] contract. */
+    onDelete: (EventEditScope) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val source = sources.firstOrNull { it.id == event.sourceId }
     val canWrite = source?.canWrite == true && event.uid != null
     val color = calendarDotColor(event.sourceId, sources)
+    val asksScope = event.asksEditScope
+
+    // The scope question a recurring occurrence's trash asks. Keyed on the event so opening a
+    // different one into the card never inherits the question the last one was mid-way through.
+    var askingScope by remember(event) { mutableStateOf(false) }
+    if (askingScope) {
+        // Swapped in for the detail card rather than floated over it: both are centred at the same
+        // max width and each brings its own scrim, so stacking would dim twice and leave the card
+        // underneath fully covered anyway. Dismissing puts the event back.
+        EventScopePopup(
+            title = "Slet gentagelse",
+            // Unlike a save, a delete has no case that forbids the single occurrence.
+            allowThisEvent = true,
+            onPick = { scope -> askingScope = false; onDelete(scope) },
+            onDismiss = { askingScope = false },
+            modifier = modifier,
+        )
+        return
+    }
 
     PopupScrim(onClose)
     PopupCard(
@@ -112,7 +138,14 @@ fun BoxScope.EventDetailPopup(
                     description = "Rediger",
                     onClick = onEdit,
                 )
-                DeleteAction(onDelete)
+                DeleteAction(
+                    // An addressable occurrence asks which of them to remove, and that question
+                    // *is* the confirmation — the two-tap arming is what everything else gets.
+                    confirmInPlace = !asksScope,
+                    onDelete = {
+                        if (asksScope) askingScope = true else onDelete(EventEditScope.ThisEvent)
+                    },
+                )
                 // Separates what changes the event from what merely closes the card.
                 Box(
                     Modifier
@@ -211,27 +244,37 @@ fun BoxScope.EventDetailPopup(
 /**
  * The delete affordance in the detail popup's action row: the same two-tap confirm the editor's
  * "Slet" pill uses ([TwoTapConfirm]), worn as an icon — armed, the trash sits on a filled Rose disc,
- * and it disarms itself if nothing follows.
+ * and it disarms itself if nothing follows. A series skips the arming ([confirmInPlace]) because the
+ * scope card it opens instead is already the question that confirms it.
  */
 @Composable
-private fun DeleteAction(onDelete: () -> Unit) {
-    TwoTapConfirm(enabled = true, onConfirm = onDelete) { armed, onTap ->
-        PopupAction(
-            icon = { tint ->
-                Box(
-                    modifier = Modifier
-                        .size(Dimensions.popupIconSize + 8.dp)
-                        .clip(CircleShape)
-                        .then(if (armed) Modifier.background(Rose) else Modifier),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    GlyphIcon(Res.drawable.delete_filled, if (armed) Ink else tint)
-                }
-            },
-            description = if (armed) "Bekræft sletning" else "Slet",
-            onClick = onTap,
-        )
+private fun DeleteAction(confirmInPlace: Boolean, onDelete: () -> Unit) {
+    if (confirmInPlace) {
+        TwoTapConfirm(enabled = true, onConfirm = onDelete) { armed, onTap ->
+            DeleteGlyph(armed = armed, onTap = onTap)
+        }
+    } else {
+        DeleteGlyph(armed = false, onTap = onDelete)
     }
+}
+
+@Composable
+private fun DeleteGlyph(armed: Boolean, onTap: () -> Unit) {
+    PopupAction(
+        icon = { tint ->
+            Box(
+                modifier = Modifier
+                    .size(Dimensions.popupIconSize + 8.dp)
+                    .clip(CircleShape)
+                    .then(if (armed) Modifier.background(Rose) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                GlyphIcon(Res.drawable.delete_filled, if (armed) Ink else tint)
+            }
+        },
+        description = if (armed) "Bekræft sletning" else "Slet",
+        onClick = onTap,
+    )
 }
 
 /** One icon action in a popup's top row: a full touch target around a plain glyph. */

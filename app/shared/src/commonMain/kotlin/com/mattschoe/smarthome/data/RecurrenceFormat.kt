@@ -1,5 +1,6 @@
 package com.mattschoe.smarthome.data
 
+import com.mattschoe.smarthome.data.model.CalendarEvent
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
@@ -282,3 +283,15 @@ fun expandRecurrence(
     }
     return days.sorted()
 }
+
+/**
+ * Whether this event has occurrences to choose between — the condition for putting the scope card in
+ * front of a save, a delete or a dropped week block.
+ *
+ * Only an occurrence Home Assistant has named ([CalendarEvent.recurrenceId]) can be addressed on its
+ * own: "denne begivenhed" and "denne og fremtidige" are both written with that id, so without one
+ * every answer resolves to the same series-wide write. A repeating event drawn without an id — a
+ * create still sitting in the offline outbox, or an integration that reports `rrule` alone — can
+ * only be written as a whole, and is not asked a question that has one honest answer.
+ */
+val CalendarEvent.asksEditScope: Boolean get() = recurrenceId != null
