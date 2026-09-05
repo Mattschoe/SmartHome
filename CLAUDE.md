@@ -25,6 +25,14 @@ The full design + UX spec lives in `app/docs/` and is the source of truth for wh
 # Run the desktop (JVM) app — a 1280×800 window, the laptop verification path
 ./gradlew :shared:run
 
+# Build a self-contained desktop app image (app + trimmed JRE) under
+# shared/build/compose/binaries/main/app/SmartHome — launch it with bin/SmartHome
+./gradlew :shared:createDistributable
+
+# Wrap that into the host's installer format (.rpm on Fedora — needs rpm-build).
+# Installs to /opt/smarthome and registers a .desktop launcher entry.
+./gradlew :shared:packageDistributionForCurrentOS
+
 # Run all tests across all KMP targets (common + android host + ios sim)
 ./gradlew allTests
 

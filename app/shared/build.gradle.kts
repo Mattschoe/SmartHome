@@ -1,3 +1,4 @@
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.util.Properties
@@ -157,13 +158,47 @@ composeCompiler {
     stabilityConfigurationFiles.add(layout.projectDirectory.file("compose-stability.conf"))
 }
 
-// Desktop (JVM) entry point. `./gradlew :shared:run` launches the dashboard in a resizable window.
+// Desktop (JVM) entry point. `./gradlew :shared:run` launches the dashboard in a resizable window;
+// `:shared:createDistributable` builds a self-contained app image under build/compose/binaries, and
+// `:shared:packageDistributionForCurrentOS` wraps that into the host's installer format (.rpm here).
 compose.desktop {
     application {
         mainClass = "com.mattschoe.smarthome.MainKt"
         nativeDistributions {
+            targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Msi)
             packageName = "SmartHome"
             packageVersion = "1.0.0"
+            description = "Smart Home Dashboard"
+            vendor = "mattschoe"
+
+            // Trim the bundled runtime to what the app actually loads. Skia/Compose needs desktop
+            // AWT, Ktor needs the HTTP/crypto stack; the rest of the JDK can stay out of the image.
+            modules(
+                "java.instrument",   // Coil/Ktor agents-capable libraries probe for it at startup
+                "java.management",   // coroutines' debug/JMX probes
+                "java.naming",       // OkHttp DNS
+                "jdk.crypto.ec",     // TLS to Home Assistant over wss/https
+                "jdk.unsupported",   // sun.misc.Unsafe, still used by Skiko
+            )
+
+            linux {
+                iconFile.set(project.file("icons/smarthome.png"))
+                shortcut = true          // writes the .desktop entry, so it shows up in the launcher
+                menuGroup = "Utility"
+                appCategory = "Utility"
+                packageName = "smarthome"
+            }
+            // No macOS/Windows iconFile: jpackage wants .icns / .ico there, and only icons/smarthome.png
+            // exists. Both hosts fall back to the Compose default icon until someone builds on them.
+            macOS {
+                bundleID = "com.mattschoe.smarthome"
+            }
+            windows {
+                menuGroup = "SmartHome"
+                shortcut = true
+                // Stable UUID so an upgrade replaces the install instead of stacking beside it.
+                upgradeUuid = "6f1f7d9c-4a1e-4a5f-9a2a-2f0c1b7a5e31"
+            }
         }
     }
 }
