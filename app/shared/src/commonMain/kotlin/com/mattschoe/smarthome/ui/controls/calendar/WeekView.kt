@@ -60,6 +60,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
@@ -84,6 +85,7 @@ import com.mattschoe.smarthome.data.danishMonths
 import com.mattschoe.smarthome.data.droppedEventSlot
 import com.mattschoe.smarthome.data.formatMinuteOfDay
 import com.mattschoe.smarthome.data.formatTimeOfDay
+import com.mattschoe.smarthome.data.isoWeekNumber
 import com.mattschoe.smarthome.data.MinEventSpanMinutes
 import com.mattschoe.smarthome.data.layoutDayEvents
 import com.mattschoe.smarthome.data.weekAtPage
@@ -101,6 +103,7 @@ import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.OnForest
 import com.mattschoe.smarthome.ui.theme.onCalendarColor
 import com.mattschoe.smarthome.ui.theme.Rose
+import com.mattschoe.smarthome.ui.theme.sectionLabelStyle
 import kotlinx.coroutines.flow.first
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
@@ -278,7 +281,7 @@ private fun WeekHeader(
     onSelectDay: (LocalDate) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth()) {
-        Spacer(Modifier.width(Dimensions.weekTimeGutter))
+        WeekNumberCell(days.first())
         days.forEach { date ->
             val isToday = date == today
             val isSelected = date == selectedDay
@@ -315,6 +318,39 @@ private fun WeekHeader(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * The gutter's corner above the hours: the ISO week the shown page covers, stacked into the day
+ * columns' own two rows — the label on their weekday-initial line, the number on their day-number
+ * line — so it reads across as chrome rather than as an eighth day, and so the header keeps exactly
+ * the height it had. That height is what the page reports as its chrome, which sets the grid's
+ * zoom floor, so this cell must not add a row of its own.
+ */
+@Composable
+private fun WeekNumberCell(monday: LocalDate) {
+    val week = isoWeekNumber(monday)
+    Column(
+        modifier = Modifier
+            .width(Dimensions.weekTimeGutter)
+            // Collapses the two lines, which would otherwise be read out as two fragments.
+            .clearAndSetSemantics { contentDescription = "Uge $week" },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(text = "UGE", style = sectionLabelStyle(10.sp), maxLines = 1, softWrap = false)
+        Spacer(Modifier.height(2.dp))
+        Box(
+            modifier = Modifier.size(Dimensions.calendarDayDisc),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = week.toString(),
+                color = Muted,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+            )
         }
     }
 }
