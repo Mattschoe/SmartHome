@@ -112,6 +112,13 @@ object Dimensions {
     val weekHourLabelMinSpacing = 18.dp
     val weekTimeGutter = 34.dp
     val weekHourLabelHeight = 14.dp
+    // The ISO week number in the header's gutter corner (WeekNumberCell in WeekView.kt): the
+    // [TodayButton] treatment shrunk to fit the gutter and drawn in the muted hairline, since it
+    // labels the page rather than offering anything to press.
+    val weekNumberBoxWidth = 30.dp
+    val weekNumberBoxHeight = 24.dp
+    val weekNumberBoxRadius = 8.dp
+    val weekNumberBoxBorder = 1.dp
     // An event block: its floor height *at full expansion* (it scales down with the zoom, so a block
     // stays true to its minutes), the leading bar in the calendar's full color, and the padding its
     // text sits inside — which is also the budget the block's own line-fitting spends from.

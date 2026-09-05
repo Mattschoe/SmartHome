@@ -103,7 +103,6 @@ import com.mattschoe.smarthome.ui.theme.Muted
 import com.mattschoe.smarthome.ui.theme.OnForest
 import com.mattschoe.smarthome.ui.theme.onCalendarColor
 import com.mattschoe.smarthome.ui.theme.Rose
-import com.mattschoe.smarthome.ui.theme.sectionLabelStyle
 import kotlinx.coroutines.flow.first
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
@@ -280,7 +279,7 @@ private fun WeekHeader(
     selectedDay: LocalDate,
     onSelectDay: (LocalDate) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth()) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         WeekNumberCell(days.first())
         days.forEach { date ->
             val isToday = date == today
@@ -323,33 +322,38 @@ private fun WeekHeader(
 }
 
 /**
- * The gutter's corner above the hours: the ISO week the shown page covers, stacked into the day
- * columns' own two rows — the label on their weekday-initial line, the number on their day-number
- * line — so it reads across as chrome rather than as an eighth day, and so the header keeps exactly
- * the height it had. That height is what the page reports as its chrome, which sets the grid's
- * zoom floor, so this cell must not add a row of its own.
+ * The gutter's corner above the hours: the ISO week the shown page covers, bare of any label and set
+ * on the day numbers' own line, so it reads across the header as one row of numbers rather than as a
+ * stacked caption. It borrows the jump-to-today button's rounded outline so the number reads as
+ * chrome and not as an eighth day, but drawn in the muted hairline: it is the only box in the header
+ * that cannot be pressed, and it should sit behind the dates rather than compete with them. The cell
+ * adds no row of its own — the header's height, which the page reports as its chrome and which sets
+ * the grid's zoom floor, stays exactly what the day columns make it.
  */
 @Composable
 private fun WeekNumberCell(monday: LocalDate) {
     val week = isoWeekNumber(monday)
-    Column(
+    val shape = RoundedCornerShape(Dimensions.weekNumberBoxRadius)
+    Box(
         modifier = Modifier
             .width(Dimensions.weekTimeGutter)
-            // Collapses the two lines, which would otherwise be read out as two fragments.
+            .height(Dimensions.calendarDayDisc)
             .clearAndSetSemantics { contentDescription = "Uge $week" },
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentAlignment = Alignment.Center,
     ) {
-        Text(text = "UGE", style = sectionLabelStyle(10.sp), maxLines = 1, softWrap = false)
-        Spacer(Modifier.height(2.dp))
         Box(
-            modifier = Modifier.size(Dimensions.calendarDayDisc),
+            modifier = Modifier
+                .size(Dimensions.weekNumberBoxWidth, Dimensions.weekNumberBoxHeight)
+                .border(Dimensions.weekNumberBoxBorder, Muted, shape),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = week.toString(),
                 color = Muted,
-                fontSize = 15.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
