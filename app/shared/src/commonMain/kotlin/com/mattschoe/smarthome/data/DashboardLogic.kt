@@ -343,6 +343,17 @@ fun weekStart(date: LocalDate): LocalDate = date.minus(date.dayOfWeek.isoDayNumb
 const val DaysPerWeek = 7
 
 /**
+ * The ISO 8601 week number [date] falls in — the "uge 36" a Danish household counts by, printed in
+ * the week view's gutter corner.
+ *
+ * Counted off the week's **Thursday**: an ISO week belongs to the year holding its Thursday, so that
+ * Thursday's day-of-year divides straight into the week number, and the weeks straddling New Year —
+ * along with the 53-week years — need no case of their own.
+ */
+fun isoWeekNumber(date: LocalDate): Int =
+    (weekStart(date).plus(3, DateTimeUnit.DAY).dayOfYear - 1) / DaysPerWeek + 1
+
+/**
  * How far back and forward from today the adapter fetches calendar events — and keeps them. A
  * generous rolling window: a household calendar is tiny, and fetching a year ahead means month
  * navigation never has to reach the adapter.

@@ -471,6 +471,37 @@ class DashboardLogicTest {
     }
 
     @Test
+    fun isoWeekNumber_isTheSameForEveryDayOfTheWeek() {
+        val monday = LocalDate(2026, 8, 31)
+        assertEquals(36, isoWeekNumber(monday))
+        for (offset in 0 until DaysPerWeek) {
+            assertEquals(36, isoWeekNumber(monday.plus(offset, DateTimeUnit.DAY)))
+        }
+        assertEquals(37, isoWeekNumber(monday.plus(DaysPerWeek, DateTimeUnit.DAY)))
+    }
+
+    @Test
+    fun isoWeekNumber_countsTheNewYearStraddleByItsThursday() {
+        // Week 1 of 2026 is the one holding Thursday 1 Jan — it opens in the previous December and
+        // carries that whole week, both sides of the year boundary.
+        assertEquals(1, isoWeekNumber(LocalDate(2025, 12, 29)))  // Monday, still December
+        assertEquals(1, isoWeekNumber(LocalDate(2026, 1, 1)))
+        assertEquals(1, isoWeekNumber(LocalDate(2026, 1, 4)))    // Sunday closes week 1
+        assertEquals(2, isoWeekNumber(LocalDate(2026, 1, 5)))
+    }
+
+    @Test
+    fun isoWeekNumber_reaches53InALongYear() {
+        // 2026 opens on a Thursday, so it runs to 53 weeks: the last begins 28 Dec and spills into
+        // January, whose own week 1 only starts on the Monday after.
+        assertEquals(53, isoWeekNumber(LocalDate(2026, 12, 28)))
+        assertEquals(53, isoWeekNumber(LocalDate(2027, 1, 3)))
+        assertEquals(1, isoWeekNumber(LocalDate(2027, 1, 4)))
+        // And in a leap year, where the deciding Thursday is day 366.
+        assertEquals(53, isoWeekNumber(LocalDate(2021, 1, 1)))
+    }
+
+    @Test
     fun layoutDayEvents_givesNonOverlappingEventsTheFullColumn() {
         val placed = layoutDayEvents(listOf(timedEvent("A", 540, 600), timedEvent("B", 660, 720)))
         assertEquals(listOf(0, 0), placed.map { it.lane })
