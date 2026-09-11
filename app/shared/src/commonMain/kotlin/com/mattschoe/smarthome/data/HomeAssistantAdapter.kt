@@ -57,11 +57,15 @@ import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
@@ -73,9 +77,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
@@ -136,6 +144,7 @@ class HomeAssistantAdapter(
      * means this adapter has no offline behaviour and a write with no socket fails as it always did.
      */
     private val outbox: OfflineOutbox? = null,
+    private val networkMonitor: NetworkMonitor = AlwaysAvailableNetworkMonitor,
 ) : HomeAdapter {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -196,7 +205,7 @@ class HomeAssistantAdapter(
     private val pending = mutableMapOf<Int, CompletableDeferred<JsonObject>>()
     private val eventHandlers = mutableMapOf<Int, (JsonObject) -> Unit>()
 
-    private var reconnectDelay = INITIAL_RECONNECT_MS
+    private val reconnectPolicy = ReconnectPolicy(networkMonitor)
     @Volatile private var session: DefaultClientWebSocketSession? = null
 
     init {
@@ -816,11 +825,35 @@ class HomeAssistantAdapter(
 
     private suspend fun connectionLoop() {
         while (scope.isActive) {
+            reconnectPolicy.awaitNetwork()
             try {
                 client.webSocket(config.webSocketUrl) {
-                    session = this
+                    val liveSession = this
+                    session = liveSession
                     try {
-                        runSession()
+                        // Race the whole session — auth and discovery included — against connectivity
+                        // loss. Closing plus cancelling the runner fails in-flight requests promptly;
+                        // the normal finally path below then publishes the existing offline state.
+                        supervisorScope {
+                            val runner = async { liveSession.runSession() }
+                            val networkLost = async {
+                                networkMonitor.isAvailable.filter { !it }.first()
+                            }
+                            try {
+                                select<Unit> {
+                                    runner.onAwait { }
+                                    networkLost.onAwait {
+                                        liveSession.close(
+                                            CloseReason(CloseReason.Codes.GOING_AWAY, "Network unavailable")
+                                        )
+                                        runner.cancelAndJoin()
+                                    }
+                                }
+                            } finally {
+                                runner.cancel()
+                                networkLost.cancel()
+                            }
+                        }
                     } finally {
                         session = null
                         failPending()
@@ -841,10 +874,12 @@ class HomeAssistantAdapter(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                println("HomeAssistantAdapter: connection lost (${e.message}); reconnecting in ${reconnectDelay}ms")
+                println(
+                    "HomeAssistantAdapter: connection lost (${e.message}); " +
+                        "waiting to reconnect"
+                )
             }
-            delay(reconnectDelay)
-            reconnectDelay = (reconnectDelay * 2).coerceAtMost(MAX_RECONNECT_MS)
+            reconnectPolicy.awaitRetry()
         }
     }
 
@@ -876,7 +911,7 @@ class HomeAssistantAdapter(
                 rediscoverTrigger.trySend(Unit)
             }
         }
-        reconnectDelay = INITIAL_RECONNECT_MS // healthy connection — reset backoff
+        reconnectPolicy.reset() // healthy connection — reset backoff
         onConnected()
 
         reader.join() // returns when `incoming` closes; lets the webSocket block end and reconnect
@@ -1402,8 +1437,6 @@ class HomeAssistantAdapter(
         HaCommandException(type, code, message)
 
     private companion object {
-        const val INITIAL_RECONNECT_MS = 1_000L
-        const val MAX_RECONNECT_MS = 30_000L
         // Registry lists are the slowest of these and answer well inside a second on a healthy box.
         const val REQUEST_TIMEOUT_MS = 20_000L
         val HOLD = 3_000.milliseconds

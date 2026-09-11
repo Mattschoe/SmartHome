@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.mattschoe.smarthome.data.AndroidNetworkMonitor
 import com.mattschoe.smarthome.data.SharedPreferencesStore
 import com.mattschoe.smarthome.media.SmartHomeMediaService
 import com.mattschoe.smarthome.reminders.AndroidAlarmScheduler
@@ -102,8 +103,10 @@ class AppApplication : Application() {
         // rather than letting AppContainer resolve one (see platformKeyValueStore).
         val store = SharedPreferencesStore(this)
         val role = deviceRole()
+        val networkMonitor = AndroidNetworkMonitor(this)
         appContainer = AppContainer(
             keyValueStore = store,
+            networkMonitor = networkMonitor,
             deviceRole = role,
             alarmScheduler = AndroidAlarmScheduler(this, store),
             notifications = SystemNotificationPresenter(this),

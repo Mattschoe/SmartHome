@@ -29,11 +29,15 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -45,9 +49,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -81,7 +89,10 @@ import kotlinx.serialization.json.putJsonArray
  * `event` frames to [handleEvent]. Auth is required (schema ≥ 28): after the server hello we send an
  * `auth` command with the MA long-lived token before any other command.
  */
-class MusicAssistantAdapter(private val config: MaConfig) {
+class MusicAssistantAdapter(
+    private val config: MaConfig,
+    private val networkMonitor: NetworkMonitor = AlwaysAvailableNetworkMonitor,
+) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val client = HttpClient { install(WebSockets) }
@@ -119,7 +130,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
     private val pending = mutableMapOf<Int, CompletableDeferred<JsonObject>>()
 
     @Volatile private var session: DefaultClientWebSocketSession? = null
-    private var reconnectDelay = INITIAL_RECONNECT_MS
+    private val reconnectPolicy = ReconnectPolicy(networkMonitor)
 
     init {
         scope.launch { connectionLoop() }
@@ -129,11 +140,34 @@ class MusicAssistantAdapter(private val config: MaConfig) {
 
     private suspend fun connectionLoop() {
         while (scope.isActive) {
+            reconnectPolicy.awaitNetwork()
             try {
                 client.webSocket(config.webSocketUrl) {
-                    session = this
+                    val liveSession = this
+                    session = liveSession
                     try {
-                        runSession()
+                        // Include hello/auth in the race: a stale socket during startup must not sit
+                        // through command timeouts before the restored network can reconnect it.
+                        supervisorScope {
+                            val runner = async { liveSession.runSession() }
+                            val networkLost = async {
+                                networkMonitor.isAvailable.filter { !it }.first()
+                            }
+                            try {
+                                select<Unit> {
+                                    runner.onAwait { }
+                                    networkLost.onAwait {
+                                        liveSession.close(
+                                            CloseReason(CloseReason.Codes.GOING_AWAY, "Network unavailable")
+                                        )
+                                        runner.cancelAndJoin()
+                                    }
+                                }
+                            } finally {
+                                runner.cancel()
+                                networkLost.cancel()
+                            }
+                        }
                     } finally {
                         session = null
                         failPending()
@@ -146,11 +180,10 @@ class MusicAssistantAdapter(private val config: MaConfig) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // Any other drop is retried on the backoff below.
-                log("connection lost (${e.message}); reconnecting in ${reconnectDelay}ms")
+                // Any other drop is retried by the timer or woken early by network restoration.
+                log("connection lost (${e.message}); waiting to reconnect")
             }
-            delay(reconnectDelay)
-            reconnectDelay = (reconnectDelay * 2).coerceAtMost(MAX_RECONNECT_MS)
+            reconnectPolicy.awaitRetry()
         }
     }
 
@@ -163,7 +196,7 @@ class MusicAssistantAdapter(private val config: MaConfig) {
 
         val reader = launch { readLoop() }
         authenticate()
-        reconnectDelay = INITIAL_RECONNECT_MS // healthy connection — reset backoff
+        reconnectPolicy.reset() // healthy connection — reset backoff
         log("connected to $baseUrl (schema ${hello["schema_version"]?.jsonPrimitive?.contentOrNull})")
         onConnected()
         reader.join() // returns when `incoming` closes; lets the webSocket block end and reconnect
@@ -569,6 +602,8 @@ class MusicAssistantAdapter(private val config: MaConfig) {
         val result = try {
             command("auth", buildJsonObject { put("token", config.token) })
         } catch (e: MaCommandException) {
+            // A socket loss or timeout during auth is connectivity, not proof that the token is bad.
+            if (e.code == null) throw e
             throw MaAuthException(e.message ?: "auth rejected")
         }
         val authed = (result as? JsonObject)?.get("authenticated")?.jsonPrimitive?.booleanOrNull ?: false
@@ -667,12 +702,10 @@ class MusicAssistantAdapter(private val config: MaConfig) {
             .removeSuffix("/ws")
 
     private class MaAuthException(message: String) : Exception(message)
-    private class MaCommandException(command: String, code: Int?, details: String?) :
+    private class MaCommandException(command: String, val code: Int?, details: String?) :
         Exception("MA command '$command' failed (code=$code): $details")
 
     private companion object {
-        val INITIAL_RECONNECT_MS = 1_000L
-        val MAX_RECONNECT_MS = 30_000L
         val REQUEST_TIMEOUT_MS = 20_000L
         val BROWSE_REFRESH_MS = 5 * 60 * 1_000L
         // How long one slice of the Quick Picks pool stays on screen.
