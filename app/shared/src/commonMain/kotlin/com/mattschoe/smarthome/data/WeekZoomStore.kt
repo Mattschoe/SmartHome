@@ -1,21 +1,28 @@
 package com.mattschoe.smarthome.data
 
-/**
- * How tall one hour row of the week grid may be, in dp: fully expanded, where a day is 576dp and
- * scrolls, down to the whole 24h in 144dp. It lives here rather than only as a
- * `Dimensions` token because it is also what a persisted level is validated against — the range and
- * the geometry are one fact, and `Dimensions.weekHourHeightMin`/`Max` are this range as Dp.
- */
-val WeekHourHeightRange = 6f..24f
+/** The smallest persisted week-grid scale, in dp per hour. */
+const val WeekHourHeightMin = 6f
+
+/** The fresh-install scale and event-block design baseline, in dp per hour. */
+const val WeekHourHeightDefault = 24f
 
 /**
- * A zoom level, clamped into the range the grid can actually draw. Non-finite values fall back to
- * the expanded end rather than clamping: a pinch's scale factor is a ratio of finger distances, and
- * both that and a persisted string can hand this a NaN, which every comparison would let through.
+ * A practical safety ceiling rather than a normal zoom target. At 480dp per hour the 24-hour grid
+ * is 11,520dp tall and shows roughly one hour at a time on the target tablet.
+ */
+const val WeekHourHeightSafetyLimit = 480f
+
+/** Persisted week-grid scales accepted across app restarts. */
+val WeekHourHeightRange = WeekHourHeightMin..WeekHourHeightSafetyLimit
+
+/**
+ * A persisted zoom level clamped into the grid's safe range. Non-finite values fall back to the
+ * normal 24dp default rather than either extreme: both gesture math and persisted strings can
+ * produce NaN or infinity, which a plain comparison would let through.
  */
 fun clampWeekHourHeight(hourHeightDp: Float): Float =
     if (hourHeightDp.isFinite()) hourHeightDp.coerceIn(WeekHourHeightRange)
-    else WeekHourHeightRange.endInclusive
+    else WeekHourHeightDefault
 
 /**
  * How tall one hour row of the week grid is, in dp — what pinching the grid sets. Kept between runs
@@ -35,9 +42,8 @@ class KeyValueWeekZoomStore(private val store: KeyValueStore) : WeekZoomStore {
 
     override fun read(): Float {
         val raw = runCatching { store.get(Key) }.getOrNull()?.toFloatOrNull()
-        // Nothing written, or something that isn't a number: open fully expanded, which is the view
-        // the week grid was designed around.
-        return clampWeekHourHeight(raw ?: WeekHourHeightRange.endInclusive)
+        // Missing or malformed state is not a request for an extreme: open at the design baseline.
+        return clampWeekHourHeight(raw ?: WeekHourHeightDefault)
     }
 
     override fun write(hourHeightDp: Float) {
@@ -51,7 +57,7 @@ class KeyValueWeekZoomStore(private val store: KeyValueStore) : WeekZoomStore {
 
 /** A level that lives only as long as the process — the fallback where no [KeyValueStore] exists. */
 class InMemoryWeekZoomStore : WeekZoomStore {
-    private var hourHeightDp = WeekHourHeightRange.endInclusive
+    private var hourHeightDp = WeekHourHeightDefault
 
     override fun read(): Float = hourHeightDp
 

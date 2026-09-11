@@ -2,7 +2,9 @@ package com.mattschoe.smarthome.ui.theme
 
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mattschoe.smarthome.data.WeekHourHeightRange
+import com.mattschoe.smarthome.data.WeekHourHeightDefault
+import com.mattschoe.smarthome.data.WeekHourHeightMin
+import com.mattschoe.smarthome.data.WeekHourHeightSafetyLimit
 
 /** Shared geometry tokens so no composable hardcodes a corner radius or hit-target size. */
 object Dimensions {
@@ -100,13 +102,14 @@ object Dimensions {
 
     // Right-card Calendar panel (week view). The grid is 24 hour rows beside a gutter of hour labels.
     // Widths stay proportional (seven weight(1f) columns), so the same composables re-flow on a phone.
-    // The hour row is a **range the reader sets** by pinching the grid, not a constant: at
-    // [weekHourHeightMax] the day is 576dp and scrolls inside the card. The floor is not a token at
-    // all — the grid fills the card, so collapsing stops the moment all 24 hours exactly fit the
-    // height on hand, which `CalendarViews` computes from its own constraints. These two are the
-    // persisted level's storage bounds (`WeekZoomStore`) and the ceiling that layout still honours.
-    val weekHourHeightMin = WeekHourHeightRange.start.dp
-    val weekHourHeightMax = WeekHourHeightRange.endInclusive.dp
+    // The fresh-install/default row height is [weekHourHeightDefault]. Pinching may expand it as far
+    // as [weekHourHeightSafetyLimit], a practical guard rather than a normal layout target. The
+    // effective zoom-out floor is screen-dependent instead of this persisted minimum: collapsing
+    // stops when all 24 hours exactly fill the viewport, which `CalendarViews` computes from its own
+    // constraints and passes down with the safety limit as the gesture's actual bounds.
+    val weekHourHeightMin = WeekHourHeightMin.dp
+    val weekHourHeightDefault = WeekHourHeightDefault.dp
+    val weekHourHeightSafetyLimit = WeekHourHeightSafetyLimit.dp
     // Below this much room per hour, labels and rules thin out to every 2nd, 3rd… hour rather than
     // collapsing into mush. See `hourStride` in WeekView.kt, which this token alone tunes.
     val weekHourLabelMinSpacing = 18.dp
@@ -119,9 +122,10 @@ object Dimensions {
     val weekNumberBoxHeight = 24.dp
     val weekNumberBoxRadius = 8.dp
     val weekNumberBoxBorder = 1.dp
-    // An event block: its floor height *at full expansion* (it scales down with the zoom, so a block
-    // stays true to its minutes), the leading bar in the calendar's full color, and the padding its
-    // text sits inside — which is also the budget the block's own line-fitting spends from.
+    // An event block: its floor reaches this height at the 24dp/hour design baseline and stays there
+    // at larger scales; actual event duration then supplies any additional growth. Below the baseline
+    // the floor scales down with the zoom so blocks stay true to their minutes. The remaining tokens
+    // define its leading bar and the padding its own line-fitting spends from.
     val weekMinBlockHeight = 14.dp
     val weekBlockRadius = 6.dp
     val weekBlockBarWidth = 3.dp

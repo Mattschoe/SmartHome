@@ -79,7 +79,6 @@ import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.HoursPerDay
 import com.mattschoe.smarthome.data.MinutesPerDay
 import com.mattschoe.smarthome.data.PositionedEvent
-import com.mattschoe.smarthome.data.WeekHourHeightRange
 import com.mattschoe.smarthome.data.canDragEvent
 import com.mattschoe.smarthome.data.danishMonths
 import com.mattschoe.smarthome.data.droppedEventSlot
@@ -143,6 +142,8 @@ internal fun WeekPager(
     nowMinutes: Int,
     sources: List<CalendarSource>,
     hourHeight: Dp,
+    /** Effective zoom bounds for this viewport: its fit-all-hours floor through the safety limit. */
+    hourHeightBounds: ClosedFloatingPointRange<Float>,
     onSelectDay: (LocalDate) -> Unit,
     onShowWeek: (LocalDate) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
@@ -213,10 +214,16 @@ internal fun WeekPager(
                         onShowWeek(weekAtPage(calendarWindow, pagerState.currentPage + 1)); true
                     },
                     CustomAccessibilityAction("Komprimér timer") {
-                        onHourHeight(steppedHourHeight(hourHeight.value, expand = false)); true
+                        onHourHeight(
+                            steppedHourHeight(hourHeight.value, expand = false, hourHeightBounds),
+                        )
+                        true
                     },
                     CustomAccessibilityAction("Udvid timer") {
-                        onHourHeight(steppedHourHeight(hourHeight.value, expand = true)); true
+                        onHourHeight(
+                            steppedHourHeight(hourHeight.value, expand = true, hourHeightBounds),
+                        )
+                        true
                     },
                 )
             },
@@ -237,6 +244,7 @@ internal fun WeekPager(
                 sources = sources,
                 scroll = hourScroll,
                 hourHeight = hourHeight,
+                hourHeightBounds = hourHeightBounds,
                 onHourHeight = onHourHeight,
                 onOpenEvent = onOpenEvent,
                 onNewEventAt = onNewEventAt,
@@ -577,27 +585,22 @@ private val HourStrides = intArrayOf(1, 2, 3, 4, 6, 12)
 internal fun hourStride(hourHeight: Dp): Int =
     HourStrides.firstOrNull { hourHeight * it >= Dimensions.weekHourLabelMinSpacing } ?: HourStrides.last()
 
+/** Scale used by the screen-reader zoom actions; repeated actions traverse the full range smoothly. */
+private const val AccessibilityZoomFactor = 1.5f
+
 /**
- * The levels the screen-reader zoom actions step between: the heights at which [hourStride] changes,
- * bounded by the range's own ends. A pinch is continuous and has no screen-reader equivalent, so the
- * actions move by the only steps at which the grid visibly reads differently.
+ * One proportional accessibility zoom step, clamped to this viewport's effective bounds. Starting
+ * outside the bounds is tolerated so a resized window can recover in one action without a dead step.
  */
-internal val WeekZoomSteps: List<Float> = buildList {
-    add(WeekHourHeightRange.start)
-    HourStrides.forEach { stride ->
-        val height = Dimensions.weekHourLabelMinSpacing.value / stride
-        if (height in WeekHourHeightRange) add(height)
-    }
-    add(WeekHourHeightRange.endInclusive)
-}.distinct().sorted()
-
-/** How far apart two levels must be to count as different steps, in dp. */
-private const val ZoomStepEpsilon = 0.01f
-
-/** The next [WeekZoomSteps] level above (or below) [current], stopping at the range's ends. */
-internal fun steppedHourHeight(current: Float, expand: Boolean): Float =
-    if (expand) WeekZoomSteps.firstOrNull { it > current + ZoomStepEpsilon } ?: WeekHourHeightRange.endInclusive
-    else WeekZoomSteps.lastOrNull { it < current - ZoomStepEpsilon } ?: WeekHourHeightRange.start
+internal fun steppedHourHeight(
+    current: Float,
+    expand: Boolean,
+    bounds: ClosedFloatingPointRange<Float>,
+): Float {
+    val clamped = current.coerceIn(bounds)
+    val scaled = if (expand) clamped * AccessibilityZoomFactor else clamped / AccessibilityZoomFactor
+    return scaled.coerceIn(bounds)
+}
 
 /** Where a pinch's fingers were when it began, in the terms the grid re-aims itself with. */
 private data class ZoomAnchor(
@@ -626,6 +629,8 @@ private fun WeekGrid(
     sources: List<CalendarSource>,
     scroll: ScrollState,
     hourHeight: Dp,
+    /** The same viewport-specific bounds used by the pager's accessibility zoom actions. */
+    hourHeightBounds: ClosedFloatingPointRange<Float>,
     onHourHeight: (Float) -> Unit,
     onOpenEvent: (CalendarEvent) -> Unit,
     onNewEventAt: (LocalDate, LocalTime) -> Unit,
@@ -638,6 +643,7 @@ private fun WeekGrid(
     // mid-pinch), so it reaches the current scale and callback through rememberUpdatedState — the
     // same reason the brightness dial's drag does.
     val currentHourHeight by rememberUpdatedState(hourHeight)
+    val currentHourHeightBounds by rememberUpdatedState(hourHeightBounds)
     val currentOnHourHeight by rememberUpdatedState(onHourHeight)
     // Null on every page but the one being pinched — which is what makes the re-aim below safe in a
     // pager that composes its neighbours too.
@@ -732,6 +738,7 @@ private fun WeekGrid(
                     // second pointer is down, consuming there locks them out for the whole gesture.
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     var zooming = false
+                    var gestureHourHeight = currentHourHeight.value
                     do {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         // A held block outranks the pinch, or a second finger landing anywhere while
@@ -739,19 +746,31 @@ private fun WeekGrid(
                         if (!dragging && event.changes.count { it.pressed } >= 2) {
                             if (!zooming) {
                                 zooming = true
+                                gestureHourHeight = currentHourHeight.value.coerceIn(currentHourHeightBounds)
                                 val centroid = event.calculateCentroid(useCurrent = true)
                                 anchor = ZoomAnchor(
                                     hours = (scroll.value + centroid.y) / currentHourHeight.toPx(),
                                     viewportY = centroid.y,
                                 )
                             }
-                            // A zero or non-finite factor is two fingers landing on the same point,
-                            // not a request to collapse the day.
+                            // calculateZoom() is incremental. Accumulate every factor locally instead
+                            // of waiting for recomposition to refresh currentHourHeight between pointer
+                            // events; clamping the accumulator makes reversal responsive at either edge.
                             val zoom = event.calculateZoom()
                             if (zoom.isFinite() && zoom > 0f) {
-                                currentOnHourHeight(currentHourHeight.value * zoom)
+                                val scaled = gestureHourHeight * zoom
+                                gestureHourHeight = if (scaled.isFinite()) {
+                                    scaled.coerceIn(currentHourHeightBounds)
+                                } else {
+                                    currentHourHeightBounds.endInclusive
+                                }
+                                currentOnHourHeight(gestureHourHeight)
                             }
                             event.changes.forEach { it.consume() }
+                        } else {
+                            // If one finger remains and another lands later, that is a new pinch and
+                            // must anchor and accumulate from the then-rendered scale.
+                            zooming = false
                         }
                     } while (event.changes.any { it.pressed })
                 }
@@ -908,15 +927,16 @@ private fun HeldBlock(
 }
 
 /**
- * How tall a block of [spanMinutes] draws. The floor it is held to scales with the zoom, so a
- * pinched grid stays *true to time*: blocks shrink with the day rather than a half-hour meeting
- * standing as tall as the two hours below it. At full expansion the floor is exactly
- * [Dimensions.weekMinBlockHeight].
+ * How tall a block of [spanMinutes] draws. Up to the 24dp/hour design baseline, its minimum scales
+ * with the grid so a short meeting does not dwarf the hours around it. The minimum then saturates at
+ * [Dimensions.weekMinBlockHeight]; beyond the baseline, real event duration supplies the growth.
  */
-private fun blockHeight(spanMinutes: Int, hourHeight: Dp): Dp =
+internal fun blockHeight(spanMinutes: Int, hourHeight: Dp): Dp =
     minuteOffset(spanMinutes, hourHeight).coerceAtLeast(
-        (Dimensions.weekMinBlockHeight * (hourHeight / Dimensions.weekHourHeightMax))
-            .coerceAtLeast(MinBlockHeightFloor),
+        (
+            Dimensions.weekMinBlockHeight *
+                (hourHeight / Dimensions.weekHourHeightDefault).coerceAtMost(1f)
+            ).coerceAtLeast(MinBlockHeightFloor),
     )
 
 /**
