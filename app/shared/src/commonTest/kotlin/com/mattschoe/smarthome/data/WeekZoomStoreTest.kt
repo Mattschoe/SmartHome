@@ -7,27 +7,32 @@ import kotlin.test.assertTrue
 class WeekZoomStoreTest {
 
     @Test
-    fun keyValueStore_roundTripsTheLevel() {
+    fun keyValueStore_roundTripsLevelsAcrossTheExpandedRange() {
         val backing = FakeZoomKeyValueStore()
-        KeyValueWeekZoomStore(backing).write(11f)
+        KeyValueWeekZoomStore(backing).write(240f)
 
         // A fresh store over the same backing is what a restart looks like.
-        assertEquals(11f, KeyValueWeekZoomStore(backing).read())
+        assertEquals(240f, KeyValueWeekZoomStore(backing).read())
     }
 
     @Test
-    fun keyValueStore_readsNothingAsFullyExpanded() {
-        // The grid was designed around the expanded end, so that is what an unpinched app opens at.
+    fun keyValueStore_readsNothingAsTheDesignDefault() {
         assertEquals(
-            WeekHourHeightRange.endInclusive,
+            WeekHourHeightDefault,
             KeyValueWeekZoomStore(FakeZoomKeyValueStore()).read(),
         )
     }
 
     @Test
-    fun keyValueStore_readsGarbageAsFullyExpanded() {
+    fun keyValueStore_readsMalformedAndNonFiniteValuesAsTheDesignDefault() {
         val backing = FakeZoomKeyValueStore().apply { put("calendar.weekZoom", "sludder") }
-        assertEquals(WeekHourHeightRange.endInclusive, KeyValueWeekZoomStore(backing).read())
+        assertEquals(WeekHourHeightDefault, KeyValueWeekZoomStore(backing).read())
+
+        backing.put("calendar.weekZoom", "NaN")
+        assertEquals(WeekHourHeightDefault, KeyValueWeekZoomStore(backing).read())
+
+        backing.put("calendar.weekZoom", "Infinity")
+        assertEquals(WeekHourHeightDefault, KeyValueWeekZoomStore(backing).read())
     }
 
     @Test
@@ -37,34 +42,38 @@ class WeekZoomStoreTest {
         val backing = FakeZoomKeyValueStore().apply { put("calendar.weekZoom", "0.0") }
         assertEquals(WeekHourHeightRange.start, KeyValueWeekZoomStore(backing).read())
 
-        backing.put("calendar.weekZoom", "400.0")
-        assertEquals(WeekHourHeightRange.endInclusive, KeyValueWeekZoomStore(backing).read())
+        backing.put("calendar.weekZoom", "600.0")
+        assertEquals(WeekHourHeightSafetyLimit, KeyValueWeekZoomStore(backing).read())
     }
 
     @Test
     fun clamp_rejectsNonFiniteLevels() {
         // A pinch's scale factor is a ratio of finger distances, so it can hand this a NaN — which
         // every comparison, and therefore a plain coerceIn, would let straight through.
-        assertEquals(WeekHourHeightRange.endInclusive, clampWeekHourHeight(Float.NaN))
-        assertEquals(WeekHourHeightRange.endInclusive, clampWeekHourHeight(Float.POSITIVE_INFINITY))
-        assertEquals(WeekHourHeightRange.endInclusive, clampWeekHourHeight(Float.NEGATIVE_INFINITY))
+        assertEquals(WeekHourHeightDefault, clampWeekHourHeight(Float.NaN))
+        assertEquals(WeekHourHeightDefault, clampWeekHourHeight(Float.POSITIVE_INFINITY))
+        assertEquals(WeekHourHeightDefault, clampWeekHourHeight(Float.NEGATIVE_INFINITY))
     }
 
     @Test
     fun inMemoryStore_keepsWhatItIsGiven() {
         val store = InMemoryWeekZoomStore()
-        assertEquals(WeekHourHeightRange.endInclusive, store.read())
-        store.write(9f)
-        assertEquals(9f, store.read())
+        assertEquals(WeekHourHeightDefault, store.read())
+        store.write(300f)
+        assertEquals(300f, store.read())
         store.write(1f)
-        assertEquals(WeekHourHeightRange.start, store.read())
+        assertEquals(WeekHourHeightMin, store.read())
     }
 
     @Test
-    fun range_spansAScrollingDayDownToOneThatFits() {
-        assertTrue(WeekHourHeightRange.start < WeekHourHeightRange.endInclusive)
-        assertEquals(576f, WeekHourHeightRange.endInclusive * HoursPerDay)
-        assertEquals(144f, WeekHourHeightRange.start * HoursPerDay)
+    fun range_separatesTheDefaultFromItsSafetyCeiling() {
+        assertEquals(WeekHourHeightMin, WeekHourHeightRange.start)
+        assertEquals(WeekHourHeightSafetyLimit, WeekHourHeightRange.endInclusive)
+        assertTrue(WeekHourHeightDefault in WeekHourHeightRange)
+        assertTrue(WeekHourHeightDefault < WeekHourHeightSafetyLimit)
+        assertEquals(144f, WeekHourHeightMin * HoursPerDay)
+        assertEquals(576f, WeekHourHeightDefault * HoursPerDay)
+        assertEquals(11_520f, WeekHourHeightSafetyLimit * HoursPerDay)
     }
 }
 

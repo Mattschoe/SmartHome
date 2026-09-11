@@ -12,7 +12,7 @@ class WeekViewTest {
 
     @Test
     fun hourStride_showsEveryHourWhileTheyHaveRoom() {
-        assertEquals(1, hourStride(Dimensions.weekHourHeightMax))
+        assertEquals(1, hourStride(Dimensions.weekHourHeightSafetyLimit))
         assertEquals(1, hourStride(Dimensions.weekHourLabelMinSpacing))
     }
 
@@ -49,24 +49,32 @@ class WeekViewTest {
     }
 
     @Test
-    fun steppedHourHeight_walksTheBreakpointsAndStopsAtTheEnds() {
-        assertEquals(listOf(6f, 9f, 18f, 24f), WeekZoomSteps)
+    fun steppedHourHeight_usesProportionalChangesAcrossTheExpandedRange() {
+        val bounds = 6f..480f
 
-        assertEquals(18f, steppedHourHeight(24f, expand = false))
-        assertEquals(9f, steppedHourHeight(18f, expand = false))
-        assertEquals(6f, steppedHourHeight(9f, expand = false))
-        assertEquals(6f, steppedHourHeight(6f, expand = false))
-
-        assertEquals(9f, steppedHourHeight(6f, expand = true))
-        assertEquals(24f, steppedHourHeight(18f, expand = true))
-        assertEquals(24f, steppedHourHeight(24f, expand = true))
+        assertEquals(36f, steppedHourHeight(24f, expand = true, bounds))
+        assertEquals(240f, steppedHourHeight(360f, expand = false, bounds))
+        assertEquals(480f, steppedHourHeight(400f, expand = true, bounds))
+        assertEquals(6f, steppedHourHeight(6f, expand = false, bounds))
+        assertEquals(480f, steppedHourHeight(480f, expand = true, bounds))
     }
 
     @Test
-    fun steppedHourHeight_stepsOffALevelPinchedBetweenTwoBreakpoints() {
-        // The pinch is continuous, so the screen-reader actions mostly start from somewhere between
-        // two steps: each must move to the neighbouring one, never back to where it already is.
-        assertEquals(18f, steppedHourHeight(13.5f, expand = true))
-        assertEquals(9f, steppedHourHeight(13.5f, expand = false))
+    fun steppedHourHeight_respectsTheViewportSpecificFitFloor() {
+        val bounds = 17f..480f
+
+        assertEquals(17f, steppedHourHeight(20f, expand = false, bounds))
+        assertEquals(25.5f, steppedHourHeight(17f, expand = true, bounds))
+        // A level left outside the range by a resize recovers immediately rather than taking a dead step.
+        assertEquals(17f, steppedHourHeight(10f, expand = false, bounds))
+    }
+
+    @Test
+    fun blockHeight_preservesTheBaselineFloorAndLetsDurationGrowBeyondIt() {
+        assertEquals(3.5.dp, blockHeight(spanMinutes = 1, hourHeight = 6.dp))
+        assertEquals(7.dp, blockHeight(spanMinutes = 1, hourHeight = 12.dp))
+        assertEquals(14.dp, blockHeight(spanMinutes = 1, hourHeight = 24.dp))
+        assertEquals(14.dp, blockHeight(spanMinutes = 1, hourHeight = 480.dp))
+        assertEquals(240.dp, blockHeight(spanMinutes = 30, hourHeight = 480.dp))
     }
 }

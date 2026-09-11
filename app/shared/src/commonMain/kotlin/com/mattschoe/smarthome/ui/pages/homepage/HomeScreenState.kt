@@ -246,8 +246,9 @@ sealed interface HomeScreenState {
         val calendarSettings: CalendarSettingsRoute?,
         /**
          * How tall one hour row of the week grid is, in dp — what pinching the grid sets (VM-owned,
-         * persisted). At the top of its range the day is 576dp and scrolls; the bottom is whatever
-         * height makes all 24 hours exactly fill the card, which the view computes from its own size.
+         * persisted). New installs start at 24dp/hour and may expand to the 480dp/hour practical
+         * safety limit. The effective zoom-out floor is whatever height makes all 24 hours exactly
+         * fill the viewport, which the view computes from its own size.
          */
         val weekHourHeight: Float,
         /** Whether a save or delete from the editor is in flight — the button spins and re-taps drop. */

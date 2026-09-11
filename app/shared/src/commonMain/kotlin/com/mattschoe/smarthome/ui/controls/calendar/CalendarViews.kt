@@ -148,14 +148,15 @@ internal fun CalendarViews(
                 // shown week's, not a constant.
                 var chrome by remember { mutableStateOf(0.dp) }
                 // The grid fills the card, and the zoom's floor is the height at which all 24 hours
-                // exactly fill it: collapsing past that would only open dead space, since the hours no
-                // longer hand what they give up to anything below. Expanding scrolls, as before. The
-                // ceiling stays the token unless the card is tall enough that merely fitting the day
-                // already exceeds it. Clamping what is *shown* rather than what is stored means a level
-                // persisted from a taller window renders sanely without being silently rewritten — only
-                // a real pinch writes, and it writes already clamped.
+                // exactly fill it: collapsing past that would only open dead space. Expansion runs to
+                // the practical safety limit, producing actual screen-dependent bounds that every zoom
+                // input below shares. The ceiling only follows the floor on an extraordinarily tall
+                // viewport where fitting the day already exceeds that limit. Clamping what is *shown*
+                // rather than what is stored means a level persisted from a taller window renders sanely
+                // without being silently rewritten — only a real zoom input writes.
                 val fit = ((maxHeight - chrome) / HoursPerDay).coerceAtLeast(1.dp).value
-                val ceiling = maxOf(fit, Dimensions.weekHourHeightMax.value)
+                val ceiling = maxOf(fit, Dimensions.weekHourHeightSafetyLimit.value)
+                val hourHeightBounds = fit..ceiling
                 WeekPager(
                     weekDays = weekDays,
                     eventsByDay = eventsByDay,
@@ -164,14 +165,15 @@ internal fun CalendarViews(
                     calendarWindow = calendarWindow,
                     nowMinutes = nowMinutes,
                     sources = sources,
-                    hourHeight = weekHourHeight.coerceIn(fit, ceiling).dp,
+                    hourHeight = weekHourHeight.coerceIn(hourHeightBounds).dp,
+                    hourHeightBounds = hourHeightBounds,
                     onSelectDay = onSelectDay,
                     onShowWeek = onShowWeek,
                     onOpenEvent = onOpenEventDetail,
                     onNewEventAt = onNewEventAt,
                     onMoveEvent = onMoveEvent,
                     dragEnabled = dragEnabled,
-                    onHourHeight = { onWeekHourHeight(it.coerceIn(fit, ceiling)) },
+                    onHourHeight = onWeekHourHeight,
                     onChrome = { chrome = it },
                     modifier = Modifier.fillMaxSize(),
                 )
