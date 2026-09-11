@@ -10,10 +10,12 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.mattschoe.smarthome.data.CalendarFilters
 import com.mattschoe.smarthome.data.CalendarPrefs
 import com.mattschoe.smarthome.data.EventMove
+import com.mattschoe.smarthome.data.newEventCalendarSuggestions
 import com.mattschoe.smarthome.data.model.CalendarEvent
 import com.mattschoe.smarthome.data.model.CalendarEventDraft
 import com.mattschoe.smarthome.data.model.CalendarPaletteColor
@@ -86,7 +88,7 @@ fun CalendarPanel(
     settings: CalendarSettingsRoute?,
     /** Which calendars each view draws (this device's, per view). */
     calendarFilters: CalendarFilters,
-    /** This device's own calendar colours and default event lengths. */
+    /** This device's own calendar colours, default event lengths, and last successful create target. */
     calendarPrefs: CalendarPrefs,
     onToggleCalendarFilter: (String) -> Unit,
     onSetCalendarColor: (String, CalendarPaletteColor) -> Unit,
@@ -99,6 +101,12 @@ fun CalendarPanel(
     modifier: Modifier = Modifier,
     headerTrailing: @Composable RowScope.() -> Unit = {},
 ) {
+    // Derive from the view this panel actually draws, not merely the VM's preferred view. Compact
+    // landscape forces Week here even during the frame before its settle effect updates VM state.
+    val newEventSources = remember(calendarSources, calendarFilters, calendarView, calendarPrefs) {
+        newEventCalendarSuggestions(calendarSources, calendarFilters, calendarView, calendarPrefs)
+    }
+
     AnimatedContent(
         targetState = when {
             eventEditor != null -> CalendarSurface.Editor
@@ -138,6 +146,7 @@ fun CalendarPanel(
                 target = eventEditor,
                 saving = savingEvent,
                 sources = calendarSources,
+                newEventSources = newEventSources,
                 reminders = reminders,
                 onSetEventReminder = onSetEventReminder,
                 onSave = onSaveEvent,

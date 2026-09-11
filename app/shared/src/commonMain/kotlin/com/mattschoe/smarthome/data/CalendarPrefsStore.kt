@@ -2,14 +2,15 @@ package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.CalendarPaletteColor
 import com.mattschoe.smarthome.data.model.CalendarSource
+import com.mattschoe.smarthome.data.model.CalendarView
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * What this device has been told about the home's calendars: the color each one is drawn in, and how
- * long a new event on it lasts by default.
+ * What this device has been told about the home's calendars: the color each one is drawn in, how
+ * long a new event on it lasts by default, and which calendar most recently accepted a new event.
  *
- * Both are deliberately **per device, never shared**. A calendar's color is how one person finds
+ * All three are deliberately **per device, never shared**. A calendar's color is how one person finds
  * their own things in a grid full of everyone's — Matt may want "Papkassehuset" blue while Cecilie
  * wants it yellow and the tablet in the hall keeps it green, and none of them is wrong. The same goes
  * for how long an event lasts: whoever books the shared calendar in two-hour blocks should not have
@@ -28,6 +29,8 @@ data class CalendarPrefs(
     val colorById: Map<String, CalendarPaletteColor> = emptyMap(),
     /** How long a new event lasts, in minutes. Absent means [DefaultEventDurationMinutes]. */
     val durationById: Map<String, Int> = emptyMap(),
+    /** Calendar used by the most recent successful new-event creation on this device. */
+    val lastCreatedSourceId: String? = null,
 ) {
     /** Give [sourceId] a color of its own. */
     fun withColor(sourceId: String, color: CalendarPaletteColor): CalendarPrefs =
@@ -44,6 +47,9 @@ data class CalendarPrefs(
     /** How long a new event on [sourceId] lasts, falling back to the app's standard hour. */
     fun durationFor(sourceId: String): Int =
         durationById[sourceId]?.let(::clampEventDuration) ?: DefaultEventDurationMinutes
+
+    /** Remember that a brand-new event was successfully accepted on [sourceId]. */
+    fun withLastCreatedSource(sourceId: String): CalendarPrefs = copy(lastCreatedSourceId = sourceId)
 }
 
 /** How long a new event lasts on a calendar that has not been given a length of its own. */
@@ -69,6 +75,28 @@ fun applyCalendarPrefs(sources: List<CalendarSource>, prefs: CalendarPrefs): Lis
     if (prefs.colorById.isEmpty() || sources.none { it.id in prefs.colorById }) return sources
     return sources.map { source ->
         prefs.colorById[source.id]?.let { source.copy(colorOverride = it) } ?: source
+    }
+}
+
+/**
+ * Calendars a new event may be put on in [view]. Read-only and hidden sources are removed, then the
+ * calendar most recently used for a successful create is moved to the front when it is still
+ * eligible. Every other source keeps the adapter's order.
+ */
+fun newEventCalendarSuggestions(
+    sources: List<CalendarSource>,
+    filters: CalendarFilters,
+    view: CalendarView,
+    prefs: CalendarPrefs,
+): List<CalendarSource> {
+    val hidden = filters.hidden(view)
+    val eligible = sources.filter { it.canWrite && it.id !in hidden }
+    val rememberedIndex = eligible.indexOfFirst { it.id == prefs.lastCreatedSourceId }
+    if (rememberedIndex <= 0) return eligible
+
+    return buildList(eligible.size) {
+        add(eligible[rememberedIndex])
+        eligible.forEachIndexed { index, source -> if (index != rememberedIndex) add(source) }
     }
 }
 

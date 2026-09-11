@@ -116,6 +116,8 @@ fun EventEditorSurface(
     target: EventEditorTarget,
     saving: Boolean,
     sources: List<CalendarSource>,
+    /** Writable calendars visible in the view the blank editor was opened from, in suggestion order. */
+    newEventSources: List<CalendarSource>,
     /** The home's reminder rules — what the reminder row opens on, and resolves its label from. */
     reminders: ReminderRules,
     /**
@@ -159,12 +161,13 @@ fun EventEditorSurface(
     var location by remember(target) { mutableStateOf(existing?.location.orEmpty()) }
     var allDay by remember(target) { mutableStateOf(existing?.allDay == true) }
     val writable = remember(sources) { sources.filter { it.canWrite } }
-    // Free on the edit path too, not only on create. A Home Assistant write addresses one calendar
-    // entity, so there is no update that lands on a different one: picking another chip makes the
-    // save a *move*, which the ViewModel performs as a create on the new calendar plus a delete from
-    // the old.
+    // A blank form starts on the first visible suggestion (the last successfully used calendar when
+    // it remains eligible). Existing writable events deliberately use the full writable list: a
+    // hidden calendar is still a valid move target, because visibility only controls what a view
+    // draws. A Home Assistant write addresses one calendar entity, so picking another chip makes the
+    // save a *move*, which the ViewModel performs as a create there plus a delete from the old.
     var sourceId by remember(target) {
-        mutableStateOf(existing?.sourceId ?: writable.firstOrNull()?.id.orEmpty())
+        mutableStateOf(existing?.sourceId ?: newEventSources.firstOrNull()?.id.orEmpty())
     }
     val seed = remember(target) { seedEventBounds(target, defaultDurationFor(sourceId)) }
     var startAt by remember(target) { mutableStateOf(seed.first) }
@@ -198,10 +201,14 @@ fun EventEditorSurface(
     // least the rest of the series — which is what takes "Denne begivenhed" off the scope popup.
     val ruleChanged = recurrence != storedRule
 
-    // Every writable calendar, on both paths — which is what makes an event movable. The one
-    // exception is an event on a read-only calendar: it shows that calendar's chip alone, since
-    // where it lives is a fact about it rather than a choice, like every other field there.
-    val sourceChips = if (editable) writable else sources.filter { it.id == existing?.sourceId }
+    // New events use only the current view's suggestions. Existing writable events keep every
+    // writable calendar as a move target, including calendars hidden from that view. A read-only
+    // event shows its current calendar alone, since where it lives is a fact rather than a choice.
+    val sourceChips = when {
+        existing == null -> newEventSources
+        editable -> writable
+        else -> sources.filter { it.id == existing.sourceId }
+    }
 
     // Moving the start carries the end with it, so an event keeps the length it had rather than
     // collapsing (or inverting) while a date is being picked. It is also what makes multi-day and
@@ -268,6 +275,11 @@ fun EventEditorSurface(
                 allSources = sources,
                 selectedId = sourceId,
                 enabled = editable,
+                emptyMessage = if (existing == null) {
+                    "Ingen synlig kalender kan skrives til"
+                } else {
+                    "Ingen kalender kan skrives til"
+                },
                 onSelect = { sourceId = it },
             )
             Spacer(Modifier.height(Dimensions.mediaSectionGap))
@@ -640,9 +652,9 @@ internal fun BoundsDivider() {
 }
 
 /**
- * The calendars an event may be written to. On the edit path this is the event's own calendar alone,
- * shown selected and inert — it says where the event lives without offering a move this surface
- * can't perform.
+ * The calendars an event may be written to. A new event gets the visible, ordered suggestions;
+ * editing a writable event gets every writable calendar so it can move even to one hidden from the
+ * current view. A read-only event gets its own calendar alone, selected and inert.
  *
  * The picked chip fills with the calendar's **own** colour rather than the accent: which calendar an
  * event lands on is the one selection here that is about a colour, and it is the same colour the
@@ -655,10 +667,11 @@ private fun CalendarChips(
     allSources: List<CalendarSource>,
     selectedId: String,
     enabled: Boolean,
+    emptyMessage: String,
     onSelect: (String) -> Unit,
 ) {
     if (sources.isEmpty()) {
-        Text("Ingen kalender kan skrives til", color = Muted, fontSize = 15.sp)
+        Text(emptyMessage, color = Muted, fontSize = 15.sp)
         return
     }
     Row(

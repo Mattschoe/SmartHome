@@ -236,9 +236,10 @@ sealed interface HomeScreenState {
         /** Which calendars each view draws — what the settings surface edits (VM-owned, persisted). */
         val calendarFilters: CalendarFilters,
         /**
-         * This device's own calendar colors and default event lengths (VM-owned, persisted locally).
-         * The colors are already folded into [calendar]'s sources by the time they get here; what the
-         * settings surface needs this for is showing *which* swatch and length are selected.
+         * This device's own calendar colors, default event lengths, and most recent successful new-
+         * event target (VM-owned, persisted locally). The colors are already folded into [calendar]'s
+         * sources by the time they get here; settings reads the color/length choices, while the editor
+         * uses the recent target to order and preselect its visible writable suggestions.
          */
         val calendarPrefs: CalendarPrefs,
         /** Which settings level has taken over the Calendar panel, or `null` when none has (VM-owned). */

@@ -59,9 +59,9 @@ class AppContainer(
      */
     val weekZoom: WeekZoomStore = keyValueStore?.let(::KeyValueWeekZoomStore) ?: InMemoryWeekZoomStore(),
     /**
-     * This device's own calendar colors and default event lengths. Local on purpose, and kept beside
-     * the filters rather than sent anywhere: the whole point is that this device may disagree with
-     * the other ones (see [CalendarPrefs]).
+     * This device's own calendar colors, default event lengths, and last successful new-event target.
+     * Local on purpose, and kept beside the filters rather than sent anywhere: the whole point is
+     * that this device may disagree with the other ones (see [CalendarPrefs]).
      */
     val calendarPrefs: CalendarPrefsStore =
         keyValueStore?.let(::KeyValueCalendarPrefsStore) ?: InMemoryCalendarPrefsStore(),
