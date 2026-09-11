@@ -36,3 +36,4 @@ google-services.json
 # Misc
 .serena/
 .claude/.headroom_wrap_marker.json
+.pi/
