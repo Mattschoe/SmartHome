@@ -16,6 +16,8 @@ import com.mattschoe.smarthome.data.WeekZoomStore
 import com.mattschoe.smarthome.data.MaConfig
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.MusicAssistantAdapter
+import com.mattschoe.smarthome.data.NetworkMonitor
+import com.mattschoe.smarthome.data.AlwaysAvailableNetworkMonitor
 import com.mattschoe.smarthome.data.NoOpNotificationPresenter
 import com.mattschoe.smarthome.data.NotificationPresenter
 import com.mattschoe.smarthome.data.NowPlayingBridge
@@ -46,7 +48,12 @@ class AppContainer(
      * both the cache and the outbox.
      */
     keyValueStore: KeyValueStore? = platformKeyValueStore(),
-    val homeAdapter: HomeAdapter = buildHomeAdapter(haConfig, maConfig, keyValueStore),
+    /**
+     * Process-lifetime platform connectivity signal shared by both live adapters. Callers without a
+     * platform lifecycle (previews, tests and reminder workers) retain the old timer-only behavior.
+     */
+    networkMonitor: NetworkMonitor = AlwaysAvailableNetworkMonitor,
+    val homeAdapter: HomeAdapter = buildHomeAdapter(haConfig, maConfig, keyValueStore, networkMonitor),
     /**
      * Which calendars each Calendar view draws. Kept beside the snapshot in the same store; without
      * one the filters simply last as long as the process does.
@@ -113,6 +120,7 @@ private fun buildHomeAdapter(
     haConfig: HaConfig?,
     maConfig: MaConfig?,
     keyValueStore: KeyValueStore?,
+    networkMonitor: NetworkMonitor,
 ): HomeAdapter {
     if (haConfig?.hasToken != true) return MockAdapter()
     val ha = HomeAssistantAdapter(
@@ -121,8 +129,13 @@ private fun buildHomeAdapter(
         // Both ride on the same store, and both are pointless without one: with nowhere to persist
         // it, a queued write would be lost by the restart it is meant to survive.
         keyValueStore?.let { OfflineOutbox(KeyValueOutboxStore(it)) },
+        networkMonitor,
     )
-    return if (maConfig?.hasToken == true) CompositeHomeAdapter(ha, MusicAssistantAdapter(maConfig)) else ha
+    return if (maConfig?.hasToken == true) {
+        CompositeHomeAdapter(ha, MusicAssistantAdapter(maConfig, networkMonitor))
+    } else {
+        ha
+    }
 }
 
 /**

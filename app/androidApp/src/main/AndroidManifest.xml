@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Talk to the Home Assistant instance over the LAN WebSocket API. -->
+    <!-- Talk to the Home Assistant instance over the LAN WebSocket API and observe link changes. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- The media session that puts the active audio room on the lock screen / in the shade. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
