@@ -89,7 +89,7 @@ class HomepageViewModel(
     private val filterStore: CalendarFilterStore = InMemoryCalendarFilterStore(),
     /** Where the week grid's pinch level is kept between runs. See [setWeekHourHeight]. */
     private val zoomStore: WeekZoomStore = InMemoryWeekZoomStore(),
-    /** Where this device's own calendar colors and event lengths are kept. See [CalendarPrefs]. */
+    /** Calendar colors, event lengths, and last successful create target kept on this device. */
     private val prefsStore: CalendarPrefsStore = InMemoryCalendarPrefsStore(),
     /**
      * Where the active audio room's playback is published for the platform's own media surfaces (the
@@ -626,6 +626,15 @@ class HomepageViewModel(
 
                     else -> {
                         adapter.createEvent(sourceId, draft)
+                        // Remember only a genuinely new event, and only after the adapter accepted it.
+                        // A move also creates a row on its destination calendar, but must not replace
+                        // this preference. Do this before reminder attachment: the event has landed
+                        // even if recovering its uid or setting the reminder later fails.
+                        if (target is EventEditorTarget.New) {
+                            prefsStore.write(
+                                _calendarPrefs.updateAndGet { it.withLastCreatedSource(sourceId) },
+                            )
+                        }
                         // A reminder is keyed on the event's uid, and a create doesn't return one — Home
                         // Assistant's `calendar/event/create` replies with nothing. The create already
                         // triggers a refetch, so the uid is recovered by finding the event that just

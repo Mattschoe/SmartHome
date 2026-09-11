@@ -1,8 +1,10 @@
 package com.mattschoe.smarthome.ui.pages.homepage
 
+import com.mattschoe.smarthome.data.CalendarPrefs
 import com.mattschoe.smarthome.data.EventMove
 import com.mattschoe.smarthome.data.HomeAdapter
 import com.mattschoe.smarthome.data.InMemoryCalendarFilterStore
+import com.mattschoe.smarthome.data.InMemoryCalendarPrefsStore
 import com.mattschoe.smarthome.data.MockAdapter
 import com.mattschoe.smarthome.data.model.EventEditScope
 import com.mattschoe.smarthome.data.model.RecurrenceRange
@@ -1093,7 +1095,8 @@ class HomepageViewModelTest {
 
     @Test
     fun saveEvent_writesItAndClosesTheSurface() = runTest(mainDispatcher) {
-        val vm = HomepageViewModel(MockAdapter())
+        val prefsStore = InMemoryCalendarPrefsStore()
+        val vm = HomepageViewModel(MockAdapter(), prefsStore = prefsStore)
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
@@ -1107,11 +1110,15 @@ class HomepageViewModelTest {
         assertFalse(ready.savingEvent)
         assertNull(ready.toast)
         assertTrue(ready.selectedDayEvents.any { it.title == "Yoga" && it.sourceId == "calendar.matt" })
+        assertEquals("calendar.matt", ready.calendarPrefs.lastCreatedSourceId)
+        assertEquals("calendar.matt", prefsStore.read().lastCreatedSourceId)
     }
 
     @Test
     fun saveEvent_failure_keepsTheSurfaceOpenSoNothingTypedIsLost() = runTest(mainDispatcher) {
-        val vm = HomepageViewModel(FailingCalendarWriteAdapter())
+        val previous = CalendarPrefs(lastCreatedSourceId = "calendar.cecilie")
+        val prefsStore = InMemoryCalendarPrefsStore().apply { write(previous) }
+        val vm = HomepageViewModel(FailingCalendarWriteAdapter(), prefsStore = prefsStore)
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
@@ -1124,11 +1131,15 @@ class HomepageViewModelTest {
         assertIs<EventEditorTarget.New>(ready.eventEditor)
         assertFalse(ready.savingEvent)
         assertEquals("Kunne ikke gemme", ready.toast?.text)
+        assertEquals(previous, ready.calendarPrefs)
+        assertEquals(previous, prefsStore.read())
     }
 
     @Test
     fun saveEvent_onAnOpenEventReplacesItRatherThanAppending() = runTest(mainDispatcher) {
-        val vm = HomepageViewModel(MockAdapter())
+        val previous = CalendarPrefs(lastCreatedSourceId = "calendar.papkassehuset")
+        val prefsStore = InMemoryCalendarPrefsStore().apply { write(previous) }
+        val vm = HomepageViewModel(MockAdapter(), prefsStore = prefsStore)
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
@@ -1145,11 +1156,15 @@ class HomepageViewModelTest {
         assertEquals(1, same.size)
         assertEquals("Morgenmøde (flyttet)", same.single().title)
         assertEquals("calendar.matt", same.single().sourceId)
+        assertEquals(previous, ready.calendarPrefs)
+        assertEquals(previous, prefsStore.read())
     }
 
     @Test
     fun saveEvent_onAnotherCalendarMovesTheEventThere() = runTest(mainDispatcher) {
-        val vm = HomepageViewModel(MockAdapter())
+        val previous = CalendarPrefs(lastCreatedSourceId = "calendar.papkassehuset")
+        val prefsStore = InMemoryCalendarPrefsStore().apply { write(previous) }
+        val vm = HomepageViewModel(MockAdapter(), prefsStore = prefsStore)
         backgroundScope.launch { vm.screenState.collect {} }
         advanceUntilIdle()
 
@@ -1167,6 +1182,8 @@ class HomepageViewModelTest {
         assertTrue(ready.calendar.events.none { it.uid == before.uid })
         val moved = ready.calendar.events.single { it.title == "Morgenmøde" }
         assertEquals("calendar.cecilie", moved.sourceId)
+        assertEquals(previous, ready.calendarPrefs)
+        assertEquals(previous, prefsStore.read())
     }
 
     @Test

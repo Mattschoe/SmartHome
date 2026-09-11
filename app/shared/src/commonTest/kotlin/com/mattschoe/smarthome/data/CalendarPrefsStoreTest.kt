@@ -2,11 +2,19 @@ package com.mattschoe.smarthome.data
 
 import com.mattschoe.smarthome.data.model.CalendarPaletteColor
 import com.mattschoe.smarthome.data.model.CalendarSource
+import com.mattschoe.smarthome.data.model.CalendarView
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class CalendarPrefsStoreTest {
+
+    private val sources = listOf(
+        CalendarSource("calendar.roster", "Roster", canWrite = false),
+        CalendarSource("calendar.matt", "Matt", canWrite = true),
+        CalendarSource("calendar.cecilie", "Cecilie", canWrite = true),
+        CalendarSource("calendar.home", "Home", canWrite = true),
+    )
 
     @Test
     fun durationFor_fallsBackToTheStandardHour() {
@@ -26,6 +34,69 @@ class CalendarPrefsStoreTest {
     fun withDuration_clampsWhatTheGridCannotDraw() {
         assertEquals(EVENT_DURATIONS.first(), CalendarPrefs().withDuration("c", 0).durationFor("c"))
         assertEquals(24 * 60, CalendarPrefs().withDuration("c", 99_999).durationFor("c"))
+    }
+
+    @Test
+    fun withLastCreatedSource_preservesTheOtherPreferences() {
+        val before = CalendarPrefs()
+            .withColor("calendar.matt", CalendarPaletteColor.Slate)
+            .withDuration("calendar.matt", 120)
+
+        val after = before.withLastCreatedSource("calendar.cecilie")
+
+        assertEquals(before.colorById, after.colorById)
+        assertEquals(before.durationById, after.durationById)
+        assertEquals("calendar.cecilie", after.lastCreatedSourceId)
+    }
+
+    @Test
+    fun newEventSuggestions_excludeReadOnlyAndCalendarsHiddenInTheCurrentView() {
+        val filters = CalendarFilters(
+            hiddenInMonth = setOf("calendar.cecilie"),
+            hiddenInWeek = setOf("calendar.matt"),
+        )
+
+        assertEquals(
+            listOf("calendar.matt", "calendar.home"),
+            newEventCalendarSuggestions(sources, filters, CalendarView.Month, CalendarPrefs()).map { it.id },
+        )
+        assertEquals(
+            listOf("calendar.cecilie", "calendar.home"),
+            newEventCalendarSuggestions(sources, filters, CalendarView.Week, CalendarPrefs()).map { it.id },
+        )
+    }
+
+    @Test
+    fun newEventSuggestions_moveTheRememberedCalendarFirstAndKeepTheRestStable() {
+        val suggested = newEventCalendarSuggestions(
+            sources = sources,
+            filters = CalendarFilters(),
+            view = CalendarView.Month,
+            prefs = CalendarPrefs(lastCreatedSourceId = "calendar.home"),
+        )
+
+        assertEquals(
+            listOf("calendar.home", "calendar.matt", "calendar.cecilie"),
+            suggested.map { it.id },
+        )
+    }
+
+    @Test
+    fun newEventSuggestions_ignoreAnIneligibleRememberedCalendar() {
+        val filters = CalendarFilters(hiddenInMonth = setOf("calendar.cecilie"))
+        val expected = listOf("calendar.matt", "calendar.home")
+
+        listOf("calendar.cecilie", "calendar.roster", "calendar.removed").forEach { remembered ->
+            assertEquals(
+                expected,
+                newEventCalendarSuggestions(
+                    sources,
+                    filters,
+                    CalendarView.Month,
+                    CalendarPrefs(lastCreatedSourceId = remembered),
+                ).map { it.id },
+            )
+        }
     }
 
     @Test
@@ -54,16 +125,34 @@ class CalendarPrefsStoreTest {
     }
 
     @Test
-    fun keyValueStore_roundTripsBothSettings() {
+    fun keyValueStore_roundTripsAllSettings() {
         val backing = FakePrefsKeyValueStore()
         val prefs = CalendarPrefs()
             .withColor("calendar.papkassehuset", CalendarPaletteColor.Terracotta)
             .withDuration("calendar.papkassehuset", 120)
             .withDuration("calendar.matt", 30)
+            .withLastCreatedSource("calendar.matt")
         KeyValueCalendarPrefsStore(backing).write(prefs)
 
         // A fresh store over the same backing is what a restart looks like.
         assertEquals(prefs, KeyValueCalendarPrefsStore(backing).read())
+    }
+
+    @Test
+    fun keyValueStore_readsOlderJsonWithoutARecentCalendar() {
+        val backing = FakePrefsKeyValueStore().apply {
+            put(
+                "calendar.prefs",
+                """{"colorById":{"calendar.matt":"Olive"},"durationById":{"calendar.matt":30}}""",
+            )
+        }
+
+        assertEquals(
+            CalendarPrefs()
+                .withColor("calendar.matt", CalendarPaletteColor.Olive)
+                .withDuration("calendar.matt", 30),
+            KeyValueCalendarPrefsStore(backing).read(),
+        )
     }
 
     @Test
