@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep the launch window behind Compose the same light green as the app icon. -->
+    <style name="Theme.SmartHome" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+    </style>
+</resources>
