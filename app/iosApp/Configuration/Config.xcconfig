@@ -1,7 +1,9 @@
-TEAM_ID=
+// CI supplies DEVELOPMENT_TEAM from the APPLE_TEAM_ID GitHub secret. To run from
+// Xcode locally, either set TEAM_ID here in an uncommitted change or select your team.
+TEAM_ID =
 
-PRODUCT_NAME=SmartHome
-PRODUCT_BUNDLE_IDENTIFIER=com.mattschoe.smarthome.SmartHome$(TEAM_ID)
+PRODUCT_NAME = SmartHome
+PRODUCT_BUNDLE_IDENTIFIER = com.mattschoe.smarthome
 
-CURRENT_PROJECT_VERSION=1
-MARKETING_VERSION=1.0
+CURRENT_PROJECT_VERSION = 1
+MARKETING_VERSION = 1.0
