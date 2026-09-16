@@ -14,7 +14,8 @@ concurrency:
 jobs:
   build-and-upload:
     name: Build and upload iOS release
-    runs-on: macos-15
+    # Compose Multiplatform 1.11 links against UIKit symbols provided by the Xcode 26 SDK.
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       BUNDLE_ID: com.mattschoe.smarthome
