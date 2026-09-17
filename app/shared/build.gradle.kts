@@ -160,14 +160,16 @@ composeCompiler {
 
 // Desktop (JVM) entry point. `./gradlew :shared:run` launches the dashboard in a resizable window;
 // `:shared:createDistributable` builds a self-contained app image under build/compose/binaries, and
-// `:shared:packageDistributionForCurrentOS` wraps that into the host's installer format (.rpm here).
+// the package tasks wrap it in a native installer. CI supplies the release tag through this property.
+val desktopPackageVersion = providers.gradleProperty("desktopPackageVersion").orElse("1.0.0")
+
 compose.desktop {
     application {
         mainClass = "com.mattschoe.smarthome.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Msi)
+            targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.Dmg, TargetFormat.Exe)
             packageName = "SmartHome"
-            packageVersion = "1.0.0"
+            packageVersion = desktopPackageVersion.get()
             description = "Smart Home Dashboard"
             vendor = "mattschoe"
 
@@ -188,12 +190,12 @@ compose.desktop {
                 appCategory = "Utility"
                 packageName = "smarthome"
             }
-            // No macOS/Windows iconFile: jpackage wants .icns / .ico there, and only icons/smarthome.png
-            // exists. Both hosts fall back to the Compose default icon until someone builds on them.
+            // No macOS iconFile yet: jpackage requires an .icns file there.
             macOS {
                 bundleID = "com.mattschoe.smarthome"
             }
             windows {
+                iconFile.set(project.file("icons/smarthome.ico"))
                 menuGroup = "SmartHome"
                 shortcut = true
                 // Stable UUID so an upgrade replaces the install instead of stacking beside it.

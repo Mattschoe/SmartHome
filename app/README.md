@@ -1,31 +1,37 @@
-This is a Kotlin Multiplatform project targeting Android, iOS.
+# Smart Home Dashboard
 
-* [/iosApp](./iosApp/iosApp) contains an iOS application. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+A Kotlin Multiplatform smart-home dashboard for Android, iOS, and desktop.
 
-* [/shared](./shared/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./shared/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./shared/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./shared/src/jvmMain/kotlin)
-    folder is the appropriate location.
+## Running the apps
 
-### Running the apps
+Run Gradle commands from this `app/` directory:
 
-Use the run configurations provided by the run widget in your IDE's toolbar. You can also use these commands and options:
+- Android: `./gradlew :androidApp:assembleDebug`
+- Desktop: `./gradlew :shared:run`
+- iOS: open [`iosApp/iosApp.xcodeproj`](./iosApp/iosApp.xcodeproj) in Xcode
 
-- Android app: `./gradlew :androidApp:assembleDebug`
-- iOS app: open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+## Desktop release packages
 
-### Running tests
+Publishing a GitHub Release builds and attaches two self-contained desktop installers. They bundle the required Java runtime, so Java does not need to be installed separately.
 
-Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
+### Windows
 
-- Android tests: `./gradlew :shared:testAndroidHostTest`
-- iOS tests: `./gradlew :shared:iosSimulatorArm64Test`
+Download `SmartHome-<version>-windows-x64.exe` from the GitHub Release and run it. The installer is currently unsigned, so Windows SmartScreen may show an **Unknown publisher** warning. If you trust the downloaded release, select **More info**, then **Run anyway**.
 
----
+### Fedora KDE
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+Download `SmartHome-<version>-fedora-x86_64.rpm` from the GitHub Release. Open it with Discover, or install it from a terminal:
+
+```bash
+sudo dnf install ./SmartHome-<version>-fedora-x86_64.rpm
+```
+
+The installed application is available from the KDE application launcher.
+
+## Tests
+
+- Shared tests: `./gradlew :shared:allTests`
+- Android host tests: `./gradlew :shared:testAndroidHostTest`
+- iOS simulator tests: `./gradlew :shared:iosSimulatorArm64Test`
+
+Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html).

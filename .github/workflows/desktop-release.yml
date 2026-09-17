@@ -1,0 +1,199 @@
+name: Desktop Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.display_name }} package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - display_name: Windows
+            os: windows-2025
+            gradle_task: packageExe
+            package_dir: app/shared/build/compose/binaries/main/exe
+            extension: exe
+            asset_suffix: windows-x64.exe
+            artifact_name: desktop-windows
+          - display_name: Fedora
+            os: ubuntu-24.04
+            gradle_task: packageRpm
+            package_dir: app/shared/build/compose/binaries/main/rpm
+            extension: rpm
+            asset_suffix: fedora-x86_64.rpm
+            artifact_name: desktop-fedora
+    env:
+      HA_URL: ${{ secrets.HA_URL }}
+      HA_TOKEN: ${{ secrets.HA_TOKEN }}
+      MA_URL: ${{ secrets.MA_URL }}
+      MA_TOKEN: ${{ secrets.MA_TOKEN }}
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate connection secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(HA_URL HA_TOKEN MA_TOKEN)
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required GitHub Actions secret $name is missing."
+              exit 1
+            fi
+          done
+
+      - name: Set package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          tag = os.environ["RELEASE_TAG"]
+          match = re.search(r"(?<!\d)(\d+)\.(\d+)(?:\.(\d+))?(?!\d)", tag)
+          if not match:
+              print(f"::error::Release tag {tag!r} does not contain a version such as 1.2 or 1.2.3.")
+              sys.exit(1)
+
+          major, minor, build = (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
+          if major > 255 or minor > 255 or build > 65535:
+              print("::error::Package version exceeds Windows limits (255.255.65535).")
+              sys.exit(1)
+
+          version = f"{major}.{minor}.{build}"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"PACKAGE_VERSION={version}\n")
+          print(f"Building SmartHome {version}")
+          PY
+
+      - name: Write app connection settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > app/local.properties <<EOF
+          ha.url=$HA_URL
+          ha.token=$HA_TOKEN
+          ma.url=$MA_URL
+          ma.token=$MA_TOKEN
+          EOF
+
+      - name: Validate WiX Toolset
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          where.exe candle.exe
+          where.exe light.exe
+
+      - name: Install RPM packaging tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes rpm
+          command -v rpmbuild
+
+      - name: Build native package
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew ":shared:${{ matrix.gradle_task }}" \
+            -PdesktopPackageVersion="$PACKAGE_VERSION" \
+            --stacktrace
+
+      - name: Stage release asset
+        env:
+          PACKAGE_DIR: ${{ matrix.package_dir }}
+          EXTENSION: ${{ matrix.extension }}
+          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' packages < <(
+            find "$PACKAGE_DIR" -maxdepth 1 -type f -name "*.$EXTENSION" -print0
+          )
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one .$EXTENSION package in $PACKAGE_DIR; found ${#packages[@]}."
+            printf '%s\n' "${packages[@]:-}"
+            exit 1
+          fi
+
+          destination="$RUNNER_TEMP/release/SmartHome-$PACKAGE_VERSION-$ASSET_SUFFIX"
+          mkdir -p "$(dirname "$destination")"
+          cp "${packages[0]}" "$destination"
+          echo "Staged $(basename "$destination")"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove app connection settings
+        if: always()
+        shell: bash
+        run: rm -f app/local.properties
+
+  publish:
+    name: Attach desktop packages to release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download desktop packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Attach packages to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' assets < <(find release-assets -maxdepth 1 -type f -print0)
+          if [[ "${#assets[@]}" -ne 2 ]]; then
+            echo "::error::Expected two desktop release assets; found ${#assets[@]}."
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" \
+            --clobber \
+            --repo "$GITHUB_REPOSITORY"
